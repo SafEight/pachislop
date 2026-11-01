@@ -127,7 +127,7 @@ const SHORTCUTS: { group: string; items: [keys: string, what: string][] }[] = [
   {
     group: 'Panels',
     items: [
-      ['⌘F', 'Find a setting in Properties (from the canvas or Properties; in a text field, the browser’s find)'],
+      ['⌘F', 'Find a setting in Properties, or a style in the Library while it shows (from the canvas or that panel; in a text field, the browser’s find)'],
       ['← →  on a tab', 'Switch tabs in a dock group'],
       ['Double-click a tab strip', 'Collapse / expand the group'],
       ['Drag the dock’s left edge', 'Resize the dock (double-click: default width)'],

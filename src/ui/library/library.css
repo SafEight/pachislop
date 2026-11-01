@@ -5,6 +5,14 @@
   flex: 1 1 auto;
   height: 100%;
   container-type: inline-size;
+  /* Least tile width per thumbnail size (Medium: 2 per row at the 260 px minimum). */
+  --lib-tile: 116px;
+}
+.library-panel.tiles-s {
+  --lib-tile: 76px;
+}
+.library-panel.tiles-l {
+  --lib-tile: 160px;
 }
 .lib-head {
   height: 28px;
@@ -13,6 +21,27 @@
 .lib-target {
   flex: 1;
   min-width: 0;
+}
+.lib-find {
+  flex-shrink: 0;
+  padding: 0 8px 4px;
+}
+.lib-find > input {
+  width: 100%;
+}
+/* Category chips: wrap rather than scroll, so every section stays in view. */
+.lib-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 0 8px 4px;
+  flex-shrink: 0;
+}
+.lib-chip {
+  border-radius: 9px;
+}
+.lib-chip .lib-count {
+  opacity: 0.6;
 }
 .lib-options {
   display: flex;
@@ -72,10 +101,10 @@
   flex: 1;
   min-width: 0;
 }
-/* As many ~120 px tiles per row as the dock width allows (2 at the 260 px minimum). */
+/* As many tiles of the chosen size per row as the dock width allows. */
 .lib-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--lib-tile), 1fr));
   gap: 6px;
   padding: 4px 8px 8px;
 }
@@ -150,6 +179,9 @@
   padding: 2px 5px 3px;
   font-size: 11px;
 }
+.tiles-s .lib-name {
+  font-size: 10px;
+}
 .lib-rename {
   width: 100%;
   font-size: 11px;
@@ -169,4 +201,11 @@
 .lib-empty {
   grid-column: 1 / -1;
   padding: 6px 0;
+}
+.lib-none {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 8px;
 }

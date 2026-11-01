@@ -21,14 +21,19 @@ import { errorMsg, msg, type Msg } from '../../store/msg';
 import { selectedLayer, useEditor } from '../../store/store';
 import { subtreeIds } from '../../store/tree';
 import { useT } from '../i18n';
+import { Seg } from '../controls';
 import { PsStyleImportButton } from '../PsStyleImport';
 import { downloadBlob, pickFile, useLatest } from '../util';
+import { addRecent, setCollapsed, useLibraryPrefs, type TileSize } from './prefs';
+import { LIB_FIND_INPUT_ID, queryWords, searchText } from './search';
 import { colourwayContentKey, getThumb, requestThumb, THUMB_H, THUMB_W, thumbContentKey, thumbStore, type ColourwayThumbJob, type ThumbJob } from './thumbs';
 import './library.css';
 
 const USER_GROUP = 'My Styles';
 /** Recolour presets: they keep the selected layer's structure, so they apply to every kind. */
 const COLOURWAYS_GROUP = 'Colourways 配色';
+/** The looks and colourways applied last; shown while no search or filter is on. */
+const RECENT_GROUP = 'Recent';
 /** Thumbnails show this when no title layer is selected; clicking a style then adds a new title. */
 const SAMPLE_TEXT = '確定';
 const SAMPLE_LAYER = createTitle2DLayer(SAMPLE_TEXT);
@@ -40,6 +45,35 @@ const GROUP_KIND: Record<string, StylePreset['kind']> = Object.fromEntries(
 );
 
 const KIND_NAME: Record<StylePreset['kind'], string> = { title2d: '2D', title3d: '3D' };
+
+type KindFilter = 'all' | StylePreset['kind'];
+
+/** A library tile: a look, or a colourway (a recolour of the selected layer's own structure). */
+type LookItem = { type: 'look'; preset: StylePreset };
+type Item = LookItem | { type: 'colourway'; colourway: Colourway };
+
+const look = (preset: StylePreset): LookItem => ({ type: 'look', preset });
+const COLOURWAY_ITEMS: Item[] = COLOURWAYS.map((colourway) => ({ type: 'colourway', colourway }));
+const FACTORY_ITEMS = new Map(FACTORY_STYLES.map((p) => [p.id, look(p)]));
+const GROUP_ITEMS: Record<string, LookItem[]> = Object.fromEntries(FACTORY_GROUPS.map((group) => [group, [...FACTORY_ITEMS.values()].filter((it) => it.preset.group === group)]));
+
+/** Search text of each tile (its name, section and kind), made on its first search. */
+const searchTexts = new WeakMap<Item, string>();
+function itemText(it: Item, group: string): string {
+  let s = searchTexts.get(it);
+  if (s === undefined) {
+    s = searchText(it.type === 'colourway' ? [COLOURWAY_INFO[it.colourway].name, group] : [it.preset.name, group, KIND_NAME[it.preset.kind]]);
+    searchTexts.set(it, s);
+  }
+  return s;
+}
+
+/** The thumbnail sizes (each one's least tile width is in library.css). */
+const TILE_SIZES: readonly { value: TileSize; label: string; title: string }[] = [
+  { value: 's', label: 'S', title: 'Small thumbnails' },
+  { value: 'm', label: 'M', title: 'Medium thumbnails' },
+  { value: 'l', label: 'L', title: 'Large thumbnails' },
+];
 
 /** Hover previews wait this long after real pointer movement (ms), so sweeping across tiles stays calm. */
 const HOVER_DELAY = 150;
@@ -94,7 +128,11 @@ export function LibraryPanel() {
   const sel = useEditor(selectedLayer);
   const users = useSyncExternalStore(userPresets.subscribe, userPresets.getSnapshot);
   const [applyFont, setApplyFont] = useState(false);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const { size, collapsed, recent } = useLibraryPrefs();
+  const [query, setQuery] = useState('');
+  /** The one section shown; null = all of them. */
+  const [category, setCategory] = useState<string | null>(null);
+  const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [saveName, setSaveName] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
 
@@ -154,13 +192,14 @@ export function LibraryPanel() {
           extra.label ?? msg('Add title with style “{name}”', { name: p.name }),
         );
         st.selectLayer(base.id);
-        return;
+      } else {
+        // A cross-kind look converts the layer (2D ↔ 3D): say so, it changes every style control.
+        const converted = l.kind !== p.kind;
+        const label = extra.label ?? (converted ? msg('Apply style “{name}” (→{kind})', { name: p.name, kind: KIND_NAME[p.kind] }) : msg('Apply style “{name}”', { name: p.name }));
+        st.edit((proj) => styled(proj, l.id, applyFont), undefined, label);
+        if (converted) st.notify(msg('“{layer}” is now a {kind} layer (“{name}”) — ⌘Z to convert back', { layer: l.name, kind: KIND_NAME[p.kind], name: p.name }));
       }
-      // A cross-kind look converts the layer (2D ↔ 3D): say so, it changes every style control.
-      const converted = l.kind !== p.kind;
-      const label = extra.label ?? (converted ? msg('Apply style “{name}” (→{kind})', { name: p.name, kind: KIND_NAME[p.kind] }) : msg('Apply style “{name}”', { name: p.name }));
-      st.edit((proj) => styled(proj, l.id, applyFont), undefined, label);
-      if (converted) st.notify(msg('“{layer}” is now a {kind} layer (“{name}”) — ⌘Z to convert back', { layer: l.name, kind: KIND_NAME[p.kind], name: p.name }));
+      addRecent({ type: 'look', id: p.id });
     } catch (e) {
       st.notify(errorMsg(e), 'error');
     }
@@ -199,17 +238,20 @@ export function LibraryPanel() {
     st.setPreviewOverride(null);
     const name = COLOURWAY_INFO[c].name;
     const l = colourwayLayer();
-    if (l) return st.edit((proj) => applyColourwayToProject(proj, l.id, c), undefined, msg('Colourway {name}', { name }));
-    const g = selectedLayer(st);
-    if (g?.kind !== 'group') return;
-    st.edit(
-      (proj) => {
-        const inside = new Set(subtreeIds(proj.layers, g.id));
-        return { ...proj, layers: proj.layers.map((x) => (inside.has(x.id) ? applyColourway(x, c) : x)) };
-      },
-      undefined,
-      msg('Colourway {name} on “{group}”', { name, group: g.name }),
-    );
+    if (l) st.edit((proj) => applyColourwayToProject(proj, l.id, c), undefined, msg('Colourway {name}', { name }));
+    else {
+      const g = selectedLayer(st);
+      if (g?.kind !== 'group') return;
+      st.edit(
+        (proj) => {
+          const inside = new Set(subtreeIds(proj.layers, g.id));
+          return { ...proj, layers: proj.layers.map((x) => (inside.has(x.id) ? applyColourway(x, c) : x)) };
+        },
+        undefined,
+        msg('Colourway {name} on “{group}”', { name, group: g.name }),
+      );
+    }
+    addRecent({ type: 'colourway', id: c });
   };
 
   const saveCurrent = () => {
@@ -221,7 +263,7 @@ export function LibraryPanel() {
       addUserPreset(presetFromLayer(st.project, l.id, name, USER_GROUP));
       st.notify(msg('Saved style “{name}”', { name }));
       setSaveName(null);
-      setCollapsed((c) => ({ ...c, [USER_GROUP]: false }));
+      setCollapsed(USER_GROUP, false);
     } catch (e) {
       st.notify(msg('Could not save the style: {error}', { error: errorMsg(e) }), 'error');
     }
@@ -234,7 +276,7 @@ export function LibraryPanel() {
     try {
       const n = importUserPresets(await file.text());
       st.notify(msg(n === 1 ? 'Imported {n} style from {file}' : 'Imported {n} styles from {file}', { n, file: file.name }));
-      setCollapsed((c) => ({ ...c, [USER_GROUP]: false }));
+      setCollapsed(USER_GROUP, false);
     } catch (e) {
       st.notify(msg('{file}: {error}', { file: file.name, error: errorMsg(e) }), 'error');
     }
@@ -250,28 +292,129 @@ export function LibraryPanel() {
   };
 
   // Colourways first (they apply to every kind), then sections of the target's kind (3D sections
-  // for a 3D title); My Styles stays last. `presets: null` = the colourway tiles.
+  // for a 3D title); My Styles stays last.
   const kind = title?.kind ?? 'title2d';
   const ordered = [...FACTORY_GROUPS].sort((a, b) => Number(GROUP_KIND[a] !== kind) - Number(GROUP_KIND[b] !== kind));
-  const sections: { group: string; presets: readonly StylePreset[] | null }[] = [
-    { group: COLOURWAYS_GROUP, presets: null },
-    ...ordered.map((group) => ({ group, presets: FACTORY_STYLES.filter((p) => p.group === group) })),
-    { group: USER_GROUP, presets: users },
+  const userItems = useMemo(() => users.map(look), [users]);
+  const words = queryWords(query);
+  // Each section's tiles of the kind shown that match every word of the search.
+  const all: { group: string; items: readonly Item[] }[] = [
+    { group: COLOURWAYS_GROUP, items: COLOURWAY_ITEMS },
+    ...ordered.map((group) => ({ group, items: GROUP_ITEMS[group] })),
+    { group: USER_GROUP, items: userItems },
   ];
+  const sections = all.map(({ group, items }) => ({
+    group,
+    items: items.filter((it) => (it.type === 'colourway' || kindFilter === 'all' || it.preset.kind === kindFilter) && words.every((w) => itemText(it, group).includes(w))),
+  }));
+  const filtering = words.length > 0 || category !== null;
+  // A section without a match hides; My Styles stays while nothing is searched (its Save and Import).
+  const shown = sections.filter(({ group, items }) => (category === null || group === category) && (items.length > 0 || (group === USER_GROUP && !words.length)));
+  const recentItems = recent.flatMap((r): Item[] => {
+    if (r.type === 'colourway') return COLOURWAY_ITEMS.filter((it) => it.type === 'colourway' && it.colourway === r.id);
+    const it = FACTORY_ITEMS.get(r.id) ?? userItems.find((u) => u.preset.id === r.id);
+    return it ? [it] : [];
+  });
+  const listed = !filtering && kindFilter === 'all' && recentItems.length ? [{ group: RECENT_GROUP, items: recentItems }, ...shown] : shown;
+  const clearFilters = () => {
+    setQuery('');
+    setCategory(null);
+    setKindFilter('all');
+  };
   const omakaseTip = t(applyFont ? 'Random {kind} style + random font (undoable)' : 'Random {kind} style (undoable)', { kind: title?.kind === 'title3d' ? '3D' : '2D' });
 
+  const kindOptions: { value: KindFilter; label: string; title: string }[] = [
+    { value: 'all', label: t('All'), title: t('Looks of both kinds') },
+    { value: 'title2d', label: '2D', title: t('2D looks only') },
+    { value: 'title3d', label: '3D', title: t('3D looks only') },
+  ];
+  /** A category chip: shows only `group`'s section (null: every section); again: every section. */
+  const chip = (group: string | null, label: string, count: number) => {
+    const on = category === group;
+    return (
+      <button
+        key={group ?? ''}
+        className={`small lib-chip${on ? ' active' : ''}`}
+        aria-pressed={on}
+        disabled={!on && count === 0}
+        title={group === null ? t('Show every section') : t('Show only {section}', { section: label })}
+        onClick={() => setCategory(on ? null : group)}
+      >
+        {label} <span className="lib-count">{count}</span>
+      </button>
+    );
+  };
+  const tile = (it: Item, isUser: boolean) =>
+    it.type === 'colourway' ? (
+      <ColourwayTile
+        key={it.colourway}
+        colourway={it.colourway}
+        snap={colourSnap}
+        enabled={!!recolourable}
+        group={recolourable?.kind === 'group'}
+        onPreview={previewColourway}
+        onApply={applyColourwayTo}
+      />
+    ) : (
+      <Tile
+        key={it.preset.id}
+        preset={it.preset}
+        snap={snap}
+        applyFont={applyFont}
+        usable={canApplyPreset(target, it.preset)}
+        converts={title && title.kind !== it.preset.kind ? it.preset.kind : null}
+        renaming={renaming === it.preset.id}
+        onHover={preview}
+        onApply={apply}
+        onRename={isUser ? () => setRenaming(it.preset.id) : undefined}
+        onRenamed={(name) => {
+          if (name.trim()) renameUserPreset(it.preset.id, name.trim());
+          setRenaming(null);
+        }}
+        onDelete={isUser ? () => void removeUser(it.preset) : undefined}
+      />
+    );
+
   return (
-    <div className="panel library-panel">
+    <div className={`panel library-panel tiles-${size}`}>
       {/* The dock tab names the panel: this row says what a click applies to. */}
       <div className="panel-head lib-head">
         <span className="muted ellipsis lib-target">{title ? t('Applies to “{name}”', { name: title.name }) : t('sample “{text}”', { text: SAMPLE_TEXT })}</span>
         <PsStyleImportButton />
       </div>
 
+      <div className="lib-find">
+        <input
+          id={LIB_FIND_INPUT_ID}
+          type="search"
+          value={query}
+          placeholder={t('Search styles…')}
+          aria-label={t('Search styles')}
+          title={t('Search the looks, colourways and My Styles by name, section or 2D / 3D, in English or Japanese (⌘F)')}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            // isComposing: Esc that cancels a Japanese IME conversion isn't a clear.
+            if (e.key !== 'Escape' || e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            if (query) setQuery('');
+            else e.currentTarget.blur();
+          }}
+        />
+      </div>
+
+      <div className="lib-chips" role="group" aria-label={t('Sections')}>
+        {chip(null, t('All'), sections.reduce((n, s) => n + s.items.length, 0))}
+        {sections.map(({ group, items }) => chip(group, t(group), items.length))}
+      </div>
+
       <div className="lib-options">
         <label title={t('Also switch to the font the style was designed with (おまかせ: a random font)')}>
           <input type="checkbox" checked={applyFont} aria-label={t('Apply font too')} onChange={(e) => setApplyFont(e.target.checked)} /> {t('Apply font too')}
         </label>
+        <Seg value={kindFilter} options={kindOptions} onChange={setKindFilter} />
+        <Seg value={size} options={TILE_SIZES.map((o) => ({ ...o, title: t(o.title) }))} onChange={(s) => useLibraryPrefs.setState({ size: s })} />
         <button className="small lib-omakase" title={omakaseTip} aria-label={omakaseTip} onClick={omakase}>
           おまかせ
         </button>
@@ -279,20 +422,23 @@ export function LibraryPanel() {
 
       <div className="scroll lib-scroll" onMouseLeave={() => preview(null)}>
         {!title && <div className="lib-hint muted">{t('No title selected — click a style to add a new title with it.')}</div>}
-        {sections.map(({ group, presets }) => {
+        {!listed.length && (
+          <div className="lib-none">
+            <span className="muted">{words.length ? t('No styles match “{q}”', { q: query.trim() }) : t('No styles match the filter')}</span>
+            <button className="small" title={t('Clear the search and filters')} aria-label={t('Clear the search and filters')} onClick={clearFilters}>
+              {t('Clear')}
+            </button>
+          </div>
+        )}
+        {listed.map(({ group, items }) => {
           const isUser = group === USER_GROUP;
-          const open = !collapsed[group];
+          // A search or a chosen section shows its matches, folded or not.
+          const open = filtering || !collapsed[group];
           return (
             <section key={group} className="lib-section">
               <div className="lib-section-head">
-                <button
-                  className="lib-fold"
-                  title={t(open ? 'Collapse' : 'Expand')}
-                  aria-label={t(group)}
-                  aria-expanded={open}
-                  onClick={() => setCollapsed((c) => ({ ...c, [group]: open }))}
-                >
-                  {open ? '▾' : '▸'} {t(group)} <span className="muted">{presets?.length ?? COLOURWAYS.length}</span>
+                <button className="lib-fold" title={t(open ? 'Collapse' : 'Expand')} aria-label={t(group)} aria-expanded={open} disabled={filtering} onClick={() => setCollapsed(group, open)}>
+                  {open ? '▾' : '▸'} {t(group)} <span className="muted">{items.length}</span>
                 </button>
                 {isUser && (
                   <span className="lib-section-actions">
@@ -347,37 +493,7 @@ export function LibraryPanel() {
                     </div>
                   )}
                   <div className="lib-grid">
-                    {!presets &&
-                      COLOURWAYS.map((c) => (
-                        <ColourwayTile
-                          key={c}
-                          colourway={c}
-                          snap={colourSnap}
-                          enabled={!!recolourable}
-                          group={recolourable?.kind === 'group'}
-                          onPreview={previewColourway}
-                          onApply={applyColourwayTo}
-                        />
-                      ))}
-                    {presets?.map((p) => (
-                      <Tile
-                        key={p.id}
-                        preset={p}
-                        snap={snap}
-                        applyFont={applyFont}
-                        usable={canApplyPreset(target, p)}
-                        converts={title && title.kind !== p.kind ? p.kind : null}
-                        renaming={renaming === p.id}
-                        onHover={preview}
-                        onApply={apply}
-                        onRename={isUser ? () => setRenaming(p.id) : undefined}
-                        onRenamed={(name) => {
-                          if (name.trim()) renameUserPreset(p.id, name.trim());
-                          setRenaming(null);
-                        }}
-                        onDelete={isUser ? () => void removeUser(p) : undefined}
-                      />
-                    ))}
+                    {items.map((it) => tile(it, isUser))}
                     {isUser && users.length === 0 && <div className="lib-empty muted">{t('Saved and imported styles appear here.')}</div>}
                   </div>
                 </>

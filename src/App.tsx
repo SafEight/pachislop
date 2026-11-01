@@ -8,6 +8,7 @@ import { selectedLayer, useEditor, type ArrangeOp } from './store/store';
 import { ancestorsOf } from './store/tree';
 import { Menu } from './ui/controls';
 import { Dock } from './ui/dock/Dock';
+import { useDock } from './ui/dock/layout';
 import { tr, useT } from './ui/i18n';
 import { addTextLayer, clipboardFiles, closeSplitImage, draggingFiles, importFiles, pasteClipboard, shapeItems, useSplitImage } from './ui/layerActions';
 import { Loading } from './ui/Loading';
@@ -18,6 +19,7 @@ import { TopBar } from './ui/TopBar';
 import { isTyping, oneShot, setSpaceHand, stepZoom, TOOLS } from './ui/util';
 import { Viewport } from './ui/Viewport';
 import { focusPropertySearch } from './ui/properties/searchIndex';
+import { focusLibrarySearch } from './ui/library/search';
 
 // Dialogs opened on demand (?, Start from template…) load on first use.
 const ShortcutSheet = lazy(() => import('./ui/ShortcutSheet').then((m) => ({ default: m.ShortcutSheet })));
@@ -100,13 +102,16 @@ function useShortcuts(setExportOpen: (open: boolean) => void, toggleSheet: () =>
         return;
       }
       if (isTyping(e.target)) return;
-      // ⌘F: find a setting in Properties, from the canvas (last pressed, or nothing focused) or
-      // Properties; anywhere else, and in a text field (returned above), the browser's find stays.
+      // ⌘F: find a setting in Properties — or a style in the Library while its tab is the one
+      // showing — from the canvas (last pressed, or nothing focused) or that panel; anywhere else,
+      // and in a text field (returned above), the browser's find stays.
       if (mod && !e.altKey && !e.shiftKey && e.code === 'KeyF') {
         const el = e.target instanceof Element ? e.target : null;
-        if (!canvasPressed && el !== document.body && !el?.closest('.viewport, .panel.properties, #dock-panel-properties')) return;
+        if (!canvasPressed && el !== document.body && !el?.closest('.viewport, .panel.properties, #dock-panel-properties, #dock-panel-library')) return;
         e.preventDefault();
-        focusPropertySearch();
+        const { active, collapsed } = useDock.getState();
+        if (active.top === 'library' && !collapsed.top) focusLibrarySearch();
+        else focusPropertySearch();
         return;
       }
       const layer = selectedLayer(st);
