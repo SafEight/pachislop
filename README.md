@@ -2,7 +2,7 @@
 
 # Pachislop
 
-Pachislop is a free tool for making flashy pachinko and pachislot style title art, like 確定, 激アツ, BIG BONUS or RUSH. It runs in your web browser, and nothing you make is uploaded anywhere.
+Make flashy pachislot title art in your browser. A mix of Photoshop and After Effects, with Element 3D and Eye Candy built in.
 
 **Try it here:** https://safeight.github.io/pachislop/
 
