@@ -4,46 +4,31 @@
 
 Make flashy pachislot title art in your browser. A mix of Photoshop and After Effects, with Element 3D and Eye Candy built in.
 
-**Try it here:** https://safeight.github.io/pachislop/
+**Live:** https://safeight.github.io/pachislop/ (desktop Chrome, Edge or Safari)
 
-It works best in a recent desktop version of Chrome, Edge or Safari.
+## Features
 
-## What you can do
+- **2D titles:** stacked rims, bevels, satin, metal finishes, reflection maps, glass and patterns
+- **3D titles:** extrude or inflate, bevel bands, backplates, PBR materials, HDR environments, glints and AO
+- **Effects:** glows, Deep Glow, shadows, blurs, distortions, keylines, gradient overlays, adjustments
+- **Generators:** particles, glints, speed lines, sunbursts, light streaks, fire, smoke, lightning, lens flares
+- **Compositing:** groups, clipping, layer masks, adjustment layers, blend modes
+- **Library:** 84 looks, 11 colourways, 37 templates
+- **Input:** text, shapes, SVG, images, GLB models, custom fonts
+- **Export:** transparent PNG (8/16-bit), layered PSD, SVG
+- **UI:** English / Japanese
 
-- Type a title and give it a finished look in one click: gold, chrome, rainbow, neon, fire and more.
-- Make titles flat (2D) or as real 3D lettering with bevels, metal and glass.
-- Add outlines, glows, shadows, sparkles, light rays, particles and other effects.
-- Start from a ready-made template, or from an empty canvas.
-- Use your own fonts, images, SVG logos and 3D models.
-- Export transparent PNGs, layered Photoshop files (PSD), or SVG outlines.
-- Switch the interface between English and Japanese.
+## Development
 
-## How to use it
-
-1. Open the link above, or run it yourself (see below).
-2. Add some text with the T tool, or pick a template from **File › New from template**.
-3. Open the **Library** tab and click a look. Hover a look to preview it first.
-4. Fine-tune it in the **Properties** tab. Press **⌘F** (Ctrl+F) to search for any setting.
-5. Click **Export…** to save your image.
-
-Your work is saved in the browser automatically. Use **File › Save** to keep a copy as a file.
-
-## Run it yourself
-
-You need [Node.js](https://nodejs.org) (version 20 or newer).
+Requires Node.js 20+.
 
 ```sh
 npm install
-npm run dev
+npm run dev     # dev server
+npm run build   # production build to dist/
+npm test        # unit, golden-image and perf tests (needs a GPU)
 ```
-
-Then open the address it prints, usually http://localhost:5173.
-
-Other commands:
-
-- `npm run build` makes a production build in the `dist` folder.
-- `npm test` runs the checks: unit tests, reference-image tests and speed tests. The image and speed tests need a browser with a working GPU.
 
 ## Credits
 
-Pachislop uses free fonts, images and open-source libraries. Their authors and licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Fonts, images and libraries: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
