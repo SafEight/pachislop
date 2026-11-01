@@ -4,7 +4,7 @@
 
 Make flashy pachislot title art in your browser. A mix of Photoshop and After Effects, with Element 3D and Eye Candy built in.
 
-**Live:** https://safeight.github.io/pachislop/ (desktop Chrome, Edge, Firefox or Safari)
+**Live:** https://safeight.github.io/pachislop/
 
 ## Features
 
