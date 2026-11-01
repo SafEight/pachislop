@@ -604,7 +604,6 @@ export const JA_SHELL: Readonly<Record<string, string>> = {
   '{n} PNGs: {files}': 'PNG {n} 個: {files}',
   'Apply to': '適用先',
   'Alone': '単独',
-  'Clear': 'クリア',
   'Format': '形式',
   'Split titles': 'タイトルを分割',
   'Each 2D title becomes a group: every rim alone, the face alone (hidden, each with its own part effects) and the full layer with effects (fx)': '各 2D タイトルをグループに: 境界線ごと、面のみ（非表示、それぞれのパーツの効果付き）、効果込みのレイヤー全体（fx）',

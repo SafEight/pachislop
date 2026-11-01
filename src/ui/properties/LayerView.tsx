@@ -1,4 +1,4 @@
-import { Fragment, useContext, useEffect, useRef, type KeyboardEvent, type MouseEvent } from 'react';
+import { useContext, useEffect } from 'react';
 import { ADJUSTMENT_NAMES } from '../../model/defaults';
 import type { TitleLayer } from '../../model/parts';
 import type { AdjustmentLayer, BackgroundLayer, Layer, PartKey } from '../../model/types';
@@ -11,6 +11,7 @@ import { partEnabled } from '../layers/parts';
 import { listedParts } from '../layers/rows';
 import { useOpenSection, useSectionsOpen, SectionScope } from '../sectionMemory';
 import { AdjustmentEditor } from './AdjustmentEditor';
+import { AppearanceRow, AppearanceStack, type RowClick } from './AppearanceRow';
 import { EffectStack } from './EffectCard';
 import { GeneratorView } from './GeneratorView';
 import { GroupView } from './GroupView';
@@ -23,13 +24,13 @@ import { Style2DSettings } from './style/Parts2D';
 import { LayerLightingSection } from './style/Lighting3D';
 import { RenderPassesSection, Shape3DSection } from './style/Parts3D';
 import { fillCss } from './style/shared';
-import { Swatch, SwatchTitle } from './style/widgets';
+import { SwatchTitle } from './style/widgets';
 import { StyleLint } from './StyleLint';
 import { TextSection } from './TextSection';
 import { TransformSection } from './TransformSection';
 
 /** Appearance row click: plain = edit this part in place (again: collapse to the layer), ⌘ = add / remove it, ⇧ = the range from the last clicked part. */
-function clickPart(layer: TitleLayer, part: PartKey, alone: boolean, e: MouseEvent | KeyboardEvent) {
+function clickPart(layer: TitleLayer, part: PartKey, alone: boolean, e: RowClick) {
   const { selectNode } = useEditor.getState();
   const node = { kind: 'part', layerId: layer.id, part } as const;
   if (e.shiftKey) selectNode(node, { range: true });
@@ -49,23 +50,8 @@ function AppearanceList({ layer, expanded }: { layer: TitleLayer; expanded: read
   const parts = layer.kind === 'title3d' && layer.source.kind === 'model' ? (['face'] as const) : listedParts(layer);
   const shown = parts.filter((p) => expanded.includes(p));
   const last = shown[shown.length - 1];
-  const firstRow = useRef<HTMLDivElement>(null);
-  const shownKey = shown.join('|');
-  // A part selected elsewhere (Layers, the canvas) or from a row scrolled away: bring its row to
-  // the top of the panel, after PropertiesPanel restored the remembered scroll (its frame runs first).
-  useEffect(() => {
-    const row = firstRow.current;
-    const body = row?.closest('.props-body');
-    if (!row || !body) return;
-    const raf = requestAnimationFrame(() => {
-      const r = row.getBoundingClientRect();
-      const b = body.getBoundingClientRect();
-      if (r.top < b.top || r.bottom > b.bottom - 120) body.scrollTop += r.top - b.top - 8;
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [shownKey]);
   return (
-    <div className="sty-stack" role="list" aria-label={t('Style parts')}>
+    <AppearanceStack label={t('Style parts')} shownKey={shown.join('|')}>
       {parts.map((part) => {
         const name = formatMsg(partLabel(layer, part), t);
         const summary = partSummary(t, layer, part);
@@ -73,42 +59,35 @@ function AppearanceList({ layer, expanded }: { layer: TitleLayer; expanded: read
         const sel = shown.includes(part);
         const alone = sel && shown.length === 1;
         return (
-          <Fragment key={part}>
-            <div
-              ref={part === shown[0] ? firstRow : undefined}
-              role="listitem"
-              tabIndex={0}
-              aria-selected={sel}
-              aria-expanded={part === last}
-              className={`sty-row ${sel ? 'sel' : ''} ${partEnabled(layer, part) ? '' : 'off'}`}
-              title={t('{part}: {summary} — click to edit here, ⇧ / ⌘-click to edit several', { part: name, summary })}
-              onClick={(e) => clickPart(layer, part, alone, e)}
-              onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && clickPart(layer, part, alone, e)}
-            >
-              <span className="sty-twisty" aria-hidden>
-                {part === last ? '▾' : '▸'}
-              </span>
-              <PartEye layer={layer} part={part} />
-              <Swatch css={partSwatch(layer, part)} />
-              <PartLinkBadge layer={layer} part={part} />
-              <span className="sty-name">
-                {name} {summary && <span className="muted">· {summary}</span>}
-              </span>
-              {width && <PartWidth refs={[width.ref]} max={width.max} label={name} />}
-              <span className="sty-actions">
+          <AppearanceRow
+            key={part}
+            sel={sel}
+            open={part === last}
+            off={!partEnabled(layer, part)}
+            title={t('{part}: {summary} — click to edit here, ⇧ / ⌘-click to edit several', { part: name, summary })}
+            onClick={(e) => clickPart(layer, part, alone, e)}
+            eye={<PartEye layer={layer} part={part} />}
+            swatch={partSwatch(layer, part)}
+            badge={<PartLinkBadge layer={layer} part={part} />}
+            name={name}
+            summary={summary}
+            width={width && <PartWidth refs={[width.ref]} max={width.max} label={name} />}
+            actions={
+              <>
                 <PartActions layer={layer} part={part} />
                 {alone && (
                   <IconBtn title={t('Open {part} on its own page', { part: name })} onClick={() => usePartPage.setState({ key: `${layer.id}:${part}` })}>
                     ⤢
                   </IconBtn>
                 )}
-              </span>
-            </div>
-            {part === last && <PartsInline layer={layer} parts={shown} />}
-          </Fragment>
+              </>
+            }
+          >
+            <PartsInline layer={layer} parts={shown} />
+          </AppearanceRow>
         );
       })}
-    </div>
+    </AppearanceStack>
   );
 }
 

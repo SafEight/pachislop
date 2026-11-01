@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { backplate3D, band3D, material2D, rim2D, solidFill, uid } from '../../model/defaults';
 import { bandKey, parsePartKey, partEffectsOf, plateKey, rimKey, type TitleLayer } from '../../model/parts';
+import type { AnyMaterial } from '../../model/links';
 import type { Backplate3D, Material3D, PartKey, Title3DLayer } from '../../model/types';
 import { msg, type Translate } from '../../store/msg';
 import { partLabel } from '../../store/labels';
@@ -55,26 +56,25 @@ export function stackPos(l: TitleLayer, key: PartKey): { kind: StackKind; index:
   return index < 0 ? null : { kind, index };
 }
 
-/** The 3D material a part shows (a plate's face material), or null when the part is gone. */
-function material3DOf(l: Title3DLayer, key: PartKey): Material3D | null {
-  const s = l.style3d;
+/** The material a part shows (a plate's face material), or null when the part is gone. */
+export function partMaterial(l: TitleLayer, key: PartKey): AnyMaterial | null {
   const { kind } = parsePartKey(key);
+  const pos = stackPos(l, key);
+  if (l.kind === 'title2d') return pos ? l.style.rims[pos.index].material : kind === 'face' ? l.style.face : null;
+  const s = l.style3d;
   if (kind === 'face') return s.face;
   if (kind === 'side') return s.side;
-  const pos = stackPos(l, key);
   if (!pos) return null;
   return pos.kind === 'band' ? s.bands[pos.index].material : s.backplates[pos.index].face;
 }
 
-/** CSS background of the part's swatch (the whole gradient, not just its main colour). */
+/** CSS background of a material's swatch (the whole gradient, not just its main colour). */
+export const materialCss = (m: AnyMaterial): string => ('fill' in m ? fillCss(m.fill) : material3DCss(m));
+
+/** CSS background of the part's swatch. */
 export function partSwatch(l: TitleLayer, key: PartKey): string {
-  if (l.kind === 'title2d') {
-    const pos = stackPos(l, key);
-    const mat = pos ? l.style.rims[pos.index].material : parsePartKey(key).kind === 'face' ? l.style.face : null;
-    return mat ? fillCss(mat.fill) : 'transparent';
-  }
-  const m = material3DOf(l, key);
-  return m ? material3DCss(m) : 'transparent';
+  const m = partMaterial(l, key);
+  return m ? materialCss(m) : 'transparent';
 }
 
 const pct = (v: number) => `${+v.toFixed(2)}%`;
@@ -87,22 +87,20 @@ export function partWidth(l: TitleLayer, key: PartKey): { ref: PropRef; max: num
   return null;
 }
 
+/** One-line summary bits of a material: a 2D one's fill kind and bevel, a 3D one's preset. */
+export function materialSummary(t: Translate, m: AnyMaterial): string[] {
+  if (!('fill' in m)) return [presetLabel(t, m.preset)];
+  const out = [t(FILL_KINDS.find((k) => k.value === m.fill.kind)?.label ?? m.fill.kind)];
+  if (m.bevel.enabled) out.push(t('bevel {n}', { n: pct(m.bevel.size) }));
+  return out;
+}
+
 /** One-line summary for the Appearance list, e.g. "Gold · fx 2" / "Linear · bevel 3% · fx 1"; a rim's or band's width is the field on its row (partWidth). */
 export function partSummary(t: Translate, l: TitleLayer, key: PartKey): string {
-  const out: string[] = [];
+  const mat = partMaterial(l, key);
+  const out = mat ? materialSummary(t, mat) : [];
   const pos = stackPos(l, key);
-  if (l.kind === 'title2d') {
-    const rim = pos ? l.style.rims[pos.index] : null;
-    const mat = rim ? rim.material : parsePartKey(key).kind === 'face' ? l.style.face : null;
-    if (mat) {
-      out.push(t(FILL_KINDS.find((k) => k.value === mat.fill.kind)?.label ?? mat.fill.kind));
-      if (mat.bevel.enabled) out.push(t('bevel {n}', { n: pct(mat.bevel.size) }));
-    }
-  } else {
-    const m = material3DOf(l, key);
-    if (m) out.push(presetLabel(t, m.preset));
-    if (pos?.kind === 'plate') out.push(`+${pct(l.style3d.backplates[pos.index].grow)}`);
-  }
+  if (l.kind === 'title3d' && pos?.kind === 'plate') out.push(`+${pct(l.style3d.backplates[pos.index].grow)}`);
   const fx = partEffectsOf(l, key).length;
   if (fx) out.push(t('fx {n}', { n: fx }));
   return out.join(' · ');

@@ -1,24 +1,17 @@
-import { useContext, useEffect, useRef, useState } from 'react';
-import { withoutLink } from '../../model/links';
-import type { CharAdjust, Material2D, Material3D, TextSource } from '../../model/types';
+import { useContext, useEffect, useRef } from 'react';
+import type { CharAdjust, TextSource } from '../../model/types';
 import type { TitleLayer } from '../../model/parts';
-import { applyColourway, COLOURWAY_INFO } from '../../presets/colourways';
-import { COLOURWAYS, type Colourway } from '../../presets/types';
-import { msg, type Msg } from '../../store/msg';
+import { msg } from '../../store/msg';
 import { useEditor } from '../../store/store';
 import { NumRow, Row, Section } from '../controls';
 import { useT } from '../i18n';
 import { FindProbe, useOpenSection } from '../sectionMemory';
 import { oneShot } from '../util';
-import { isNeutralAdjust, mapAdjusts, NO_ADJUST } from '../viewport/glyphs';
+import { mapAdjusts, NO_ADJUST } from '../viewport/glyphs';
 import { InfoTip } from './InfoTip';
+import { LetterMaterials } from './LetterMaterials';
 import { firstLetter } from './searchIndex';
-import { CharMaterials3D } from './style/CharMaterials3D';
-import { Material2DEditor } from './style/Material2DEditor';
-import { Material3DSection } from './style/Material3DEditor';
-import { fillCss, material2DClipboard, material3DCss } from './style/shared';
-import { MaterialLink } from './style/MaterialLink';
-import { ClipActions, SwatchTitle } from './style/widgets';
+import { fillCss, material3DCss } from './style/shared';
 
 // The Letters section of a text title: per-character offsets, scale, rotation, 3D push / tilt and
 // split-colour faces. It sits after Appearance (it is about how single letters look), not in Text.
@@ -29,113 +22,6 @@ type SourceLayer = TitleLayer;
 function faceCss(layer: SourceLayer, a: CharAdjust | undefined): string | null {
   if (layer.kind === 'title2d') return a?.face ? fillCss(a.face.fill) : null;
   return a?.face3d ? material3DCss(a.face3d) : null;
-}
-
-/**
- * Split-colour faces (激 red / アツ gold): colour chips (the colourways' faces), custom face
- * editor and clear, for the picked characters. 2D layers write `face`, 3D layers `face3d`; rims
- * stay whole-word.
- */
-function CharFaceEditor({ layer, src, selected }: { layer: SourceLayer; src: TextSource; selected: number[] }) {
-  const t = useT();
-  const [custom, setCustom] = useState(false);
-  const setAt = useEditor((s) => s.setAt);
-  const chars = Array.from(src.text);
-  const is2d = layer.kind === 'title2d';
-  const key = is2d ? 'face' : 'face3d';
-  const primary = selected[0];
-  const picked = selected.map((i) => chars[i]).join('');
-  const ref = { layerId: layer.id, path: ['source', 'chars'] };
-
-  /** Rewrite the face of every picked character (null = remove the override). */
-  const setFaces = (face: (i: number) => CharAdjust['face'] | CharAdjust['face3d'] | null, label: Msg) => {
-    const next = { ...src.chars };
-    for (const i of selected) {
-      const base: CharAdjust = { ...(next[i] ?? NO_ADJUST) };
-      delete base[key];
-      // Clearing a 3D character's face also drops its own band / side materials.
-      if (!is2d && !face(i)) {
-        delete base.bands3d;
-        delete base.side3d;
-      }
-      const f = face(i);
-      // A letter's face is its own (copied out of a linked layer face, it leaves the link behind).
-      const a: CharAdjust = !f ? base : is2d ? { ...base, face: structuredClone(withoutLink(f as Material2D)) } : { ...base, face3d: structuredClone(withoutLink(f as Material3D)) };
-      if (isNeutralAdjust(a)) delete next[i];
-      else next[i] = a;
-    }
-    setAt(ref, next, oneShot(`${layer.id}:face`), label);
-  };
-  /** The layer's face in colourway `c`: the colour chips keep the layer's own face structure. */
-  const colourFace = (c: Colourway) => {
-    const recoloured = applyColourway(layer, c);
-    return recoloured.kind === 'title2d' ? recoloured.style.face : recoloured.kind === 'title3d' ? recoloured.style3d.face : null;
-  };
-  const layerFace = layer.kind === 'title2d' ? layer.style.face : layer.style3d.face;
-  const primaryFace = src.chars[primary]?.[key];
-  const faceRef = { layerId: layer.id, path: ['source', 'chars', primary, key] };
-  return (
-    <>
-      <Row label={t('Face')} title={t('Per-character face colour (split-colour words); rims stay continuous around the word')}>
-        <span className="face-chips">
-          {COLOURWAYS.map((c) => (
-            <button
-              key={c}
-              className="face-chip"
-              title={t('{colour} face for “{chars}”', { colour: COLOURWAY_INFO[c].name, chars: picked })}
-              style={{ background: COLOURWAY_INFO[c].faceCss }}
-              onClick={() => setFaces(() => colourFace(c), msg('Face {colour} “{chars}”', { colour: COLOURWAY_INFO[c].name, chars: picked }))}
-            >
-              {COLOURWAY_INFO[c].label}
-            </button>
-          ))}
-        </span>
-      </Row>
-      <Row label="">
-        <button
-          className={`small ${custom ? 'active' : ''}`}
-          title={t("Edit this character's face material")}
-          onClick={() => {
-            if (!custom) setFaces((i) => src.chars[i]?.[key] ?? layerFace, msg('Custom face “{chars}”', { chars: picked }));
-            setCustom(!custom);
-          }}
-        >
-          {t('Custom…')}
-        </button>
-        <button className="small" disabled={!selected.some((i) => src.chars[i]?.[key])} onClick={() => setFaces(() => null, msg('Clear face “{chars}”', { chars: picked }))}>
-          {t('Clear')}
-        </button>
-      </Row>
-      {custom && primaryFace && (
-        <div className="char-face-editor">
-          {selected.length > 1 && (
-            <Row label="">
-              <button className="small" title={t('Copy this face onto every picked character')} onClick={() => setFaces(() => primaryFace, msg('Match face “{chars}”', { chars: picked }))}>
-                {t('Apply to all {n} picked', { n: selected.length })}
-              </button>
-            </Row>
-          )}
-          {layer.kind === 'title2d' && src.chars[primary]?.face ? (
-            <Section
-              id="char-face"
-              title={<SwatchTitle css={fillCss(src.chars[primary].face.fill)}>{t('Face of “{char}”', { char: chars[primary] })}</SwatchTitle>}
-              actions={
-                <>
-                  <MaterialLink refp={faceRef} kind="2d" />
-                  <ClipActions clip={material2DClipboard} value={src.chars[primary].face} refp={faceRef} />
-                </>
-              }
-            >
-              <Material2DEditor id="char-face" refp={faceRef} mat={src.chars[primary].face} />
-            </Section>
-          ) : layer.kind === 'title3d' && src.chars[primary]?.face3d ? (
-            <Material3DSection id="char-face3d" title={t('Face of “{char}”', { char: chars[primary] })} refp={faceRef} mat={src.chars[primary].face3d} defaultOpen />
-          ) : null}
-          {layer.kind === 'title3d' && <CharMaterials3D layer={layer} src={src} selected={selected} />}
-        </div>
-      )}
-    </>
-  );
 }
 
 /**
@@ -235,7 +121,7 @@ export function LettersSection({ layer, src }: { layer: SourceLayer; src: TextSo
                 <NumRow label={t('Tilt Y')} id={`${id}:ty`} value={adj.tiltY ?? 0} min={-89} max={89} step={0.5} unit="deg" clamp defaultValue={0} onChange={(v, c) => setAdj({ tiltY: v }, c, 'Character tilt Y')} title={t('+ = right side toward the viewer')} />
               </>
             )}
-            <CharFaceEditor key={`${layer.id}:${selected.join(',')}`} layer={layer} src={src} selected={selected} />
+            <LetterMaterials key={layer.id} layer={layer} src={src} selected={selected} />
             <Row label="">
               <button
                 className="small"

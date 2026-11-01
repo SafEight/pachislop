@@ -70,6 +70,10 @@
 .sty-row.off .sty-swatch {
   opacity: 0.4;
 }
+/* A letter's part that uses the layer's material (Letters): the layer's swatch, muted. */
+.sty-row.inherited .sty-swatch {
+  opacity: 0.45;
+}
 .sty-name {
   flex: 1;
   min-width: 0;

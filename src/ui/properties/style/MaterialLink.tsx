@@ -188,24 +188,40 @@ export function MaterialLink({ refp, kind }: { refp: Refs; kind: LinkKind }) {
   );
 }
 
+/** The link of `mat`, with its name and size, or null when unlinked. */
+function linkTitle(t: Translate, project: Project, mat: AnyMaterial | undefined, kind: LinkKind): string | null {
+  if (!mat?.link) return null;
+  return t('Linked: {name} ×{n}', { name: linkName(t, project, mat.link, mat), n: linkedSlots(project, mat.link, kind).length });
+}
+
 /** The link of part `part` of `l` (a plate: its front, else its edge), with its name and size, or null. */
 function partLink(t: Translate, project: Project, l: TitleLayer, part: PartKey): string | null {
-  const found: { id: string; mat: AnyMaterial; kind: LinkKind }[] = [];
+  const found: { mat: AnyMaterial; kind: LinkKind }[] = [];
   forEachMaterial(l, (s) => {
-    if (s.part === part && s.mat.link) found.push({ id: s.mat.link, mat: s.mat, kind: s.kind });
+    if (s.part === part && s.mat.link) found.push({ mat: s.mat, kind: s.kind });
   });
-  const first = found[0];
-  if (!first) return null;
-  return t('Linked: {name} ×{n}', { name: linkName(t, project, first.id, first.mat), n: linkedSlots(project, first.id, first.kind).length });
+  return found[0] ? linkTitle(t, project, found[0].mat, found[0].kind) : null;
+}
+
+function LinkBadge({ title }: { title: string | null }) {
+  return title ? (
+    <span className="part-link" title={title} aria-label={title}>
+      <LinkIcon />
+    </span>
+  ) : null;
 }
 
 /** Subtle link icon for a linked part (Layers part rows, Appearance rows); nothing when unlinked. */
 export function PartLinkBadge({ layer, part }: { layer: TitleLayer; part: PartKey }) {
   const t = useT();
   const title = useEditor((s) => partLink(t, s.project, layer, part));
-  return title ? (
-    <span className="part-link" title={title} aria-label={title}>
-      <LinkIcon />
-    </span>
-  ) : null;
+  return <LinkBadge title={title} />;
+}
+
+/** The same icon for the first linked one of `mats` (a letter's own materials in Letters); nothing when none is linked. */
+export function MaterialLinkBadge({ mats, kind }: { mats: readonly (AnyMaterial | undefined)[]; kind: LinkKind }) {
+  const t = useT();
+  const mat = mats.find((m) => m?.link);
+  const title = useEditor((s) => linkTitle(t, s.project, mat, kind));
+  return <LinkBadge title={title} />;
 }

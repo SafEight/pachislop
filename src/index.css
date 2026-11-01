@@ -865,11 +865,6 @@ canvas.value-check {
 .face-chip:hover {
   outline: 1px solid var(--accent);
 }
-.char-face-editor {
-  border-left: 2px solid var(--accent2);
-  padding-left: 6px;
-  margin: 2px 0 6px;
-}
 .align-btns {
   display: flex;
   gap: 2px;
