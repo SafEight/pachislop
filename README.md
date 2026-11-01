@@ -1,6 +1,6 @@
 ![Pachislop](docs/pachislop-logo.png)
 
-![AI bloat certified](docs/ai-bloat-certified.png)
+<p align="center"><img src="docs/ai-bloat-certified.png" alt="AI bloat certified"></p>
 
 Make flashy pachislot title art in your browser. A mix of Photoshop and After Effects, with Element 3D and Eye Candy built in.
 
