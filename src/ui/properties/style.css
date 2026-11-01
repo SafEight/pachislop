@@ -1,0 +1,300 @@
+/* Style editors (part editors, material editors, the Appearance part list). Classes prefixed `sty-`. */
+
+.sty-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.sty-swatch {
+  display: inline-block;
+  flex: none;
+  width: 18px;
+  height: 12px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.sty-swatch > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.sty-strip {
+  height: 10px;
+  margin-left: 86px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.sty-strip > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.sty-clip {
+  display: inline-flex;
+  gap: 2px;
+}
+.sty-clip .icon-btn {
+  font-size: 10px;
+}
+
+/* ---------- stack rows ---------- */
+.sty-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sty-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg2);
+  cursor: pointer;
+  user-select: none;
+}
+.sty-row:hover {
+  background: var(--bg3);
+}
+.sty-row.sel {
+  background: #2c3a55;
+}
+.sty-row.off .sty-name,
+.sty-row.off .sty-swatch {
+  opacity: 0.4;
+}
+.sty-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sty-actions {
+  display: flex;
+  flex: none;
+  visibility: hidden;
+}
+.sty-row:hover .sty-actions,
+.sty-row.sel .sty-actions {
+  visibility: visible;
+}
+.sty-twisty {
+  flex: none;
+  width: 10px;
+  font-size: 9px;
+  color: var(--muted);
+}
+/* A part edited in place under its row (Appearance): kept full width, marked by the selection colour on its left edge. */
+.sty-inline {
+  margin: 0 0 6px;
+  padding-left: 4px;
+  border-left: 2px solid #2c3a55;
+}
+.sty-inline-head {
+  padding: 4px 4px 2px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- icon pickers ---------- */
+.sty-icons .seg {
+  flex-wrap: wrap;
+}
+.sty-icons .seg button {
+  padding: 1px 3px;
+  line-height: 0;
+}
+.sty-icon {
+  display: block;
+}
+.sty-icon polygon {
+  fill: currentColor;
+  opacity: 0.85;
+}
+.sty-icon .frame {
+  fill: none;
+  stroke: currentColor;
+  opacity: 0.3;
+}
+.sty-icon .curve {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+
+/* ---------- finish ramps ---------- */
+.sty-ramps > .ctl {
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.sty-ramp {
+  width: 22px;
+  height: 14px;
+  padding: 0;
+  border-radius: 2px;
+}
+.sty-ramp.on {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---------- light sphere ---------- */
+.sty-light {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.sty-light-nums {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sty-light-nums .row > .label {
+  width: 50px;
+}
+.sty-light > .light-sphere-wrap {
+  flex: none;
+}
+/* the numeric Angle/Altitude rows beside the sphere replace its readout */
+.sty-light .light-readout {
+  display: none;
+}
+
+/* ---------- material groups ---------- */
+/* What a closed group has switched on, after its name. */
+.sty-group-on {
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* On/off sub-heading of one feature inside a group (Reflection map, Satin…). */
+.sty-feature {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.sty-feature:first-child {
+  margin-top: 2px;
+}
+
+/* ---------- linked materials (MaterialLink.tsx) ---------- */
+.link-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.link-icon {
+  flex: none;
+  vertical-align: -1px;
+}
+.link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 130px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 16px;
+  border-radius: 8px;
+  color: var(--accent2);
+  background: rgba(61, 139, 255, 0.12);
+  border: 1px solid rgba(61, 139, 255, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.link-rename {
+  width: 100px;
+  font-size: 10px;
+}
+.link-menu .menu-btn {
+  font-size: 10px;
+  padding: 0 4px;
+}
+.link-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.part-link {
+  display: inline-flex;
+  flex: none;
+  color: var(--accent2);
+  opacity: 0.8;
+}
+
+/* ---------- lighting inheritance (Lighting3D.tsx) ---------- */
+/* A lighting value with its source dot in front; its label column gives up most of the dot's width. */
+.lt-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.lt-row > .row {
+  flex: 1;
+  min-width: 0;
+}
+.lt-row > .row > .label {
+  width: 74px;
+}
+/* inherited values read a little quieter than the ones set here */
+.lt-row.inherited > .row > .ctl {
+  opacity: 0.75;
+}
+/* Filled = set here, accent2 ring = from the layer, grey ring = from Document, half = some targets. */
+.lt-src {
+  flex: none;
+  display: inline-block;
+  box-sizing: border-box;
+  width: 11px;
+  height: 11px;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted);
+  background: transparent;
+}
+button.lt-src {
+  cursor: pointer;
+}
+button.lt-src:hover {
+  box-shadow: 0 0 0 2px rgba(240, 180, 41, 0.35);
+}
+.lt-src.here {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.lt-src.layer {
+  border-color: var(--accent2);
+}
+.lt-src.mixed {
+  border-color: var(--accent);
+  background: linear-gradient(90deg, var(--accent) 50%, transparent 50%);
+}
+.lt-legend .lt-src {
+  vertical-align: -1px;
+}
+.lt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 2px;
+}

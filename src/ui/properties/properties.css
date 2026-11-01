@@ -1,0 +1,278 @@
+/* Properties panel: breadcrumb, node header, node views. Fills its dock tab and scrolls inside. */
+
+.properties {
+  height: 100%;
+}
+
+/* ---------- breadcrumb ---------- */
+.props-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px 2px;
+  font-size: 11px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.crumb-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.crumb {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: none;
+  background: none;
+  padding: 1px 3px;
+  border-radius: 3px;
+  color: var(--muted);
+}
+button.crumb:hover:not(:disabled) {
+  background: var(--bg3);
+  color: var(--text);
+}
+.crumb.current {
+  color: var(--text);
+  font-weight: 600;
+}
+.crumb-sep {
+  color: var(--muted);
+}
+
+/* ---------- header ---------- */
+.badge.k-part {
+  background: #7fd99a;
+}
+.badge.k-effect {
+  background: #ffb36a;
+}
+.badge.k-document {
+  background: #c8c8d4;
+}
+.badge.k-generator {
+  background: #f6d365;
+}
+.badge.k-mask {
+  background: #e8e8e8;
+}
+
+/* ---------- mask node (MaskView.tsx) ---------- */
+.mask-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 2px;
+}
+
+/* ---------- generator node (GeneratorView.tsx) ---------- */
+.gen-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.gen-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 6px;
+}
+.gen-chip {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+.gen-chip.on {
+  background: var(--accent2);
+  border-color: var(--accent2);
+  color: #fff;
+}
+
+/* ---------- toolbars ---------- */
+.props-toolbar,
+.fx-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+.props-toolbar {
+  border-bottom: 1px solid var(--line);
+}
+.props-toolbar .right,
+.fx-toolbar .menu-btn {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.part-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+/* Effect stacks inside a section body already have its padding. */
+.section .fx-toolbar {
+  padding: 2px 0 4px;
+}
+.section .effect {
+  margin: 6px 0;
+}
+
+/* ---------- effect cards ---------- */
+.fx-name.link {
+  cursor: pointer;
+}
+.fx-name.link:hover {
+  text-decoration: underline;
+}
+button.fx-handles {
+  padding: 0 3px;
+}
+/* Effect node: the one card fills the panel. */
+.props-body.full .effect.full {
+  min-height: calc(100% - 12px);
+}
+
+/* ---------- narrow dock ---------- */
+/* Long (Japanese) option chips wrap instead of overflowing a narrow dock. */
+.properties .seg {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.properties .row > .ctl {
+  min-width: 0;
+}
+
+/* ---------- parts ---------- */
+/* Eye column like the Layers panel: a dot when shown, empty when hidden, a blank cell where parts can't hide. */
+.part-eye {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+  line-height: 18px;
+}
+button.part-eye:hover:not(:disabled) {
+  background: var(--bg3);
+  color: var(--text);
+}
+.part-eye.on {
+  color: var(--text);
+}
+/* The eye stays clickable on a dimmed (hidden) row. */
+.sty-row.off .part-eye {
+  opacity: 1;
+}
+
+/* ---------- ⓘ tooltips (InfoTip.tsx) ---------- */
+.info-tip {
+  margin-left: 5px;
+  color: var(--muted);
+  font-weight: normal;
+  cursor: help;
+}
+.info-tip:hover,
+.info-tip:focus-visible {
+  color: var(--text);
+}
+
+/* ---------- transform (TransformSection.tsx) ---------- */
+/* Align · distribute · flip in one toolbar row. */
+.xf-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 2px 0 4px;
+}
+.xf-tools .align-btns button {
+  min-width: 22px;
+  padding: 1px 3px;
+}
+/* X / Y (/ Z), Rotation / Scale, Tilt X / Turn Y: two or three fields per row, labels hugging them. */
+.xf-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  column-gap: 10px;
+}
+.xf-grid > .row > .label {
+  width: auto;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.xf-grid .numfield {
+  justify-content: flex-end;
+}
+.xf-grid .num {
+  width: 50px;
+}
+
+/* ---------- 3D shape: bevel band list (Parts3D.tsx) ---------- */
+.band-list {
+  padding: 2px 0 4px;
+}
+.band-list.off {
+  opacity: 0.55;
+}
+.band-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 72px 34px;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+.band-row.head {
+  color: var(--muted);
+  font-size: 11px;
+  min-height: 16px;
+}
+.band-row .band-name {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  cursor: pointer;
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.band-row .band-name:hover {
+  text-decoration: underline;
+}
+.band-row .numfield .num {
+  width: 46px;
+}
+.band-profile .menu-btn {
+  padding: 1px 3px;
+  display: flex;
+  align-items: center;
+}
+.band-profile-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------- a rim's / band's width on its Appearance row (PartWidth: layer page and MultiView) ---------- */
+.part-width {
+  flex: none;
+}
+.part-width .numfield {
+  flex: 0 0 auto;
+}
+.part-width .numfield .num {
+  width: 46px;
+  height: 20px;
+}

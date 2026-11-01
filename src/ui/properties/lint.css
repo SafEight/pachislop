@@ -1,0 +1,47 @@
+/* ---------- Style check (StyleLint.tsx) ---------- */
+.lint-badge {
+  min-width: 26px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.lint-badge.ok {
+  color: #7be08a;
+  border-color: #2f6a3a;
+}
+.lint-badge.warn {
+  color: #1a1000;
+  background: #f0b400;
+  border-color: #f0b400;
+}
+.lint-pop {
+  width: 300px;
+  padding: 6px;
+  overflow: auto;
+  z-index: 50;
+}
+.lint-none {
+  padding: 4px;
+  font-size: 11px;
+}
+.lint-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.lint-item:last-child {
+  border-bottom: 0;
+}
+.lint-rule {
+  margin-left: 4px;
+  cursor: help;
+  color: var(--accent);
+}

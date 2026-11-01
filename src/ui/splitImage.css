@@ -1,0 +1,91 @@
+/* Layer ▸ Split image… (SplitImageDialog). */
+
+.split-dialog {
+  max-width: 94vw;
+}
+.split-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  min-height: 0;
+  overflow: auto;
+}
+.split-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.split-merge {
+  flex: 0 1 360px;
+  min-width: 260px;
+}
+.split-merge > .row {
+  margin: 0;
+}
+.split-merge .label {
+  width: auto;
+  white-space: nowrap;
+}
+.split-count {
+  margin-left: auto;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.split-stage {
+  position: relative;
+  min-height: 120px;
+  min-width: 360px;
+  touch-action: none;
+  user-select: none;
+  /* Room for the number tabs over boxes that start at the top edge. */
+  margin-top: 14px;
+  cursor: pointer;
+}
+.split-stage.box {
+  cursor: crosshair;
+}
+.split-stage > canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.split-stage > canvas[hidden] {
+  display: none;
+}
+.split-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.split-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid;
+  pointer-events: none;
+}
+.split-box.sel {
+  border-width: 3px;
+  box-shadow: 0 0 0 1px #000a;
+}
+.split-box > span {
+  position: absolute;
+  left: -1.5px;
+  bottom: 100%;
+  padding: 0 5px;
+  border-radius: 3px 3px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  color: #000;
+}
+.split-rect {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed #fff;
+  background: #ffffff22;
+  pointer-events: none;
+}

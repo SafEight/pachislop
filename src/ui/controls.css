@@ -1,0 +1,169 @@
+/* Numeric controls (controls.tsx): scrubby labels and values, steppers, larger hit targets. */
+
+.row {
+  min-height: 26px;
+}
+/* Long labels (effect params) wrap onto a second line instead of being cut off. */
+.row > .label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.15;
+}
+.row > .label.scrub {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
+}
+/* A value that differs from its default (double-click the label to reset). */
+.row > .label.scrub.changed {
+  color: var(--text);
+}
+.numfield .num {
+  height: 22px;
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
+}
+.numfield .num:focus {
+  cursor: text;
+  user-select: text;
+}
+.numfield .num:hover:not(:focus) {
+  border-color: var(--accent2);
+}
+.numfield input[type='range'] {
+  height: 20px;
+  opacity: 0.75;
+}
+.numfield input[type='range']:hover,
+.numfield input[type='range']:focus-visible {
+  opacity: 1;
+}
+.numfield.has-stepper {
+  flex: 0 1 auto;
+  gap: 2px;
+}
+.numfield.has-stepper .num {
+  width: 40px;
+  text-align: center;
+}
+.numfield .stepper {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+body.scrubbing,
+body.scrubbing * {
+  cursor: ew-resize !important;
+}
+
+/* Colour field (ColorInput): swatch with the native picker behind it, editable hex, eyedropper,
+   ▾ swatches / recent colours popover. */
+.colorfield {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+.colorfield input[type='color'].color {
+  width: 24px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.colorfield .hex-input {
+  width: 64px;
+  height: 20px;
+  padding: 0 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+.colorfield .color-tool {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--muted);
+}
+.colorfield .color-tool:hover,
+.colorfield .color-tool.on {
+  color: var(--text);
+}
+.color-pop {
+  padding: 6px 8px 8px;
+  width: auto;
+}
+.color-pop-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 4px 0 4px;
+}
+.color-chips {
+  display: grid;
+  grid-template-columns: repeat(7, 24px);
+  gap: 4px;
+}
+.color-chip {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #ffffff30;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.color-chip:hover {
+  outline: 2px solid var(--accent2);
+  outline-offset: 1px;
+}
+.color-chip.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Several targets with different values (MIXED): a striped swatch, a dimmed track thumb. */
+.mixed-stripes,
+.colorfield.mixed input[type='color'].color::-webkit-color-swatch {
+  background: repeating-linear-gradient(135deg, #8a8a8a 0 3px, #3a3a3a 3px 6px) !important;
+}
+.numfield.mixed input[type='range'] {
+  opacity: 0.35;
+}
+.numfield .num::placeholder,
+.colorfield .hex-input::placeholder {
+  color: var(--muted);
+}
+/* GradientEditor over gradients that differ: stripes over the first one's gradient. */
+.gmixed {
+  position: absolute;
+  inset: 0;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* Text tab character chips: the face swatch sits in its own strip under the glyph (never over
+   it), and the glyph keeps a dark outline so a white face never reads white on white. */
+.char-btn {
+  height: 32px;
+  padding-bottom: 5px;
+  text-shadow: 0 0 2px #000, 0 0 1px #000;
+}
+.char-btn.has-face::after {
+  bottom: 2px;
+  height: 3px;
+}
+.char-btn.line-btn {
+  font-size: 13px;
+}

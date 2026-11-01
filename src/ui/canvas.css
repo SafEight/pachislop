@@ -1,0 +1,538 @@
+/* Viewport: tool cursors, overlay (glyph gizmo, parameter handles, part outline, rubber bands,
+   inline text editor) and the status bar under the canvas (Viewport.tsx, viewport/*). */
+
+/* Cursor of the active tool (Hand while Space is held). Handles set their own. */
+.viewport-area.tool-glyph,
+.viewport-area.tool-shape,
+.viewport-area.tool-gradient {
+  cursor: crosshair;
+}
+.viewport-area.tool-text {
+  cursor: text;
+}
+.viewport-area.tool-hand {
+  cursor: grab;
+}
+.viewport-area.tool-hand:active {
+  cursor: grabbing;
+}
+.viewport-area.tool-zoom {
+  cursor: zoom-in;
+}
+.viewport-area.tool-zoom.zoom-out {
+  cursor: zoom-out;
+}
+
+/* Status bar (viewport/StatusBar.tsx): Photoshop's slim bottom-left status. */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 0 8px;
+  height: 24px;
+  flex-shrink: 0;
+  /* Narrow viewports first drop the hint, then the group captions and the size readout (the
+     buttons keep their tooltips); past that the fields scroll sideways instead of being cut. */
+  container-type: inline-size;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  font-size: 11px;
+  background: var(--bg1);
+  border-top: 1px solid var(--line);
+}
+.status-bar .group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* Hairline between groups, like Photoshop's status fields. */
+.status-bar .group + .group,
+.status-bar .size-readout {
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.status-bar .group > .muted {
+  margin-right: 3px;
+}
+.status-bar button {
+  padding: 0 5px;
+  line-height: 16px;
+  font-size: 11px;
+}
+.status-bar select {
+  height: 18px;
+  font-size: 11px;
+}
+.status-bar .zoom-readout {
+  width: 40px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.status-bar .size-readout {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.status-bar .hint {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: right;
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@container (max-width: 1100px) {
+  .status-bar .group > .muted:not(.zoom-readout),
+  .status-bar .size-readout {
+    display: none;
+  }
+}
+@container (max-width: 860px) {
+  .status-bar .group + .group {
+    padding-left: 5px;
+  }
+  .status-bar button {
+    padding: 0 3px;
+  }
+}
+
+/* The selected style part (a part node in the Layers panel): its outline and name. */
+.overlay .part-outline path,
+.overlay .part-outline polygon {
+  fill: none;
+  stroke: #ff9a3d;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+  filter: drop-shadow(0 0 1px #000);
+  pointer-events: none;
+}
+.overlay .part-outline text {
+  fill: #ff9a3d;
+  pointer-events: none;
+}
+
+/* Zoom tool rect and Shape tool draft box. */
+.overlay .marquee.zoom {
+  fill: none;
+  stroke: #fff;
+}
+.overlay .marquee.shape {
+  fill: #46d7ff1a;
+  stroke: #46d7ff;
+  stroke-dasharray: none;
+}
+
+.overlay .glyph-box {
+  pointer-events: none;
+  fill: transparent;
+  stroke: #ffffff38;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.overlay .glyph-box.has-face {
+  stroke: #ff6ad5;
+}
+/* Picked glyphs: a filled, solid outline so the picked letter reads at a glance. */
+.overlay .glyph-picked {
+  fill: #f0b42933;
+  stroke: var(--accent);
+  stroke-width: 2;
+  pointer-events: none;
+}
+.overlay .glyph-frame {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 5 3;
+  pointer-events: none;
+}
+.overlay .glyph-gizmo .rot-stem {
+  stroke: var(--accent);
+}
+.overlay .handle.glyph {
+  fill: #fff;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+.overlay .handle.glyph.tilt {
+  fill: #ffd34a;
+  stroke: #000;
+  stroke-width: 1;
+}
+.overlay .pivot.glyph {
+  fill: var(--accent);
+}
+.overlay .glyph-readout {
+  fill: var(--accent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.overlay .glyph-mode .sel-box {
+  stroke-dasharray: 2 4;
+  opacity: 0.6;
+}
+.overlay .sel-box.other {
+  stroke-dasharray: 4 3;
+  opacity: 0.8;
+}
+.overlay .marquee {
+  fill: #3d8bff1a;
+  stroke: var(--accent2);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.overlay .marquee.glyphs {
+  fill: #f0b4291a;
+  stroke: var(--accent);
+}
+
+.overlay .handle.glyph.z {
+  fill: #46d7ff;
+  stroke: #000;
+  stroke-width: 1;
+}
+.overlay .z-label {
+  fill: #000;
+  font-weight: 700;
+  font-size: 10px;
+}
+.overlay .bend-stem {
+  stroke: #46d7ff;
+  stroke-width: 1;
+}
+
+/* Gradient tool */
+.overlay .grad-line {
+  stroke: #fff;
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 1px #000);
+  pointer-events: none;
+}
+.overlay .grad-line-hit {
+  stroke: transparent;
+  stroke-width: 22;
+  pointer-events: stroke;
+  cursor: move;
+}
+.overlay .grad-centre {
+  fill: #fff;
+  stroke: #000;
+}
+.overlay .handle.grad {
+  stroke: #000;
+  stroke-width: 1.5;
+  cursor: move;
+}
+.overlay .handle.grad.start {
+  fill: #fff;
+}
+.overlay .handle.grad.end {
+  fill: #222;
+  stroke: #fff;
+}
+
+/* Shape / warp handles */
+.overlay .handle.shape {
+  fill: #46d7ff;
+  stroke: #000;
+  stroke-width: 1;
+}
+.overlay .handle.bend {
+  fill: #46d7ff;
+  stroke: #000;
+}
+.overlay .shape-h text,
+.overlay .bend-h text {
+  fill: #46d7ff;
+}
+
+/* Generator size handles (viewport/GeneratorHandles.tsx): the dashed emitter / focus / radius
+   outline and its side handles, in the effect-handle yellow; points and arrows reuse .fx-point / .fx-arrow. */
+.overlay .gen-size-outline {
+  fill: none;
+  stroke: #ffd34a;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+.overlay .handle.size {
+  fill: #ffd34a;
+  stroke: #000;
+  stroke-width: 1;
+}
+
+/* Layer masks (viewport/MaskHandles.tsx): the selected shape mask's dashed outline and box, its
+   handles in the mask pink; gradient masks reuse the Gradient tool's line (.grad-*). */
+.overlay .mask-outline {
+  fill: none;
+  stroke: #ff6ad5;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  filter: drop-shadow(0 0 1px #000);
+  pointer-events: none;
+}
+.overlay .mask-outline-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: move;
+}
+.overlay .mask-box {
+  fill: none;
+  stroke: #ff6ad5;
+  stroke-width: 1;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.overlay .mask-shape .rot-stem {
+  stroke: #ff6ad5;
+}
+.overlay .handle.mask {
+  fill: #fff;
+  stroke: #ff6ad5;
+  stroke-width: 1.5;
+}
+.overlay .handle.mask.move {
+  fill: #ff6ad5;
+  stroke: #000;
+  stroke-width: 1;
+}
+.overlay .mask-cross {
+  stroke: #ff6ad5;
+  stroke-width: 1;
+}
+.overlay .mask-label {
+  fill: #ff6ad5;
+  pointer-events: none;
+}
+.overlay .mask-radius {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  opacity: 0.7;
+  filter: drop-shadow(0 0 1px #000);
+  pointer-events: none;
+}
+.overlay .mask-radius.inner {
+  stroke-dasharray: 1 3;
+}
+.overlay .handle.grad.mid {
+  fill: #888;
+  stroke: #fff;
+}
+.overlay .handle.grad.inner {
+  fill: #fff;
+}
+
+/* View mask (⌥-click a mask chip): the combined mask, greyscale, covering the frame; its badge
+   sits just above the comp's top-left corner (the gamut badge has the corner inside). */
+.stage canvas.mask-view {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+.mask-view-badge {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  white-space: nowrap;
+  background: #000c;
+  color: #fff;
+  box-shadow: inset 3px 0 0 #ff6ad5;
+  transform: translateY(calc(-100% - 4px));
+}
+.mask-view-badge button {
+  padding: 0 5px;
+  line-height: 16px;
+  font-size: 11px;
+}
+
+/* Inline text editing: the textarea sits in place over the art (position, rotation and size set
+   inline by TextEditOverlay); the art behind dims so the typed text reads on any style. */
+.inline-text {
+  position: absolute;
+  z-index: 5;
+  transform-origin: center;
+  field-sizing: content;
+  min-width: 1.5em;
+  padding: 0.05em 0.15em;
+  color: #fff;
+  caret-color: var(--accent);
+  background: #0000004d;
+  border: 1px dashed var(--accent);
+  border-radius: 2px;
+  resize: none;
+  white-space: pre;
+  overflow: hidden;
+  text-shadow: 0 0 3px #000, 0 0 1px #000;
+  outline: none;
+}
+.inline-text::selection {
+  background: #3d8bff99;
+}
+.inline-text.vertical {
+  writing-mode: vertical-rl;
+}
+.stage.text-editing canvas {
+  opacity: 0.4;
+}
+
+/* Free distort (DistortHandles.tsx): lattice through the forward map, Bézier control polygon. */
+.overlay .distort-lattice {
+  fill: none;
+  stroke: #46d7ff;
+  stroke-width: 1;
+  opacity: 0.75;
+  filter: drop-shadow(0 0 1px #000);
+  pointer-events: none;
+}
+.overlay .distort-lattice.edge {
+  stroke-width: 1.5;
+  opacity: 1;
+}
+.overlay .distort-hull {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 0.75;
+  stroke-dasharray: 2 3;
+  opacity: 0.5;
+  pointer-events: none;
+}
+.overlay .handle.distort {
+  fill: #46d7ff;
+  stroke: #000;
+  stroke-width: 1;
+}
+.overlay .handle.distort.inner {
+  fill: #fff;
+}
+.overlay .distort-reset {
+  cursor: pointer;
+  pointer-events: all;
+}
+.overlay .distort-reset rect {
+  fill: #1b1b21e0;
+  stroke: #46d7ff;
+}
+.overlay .distort-reset text {
+  fill: #46d7ff;
+  font-size: 11px;
+  pointer-events: none;
+}
+.overlay .distort-reset:hover rect {
+  fill: #23323e;
+}
+
+/* Glyph gizmo side bars (長体 / 平体). */
+.overlay .handle.glyph.side {
+  fill: var(--accent);
+  stroke: #000;
+  stroke-width: 1;
+}
+
+/* Global Light dial (LightDial.tsx). */
+.overlay .light-dial-ring {
+  fill: #1b1b21b0;
+  stroke: #ffd34a;
+  stroke-width: 1;
+  pointer-events: none;
+}
+.overlay .light-dial-ray {
+  stroke: #ffd34a;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+.overlay .light-dial-centre {
+  fill: #ffd34a;
+}
+.overlay .handle.light {
+  fill: #ffd34a;
+  stroke: #000;
+  stroke-width: 1;
+}
+.overlay .light-dial-label {
+  fill: #ffd34a;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* Effects' reach around the selected layer (glows, shadows): informational only. */
+.overlay .fx-box {
+  fill: none;
+  stroke: var(--accent2);
+  stroke-width: 1;
+  stroke-dasharray: 1 4;
+  opacity: 0.55;
+}
+
+/* Handles (viewport/Handle.tsx): an invisible ≥ 24 px hit circle takes the press; the drawn
+   handle is visual only and lights up while the pointer is over its hit area. */
+.overlay .hh .hit {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+}
+.overlay .hh > :not(.hit) {
+  pointer-events: none;
+}
+.overlay .hh:hover .hit {
+  fill: #ffffff1a;
+  stroke: #ffffff66;
+  stroke-width: 1;
+}
+.overlay .hh:hover .handle {
+  stroke: #fff;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 3px var(--accent2));
+}
+
+/* Files dragged over the canvas (viewport/FileDrop.tsx): the drop zones cover the whole area,
+   above the empty-canvas card (z-index 6), so the drag never falls through to the art. */
+.file-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  background: #0d0d10b3;
+}
+.file-drop-zone {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+  text-align: center;
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+}
+.file-drop-zone.on {
+  border-color: var(--accent);
+  background: #f0b4291a;
+  color: var(--text);
+}
+.file-drop-label {
+  font-size: 18px;
+  font-weight: 600;
+}
+.file-drop-hint {
+  font-size: 12px;
+  max-width: 28em;
+}

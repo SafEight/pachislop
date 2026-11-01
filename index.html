@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Local only: network requests may go to this origin (app files, fonts, HDRI) and to blob: /
+         data: URLs (imported assets), nowhere else. Scripts, workers and images are unrestricted. -->
+    <meta http-equiv="Content-Security-Policy" content="connect-src 'self' blob: data:" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#121216" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pachislop</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/io/pwa.ts"></script>
+  </body>
+</html>

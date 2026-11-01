@@ -1,0 +1,23 @@
+JapanColor2011Coated.icc
+========================
+
+ICC profile "Japan Color 2011 Coated" (ICC v2.4, CMYK output, Lab PCS), unmodified.
+Characterization data: JCS2011 (Japan Color 2011 for sheet-fed offset, ISO 12647-2:2004,
+paper type 1, premium coated). Separation: TAC 350 %, max black 80 %, TVI 14 %.
+
+Profile provider: Japan Printing Machinery Association (JPMA)
+Copyright: X-Rite, Inc. (profile copyright tag: "Copyright X-Rite, Inc.")
+
+Source: ICC Profile Registry, International Color Consortium
+  https://registry.color.org/profile-registry/JapanColor2011Coated
+  https://registry.color.org/profile-registry/profiles/JapanColor2011Coated.icc
+SHA-256: 73202ea802e57a63a0be05ed993fde8e4d51cc436120e6c47815ce785ff42916
+
+License (as published on the registry page above):
+
+  This profile is made available by JPMA, with permission of X-Rite, Incorporated and may be
+  used, embedded, exchanged, and shared without restriction. However, it may not be altered,
+  or sold (whether standing alone or incorporated into commercial products) without written
+  permission of X-Rite.
+
+This application ships the file byte-for-byte as downloaded and does not sell it.

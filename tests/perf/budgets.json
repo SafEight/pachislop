@@ -1,0 +1,26 @@
+{
+  "preview frame: heavy 3D template": {
+    "median": 202.1,
+    "p90": 204.9
+  },
+  "generator: 金粉 (2600 particles)": {
+    "median": 6.5,
+    "p90": 6.9
+  },
+  "Gaussian Blur 200 (effects-only adjustment)": {
+    "median": 5.9,
+    "p90": 6.7
+  },
+  "Deep Glow radius 1000": {
+    "median": 29.4,
+    "p90": 30.6
+  },
+  "interactive drag frame: heavy 3D template": {
+    "median": 3.3,
+    "p90": 3.4
+  },
+  "2× PNG export (encode included): heavy 3D template": {
+    "median": 1772.7,
+    "p90": 1796.5
+  }
+}

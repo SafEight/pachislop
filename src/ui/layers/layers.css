@@ -1,0 +1,468 @@
+/* Layers panel (LayersPanel.tsx) and History panel (HistoryPanel.tsx): each fills its dock tab
+   as a flex column; only the tree / list scrolls. */
+
+.lp {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  outline: none;
+  background: var(--bg1);
+}
+.lp:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent2);
+}
+
+/* ---------- header: blend · opacity / lock · solo · guide ---------- */
+.lp-header {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.lp-header-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+}
+.lp-blend {
+  flex: 1;
+  min-width: 0;
+}
+.lp-opacity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 112px;
+}
+.lp-opacity .numfield {
+  flex: 1;
+  min-width: 0;
+}
+.lp-label {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.lp-muted {
+  color: var(--muted);
+}
+.lp-count {
+  margin-left: auto;
+  font-size: 11px;
+}
+.lp-flag-btn {
+  min-width: 22px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.lp-flag-btn.on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ---------- tree ---------- */
+.lp-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 24px; /* room below the last row to drop to the bottom of the stack */
+}
+.lp-empty {
+  padding: 12px;
+  color: var(--muted);
+}
+.lp-tail-drop {
+  height: 0;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.lp-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--bg0);
+  cursor: default;
+  user-select: none;
+}
+.lp-row:hover {
+  background: var(--bg2);
+}
+.lp-row.sel {
+  background: #263350;
+}
+.lp-row.focus {
+  background: #2f4170;
+  box-shadow: inset 2px 0 0 var(--accent2);
+}
+.lp-row.dimmed .lp-name,
+.lp-row.dimmed .lp-thumb,
+.lp-row.dimmed .lp-swatch {
+  opacity: 0.45;
+}
+.lp-row.guide .lp-name {
+  font-style: italic;
+  color: var(--muted);
+}
+.lp-part,
+.lp-effect {
+  min-height: 22px;
+  font-size: 11.5px;
+}
+.lp-head {
+  min-height: 18px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border-bottom: none;
+  padding-top: 2px;
+}
+.lp-head:hover {
+  background: none;
+}
+
+/* Drop indicators: layer reorder lines, a group's "into" box, effect targets. */
+.lp-row.drop-above {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.lp-row.drop-below {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.lp-row.drop-into,
+.lp-row.drop-fx {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+/* ⌥ held: the line an ⌥-click toggles a clipping mask on. */
+.lp.alt .lp-layer {
+  cursor: alias;
+}
+.lp.alt .lp-row.clip-top {
+  box-shadow: inset 0 2px 0 var(--accent2);
+}
+.lp.alt .lp-row.clip-bottom {
+  box-shadow: inset 0 -2px 0 var(--accent2);
+}
+
+.lp-eye,
+.lp-eye-space {
+  flex: none;
+  width: 18px;
+  text-align: center;
+}
+.lp-eye {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+.lp-eye.on {
+  color: var(--text);
+}
+/* Nesting indent after the eye column; a clipped row's ↳ sits at its right end. */
+.lp-indent {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  margin-left: -4px; /* the row gap stays one gap with or without an indent */
+}
+.lp-clip-arrow {
+  width: 12px;
+  color: var(--accent2);
+  font-weight: 700;
+}
+.lp-thumb {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.lp-thumb.checker {
+  background: repeating-conic-gradient(#5a5a66 0 25%, #74747f 0 50%) 0 0 / 6px 6px;
+}
+/* Rendered to fit inside the border (thumbs.ts THUMB_CSS); never stretched. */
+.lp-thumb canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.lp-thumb-icon {
+  background: var(--bg2);
+  font-size: 13px;
+  color: var(--text);
+}
+.lp-thumb-icon svg {
+  width: 16px;
+  height: 16px;
+}
+/* Mask chips (LayerRow MaskChip): greyscale mask over the comp frame; focus = PS's bracketed thumbnail. */
+.lp-mask {
+  position: relative;
+  margin-left: 2px;
+  background: #000;
+  cursor: pointer;
+}
+.lp-mask.focus {
+  border-color: #fff;
+  box-shadow: 0 0 0 1px var(--accent2);
+}
+.lp-mask.viewing {
+  border-color: var(--accent);
+}
+/* Disabled: crossed out with a red X, as in PS. */
+.lp-mask.off::before,
+.lp-mask.off::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 30px;
+  height: 2px;
+  background: #e0302a;
+  pointer-events: none;
+}
+.lp-mask.off::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.lp-mask.off::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+.lp-mask.drop-before {
+  box-shadow: -2px 0 0 var(--accent);
+}
+.lp-mask.drop-after {
+  box-shadow: 2px 0 0 var(--accent);
+}
+.lp-tool svg {
+  vertical-align: -1px;
+}
+.lp-swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #000a;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px #fff3;
+}
+.lp-fx-icon {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  color: var(--muted);
+  font-style: italic;
+}
+.lp-name-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.lp-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* PS: a clipping base's name is underlined. */
+.lp-name.base {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.lp-rename {
+  width: 100%;
+  min-width: 0;
+}
+.lp-badge {
+  flex: none;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 3px;
+  color: #111;
+  background: #9a9aac;
+}
+.lp-badge.k-title2d {
+  background: #6ad0ff;
+}
+.lp-badge.k-title3d {
+  background: var(--accent);
+}
+.lp-badge.lp-flag {
+  background: var(--bg3);
+  color: var(--text);
+}
+.lp-badge.lp-fx {
+  background: none;
+  color: var(--text);
+  font-style: italic;
+  border: 1px solid var(--line);
+  cursor: grab;
+}
+.lp-lock {
+  flex: none;
+  font-size: 10px;
+}
+.lp-twirl,
+.lp-twirl-space {
+  flex: none;
+  width: 16px;
+}
+.lp-twirl {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+}
+.lp-twirl:hover {
+  color: var(--text);
+}
+
+/* ---------- bottom toolbar ---------- */
+.lp-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 3px 6px;
+  border-top: 1px solid var(--line);
+}
+.lp-tool {
+  min-width: 24px;
+  height: 22px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--muted);
+}
+.lp-tool:hover:not(:disabled),
+.lp-tool.on {
+  background: var(--bg3);
+  color: var(--text);
+}
+.lp-tool-fx {
+  font-style: italic;
+  font-weight: 700;
+}
+.lp-tool-sep {
+  flex: 1;
+}
+
+/* ---------- context / toolbar menus (LayerContextMenu.tsx) ---------- */
+.lp-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 200px;
+  max-width: 340px;
+  overflow-y: auto;
+  padding: 3px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  box-shadow: 0 10px 30px #000a;
+  outline: none;
+}
+.lp-menu-sep {
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--line);
+}
+.lp-mi {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 8px 3px 4px;
+  border: none;
+  background: none;
+  text-align: left;
+}
+.lp-mi:hover:not(:disabled),
+.lp-mi:focus-visible,
+.lp-mi.open {
+  background: var(--accent2);
+  color: #fff;
+  outline: none;
+}
+.lp-mi:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+}
+.lp-mi-check {
+  flex: none;
+  width: 12px;
+}
+/* Item glyphs (generators) take the check column, a little wider. */
+.lp-mi-check:has(svg) {
+  display: flex;
+  width: 16px;
+}
+.lp-menu-head {
+  padding: 5px 8px 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.lp-menu-head:not(:first-child) {
+  margin-top: 3px;
+  border-top: 1px solid var(--line);
+}
+.lp-mi-label {
+  flex: 1;
+}
+.lp-mi-key {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+.lp-mi:hover .lp-mi-key,
+.lp-mi.open .lp-mi-key {
+  color: #dce8ff;
+}
+
+/* ---------- History panel ---------- */
+.hp {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg1);
+}
+.hp-item {
+  flex: none;
+  padding: 4px 10px;
+  border: none;
+  border-bottom: 1px solid var(--bg0);
+  background: none;
+  text-align: left;
+}
+.hp-item:hover {
+  background: var(--bg2);
+}
+.hp-item.current {
+  background: #2c3a55;
+  font-weight: 600;
+}
+.hp-item.undone {
+  color: var(--muted);
+  font-style: italic;
+}

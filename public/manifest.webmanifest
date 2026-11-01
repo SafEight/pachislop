@@ -1,0 +1,12 @@
+{
+  "name": "Pachislop",
+  "short_name": "Pachislop",
+  "description": "Pachinko / pachislot title stills: 2D layer styles and 3D extrusion, entirely offline.",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#121216",
+  "theme_color": "#121216",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
