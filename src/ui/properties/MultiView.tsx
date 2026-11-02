@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { bandKey, isTitleLayer, plateKey, rimKey, type TitleLayer } from '../../model/parts';
+import { bandKey, isTitleLayer, rimKey, type TitleLayer } from '../../model/parts';
 import type { GeneratorLayer, Layer, PartKey, TextSource, Title2DLayer, Title3DLayer } from '../../model/types';
 import { formatMsg } from '../../store/msg';
 import { partLabel } from '../../store/labels';
@@ -131,7 +131,7 @@ interface SharedPart {
   parts: PartKey[];
 }
 
-/** The parts every one of `layers` has, front to back: the face, then rims (2D) or bands, side and plates (3D) by position. */
+/** The parts every one of `layers` has, front to back: the face, then rims (2D) or the side (while any layer owns one) and bands (3D) by position. */
 function sharedParts(layers: readonly TitleLayer[]): SharedPart[] {
   const shared = (id: string, keyOf: (l: TitleLayer) => PartKey): SharedPart => ({ id, parts: layers.map(keyOf) });
   const upTo = (n: number, make: (i: number) => SharedPart) => Array.from({ length: n }, (_, i) => make(i));
@@ -140,20 +140,18 @@ function sharedParts(layers: readonly TitleLayer[]): SharedPart[] {
     return [shared('face', () => 'face'), ...upTo(rims, (i) => shared(`rim-${i}`, (l) => rimKey((l as Title2DLayer).style.rims[i].id)))];
   }
   if (!layers.every((l): l is Title3DLayer => l.kind === 'title3d')) return [];
-  // A GLB model has only its face; bands are parts only in Extrude mode.
+  // A GLB model has only its face.
   if (layers.some((l) => l.source.kind === 'model')) return [shared('face', () => 'face')];
   const style = (l: TitleLayer) => (l as Title3DLayer).style3d;
-  const bands = layers.some((l) => style(l).mode === 'inflate') ? 0 : Math.min(...layers.map((l) => style(l).bands.length));
-  const plates = Math.min(...layers.map((l) => style(l).backplates.length));
+  const bands = Math.min(...layers.map((l) => style(l).bands.length));
   return [
     shared('face', () => 'face'),
+    ...(layers.some((l) => style(l).side) ? [shared('side', () => 'side')] : []),
     ...upTo(bands, (i) => shared(`band-${i}`, (l) => bandKey(style(l).bands[i].id))),
-    shared('side', () => 'side'),
-    ...upTo(plates, (i) => shared(`plate-${i}`, (l) => plateKey(style(l).backplates[i].id))),
   ];
 }
 
-/** One shared part as a collapsible section: its name, the layers it spans, a rim's or band's width, and the part editor over all of them. */
+/** One shared part as a collapsible section: its name, the layers it spans, a rim's width or band's grow, and the part editor over all of them. */
 function SharedPartSection({ layers, part }: { layers: readonly TitleLayer[]; part: SharedPart }) {
   const t = useT();
   const swatches = layers.map((l, i) => partSwatch(l, part.parts[i]));
@@ -170,7 +168,7 @@ function SharedPartSection({ layers, part }: { layers: readonly TitleLayer[]; pa
           <Counted label={label} n={layers.length} />
         </SwatchTitle>
       }
-      actions={width && <PartWidth refs={widths.flatMap((w) => (w ? [w.ref] : []))} max={width.max} label={label} />}
+      actions={width && <PartWidth refs={widths.flatMap((w) => (w ? [w.ref] : []))} max={width.max} grow={width.grow} label={label} />}
     >
       <SectionScope value={partScope(layers[0], [part.parts[0]])}>
         <PartEditor targets={targets} id={`multi-${part.id}`} />

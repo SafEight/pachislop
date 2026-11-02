@@ -5,6 +5,7 @@ import { onEnvironmentReady } from '../../engine/three/environment';
 import { loadModel, modelStatus, onModelReady } from '../../engine/three/Layer3DRenderer';
 import { generatorParams } from '../../generators/registry';
 import { isolate, prepareRender } from '../../io/export';
+import { bandsGrow, letterOutside } from '../../model/bands';
 import { companionsOf, ownGroupOf } from '../../model/companions';
 import { effectiveLighting } from '../../model/lighting';
 import { isTitleLayer } from '../../model/parts';
@@ -269,13 +270,7 @@ function styleReach(layer: Layer): number {
     }
     return w + off;
   }
-  if (layer.kind === 'title3d') {
-    const s = layer.style3d;
-    let w = 0;
-    for (const b of s.bands) w += Math.max(0, b.width);
-    for (const p of s.backplates) if (p.enabled) w += p.grow;
-    return w;
-  }
+  if (layer.kind === 'title3d') return letterOutside(layer.style3d) + bandsGrow(layer.style3d);
   return 0;
 }
 

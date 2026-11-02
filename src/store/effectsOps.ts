@@ -88,8 +88,8 @@ export const effectsSlice: Slice<'addEffect' | 'removeEffect' | 'setEffectEnable
       if (l.kind === 'title2d') {
         if (kind === 'face' && !l.style.hideFace !== enabled) next = { ...l, style: { ...l.style, hideFace: !enabled } };
         if (kind === 'rim' && l.style.rims.some((r) => r.id === id && r.enabled !== enabled)) next = { ...l, style: { ...l.style, rims: flip(l.style.rims) } };
-      } else if (kind === 'plate' && l.style3d.backplates.some((b) => b.id === id && b.enabled !== enabled)) {
-        next = { ...l, style3d: { ...l.style3d, backplates: flip(l.style3d.backplates) } };
+      } else if (kind === 'band' && l.style3d.bands.some((b) => b.id === id && b.enabled !== enabled)) {
+        next = { ...l, style3d: { ...l.style3d, bands: flip(l.style3d.bands) } };
       }
       if (!next) return;
       const layer = next;

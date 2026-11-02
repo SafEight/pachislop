@@ -1,10 +1,10 @@
 import { migrateEffects, migrateStyle2D, migrateStyle3D } from '../io/project';
+import { convertBands, isLegacyStyle3D, type BandsConversion, type LegacyStyle3D } from '../io/migrate/bands';
 import { contentEffectsOfLook } from '../io/migrate/contentEffects';
 import { dedupeEffects } from '../io/migrate/effectDedupe';
 import { migrateMaterialEffects } from '../io/migrate/materialEffects';
 import { uid } from '../model/defaults';
-import { inheritSides } from '../model/sides';
-import type { EffectInstance, Lighting3D } from '../model/types';
+import type { EffectInstance, Lighting3D, Title3DProps } from '../model/types';
 import { fullLighting } from './apply';
 import { msg, MsgError } from '../store/msg';
 import type { PresetPartKey, StylePreset } from './types';
@@ -12,9 +12,10 @@ import type { PresetPartKey, StylePreset } from './types';
 // User style presets ("My Styles"), persisted in localStorage (a preset is a few KB of JSON).
 // Import/export uses a small JSON file format so looks can be shared between machines.
 
-const STORAGE_KEY = 'pachislot-visuals.userPresets.v9';
-/** Read in this order when the v9 key is absent, with the preset version they hold; their presets are migrated (see migratePreset) and written under STORAGE_KEY. */
+const STORAGE_KEY = 'pachislot-visuals.userPresets.v10';
+/** Read in this order when the v10 key is absent, with the preset version they hold; their presets are migrated (see migratePreset) and written under STORAGE_KEY. */
 const OLDER_STORAGE_KEYS = [
+  { key: 'pachislot-visuals.userPresets.v9', version: 9 },
   { key: 'pachislot-visuals.userPresets.v8', version: 8 },
   { key: 'pachislot-visuals.userPresets.v7', version: 7 },
   { key: 'pachislot-visuals.userPresets.v6', version: 6 },
@@ -24,23 +25,38 @@ const OLDER_STORAGE_KEYS = [
 const FILE_FORMAT = 'pachislot-visuals/style-presets';
 export const PRESET_FILE_EXT = '.pslot-styles.json';
 
-type PresetVersion = 4 | 5 | 6 | 7 | 8 | 9;
+type PresetVersion = 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 interface PresetFile {
   format: typeof FILE_FORMAT;
-  /** 9 = sides inherit (model/sides.ts); 8 = lighting as overrides; 7 = looks with companion generators; 4–7 files are read through the project migration. */
+  /** 10 = the letter and its bands (model/bands.ts); 9 = side materials inherit; 8 = lighting as overrides; 7 = looks with companion generators; 4–7 files are read through the project migration. */
   version: PresetVersion;
   presets: StylePreset[];
 }
 
-const PART_POSITION = /^(face|side|(rim|band|plate):\d+)$/;
+const PART_POSITION = /^(face|side|(rim|band):\d+)$/;
+/** Part positions of a look saved with bevel rings and backplates (before v10): 'band:i' = ring i, 'plate:i' = plate i. */
+const LEGACY_PART_POSITION = /^(face|side|(rim|band|plate):\d+)$/;
 
-/** Stored part effects with malformed keys and empty / non-list values dropped (v4 / v5 looks have none). */
-function migratePartEffects(raw: unknown): StylePreset['partEffects'] {
+/** Position `key` of a look saved with rings and backplates in its converted style: a ring folded into the letter is the face (its list joins the face's). */
+function convertedPosition(key: string, conv: BandsConversion): PresetPartKey {
+  if (key === 'face' || key.startsWith('rim:')) return key as PresetPartKey;
+  const [kind, index] = key.split(':');
+  const to = conv.part(kind === 'side' ? 'side' : { kind: kind as 'band' | 'plate', index: Number(index) });
+  return typeof to === 'number' ? `band:${to}` : to;
+}
+
+/**
+ * Stored part effects with malformed keys and empty / non-list values dropped (v4 / v5 looks have
+ * none); `conv`: the look's style was converted from rings and backplates, its positions follow.
+ */
+function migratePartEffects(raw: unknown, conv: BandsConversion | null): StylePreset['partEffects'] {
   const out: StylePreset['partEffects'] = {};
   if (!isObj(raw)) return out;
   for (const [key, list] of Object.entries(raw)) {
-    if (PART_POSITION.test(key) && Array.isArray(list) && list.length) out[key as PresetPartKey] = migrateMaterialEffects(dedupeEffects(migrateEffects(list as EffectInstance[])));
+    if (!(conv ? LEGACY_PART_POSITION : PART_POSITION).test(key) || !Array.isArray(list) || !list.length) continue;
+    const pos = conv ? convertedPosition(key, conv) : (key as PresetPartKey);
+    out[pos] = [...(out[pos] ?? []), ...migrateMaterialEffects(dedupeEffects(migrateEffects(list as EffectInstance[])))];
   }
   return out;
 }
@@ -52,17 +68,20 @@ function migratePartEffects(raw: unknown): StylePreset['partEffects'] {
  * (contentEffectsOfLook); v4 / v5 looks get no part effects. Saved before v8: its 3D lighting
  * becomes overrides as a project's does (a look's lighting is complete, so it sets every value).
  * 3D looks saved before per-layer lighting kept theirs in `comp` (applied to the comp): it
- * becomes their style3d.lighting, completed with the default comp's. Saved before v9: sides
- * equal to their neighbour inherit, as in a project (the v10 notes in io/project.ts).
+ * becomes their style3d.lighting, completed with the default comp's. Saved before v10 (bevel
+ * rings and backplates): the style converts to the letter and its bands as a project's does
+ * (convertBands, which also lets sides equal to their neighbour inherit), its part positions with it.
  */
 function migratePreset(stored: StylePreset & { comp?: Partial<Lighting3D> }, version: PresetVersion): StylePreset {
   const { comp, ...p } = stored;
-  const filledStyle = p.style3d && (version < 8 ? migrateStyle3D({ ...p.style3d, lighting: p.style3d.lighting ?? fullLighting(comp ?? {}) }, { docBlur: 0 }) : migrateStyle3D(p.style3d));
-  const style3d = filledStyle && version < 9 ? inheritSides(filledStyle) : filledStyle;
+  const raw = p.style3d as Title3DProps | LegacyStyle3D | undefined;
+  const filled = raw && (version < 8 ? migrateStyle3D({ ...raw, lighting: raw.lighting ?? fullLighting(comp ?? {}) }, { docBlur: 0 }) : migrateStyle3D(raw));
+  const conv = filled && isLegacyStyle3D(filled) ? convertBands(filled) : null;
+  const style3d = conv ? conv.style3d : (filled as Title3DProps | undefined);
   return contentEffectsOfLook({
     ...p,
     effects: migrateMaterialEffects(dedupeEffects(migrateEffects(p.effects))),
-    partEffects: migratePartEffects(p.partEffects),
+    partEffects: migratePartEffects(p.partEffects, conv),
     ...(p.style ? { style: migrateStyle2D(p.style) } : {}),
     ...(style3d ? { style3d } : {}),
   });
@@ -77,7 +96,7 @@ function readList(key: string, version: PresetVersion): StylePreset[] | null {
 
 function load(): StylePreset[] {
   try {
-    const current = readList(STORAGE_KEY, 9);
+    const current = readList(STORAGE_KEY, 10);
     if (current) return current;
     for (const { key, version } of OLDER_STORAGE_KEYS) {
       const older = readList(key, version);
@@ -178,14 +197,22 @@ const isBevelShape3D = (v: unknown) => isObj(v) && typeof v.profile === 'string'
 const isStyle2D = (v: unknown) =>
   isObj(v) && isMaterial2D(v.face) && Array.isArray(v.rims) && v.rims.every((r) => isObj(r) && typeof r.width === 'number' && isMaterial2D(r.material));
 
+const isOwnSide = (v: unknown) => v === undefined || isMaterial3D(v);
+
+/** The letter and its bands (v10), or bevel rings and backplates (before v10, converted on load). */
+const isSolids3D = (v: Obj) =>
+  Array.isArray(v.bands) &&
+  ('backplates' in v
+    ? v.bands.every((b) => isBevelShape3D(b) && isMaterial3D((b as Obj).material)) &&
+      Array.isArray(v.backplates) &&
+      v.backplates.every((p) => isObj(p) && isBevelShape3D(p.bevel) && isMaterial3D(p.face) && isOwnSide(p.side))
+    : isBevelShape3D(v.bevel) && v.bands.every((b) => isObj(b) && isBevelShape3D(b.bevel) && isMaterial3D(b.material) && isOwnSide(b.side)));
+
 const isStyle3D = (v: unknown) =>
   isObj(v) &&
   isMaterial3D(v.face) &&
-  (v.side === undefined || isMaterial3D(v.side)) &&
-  Array.isArray(v.bands) &&
-  v.bands.every((b) => isBevelShape3D(b) && isMaterial3D((b as Obj).material)) &&
-  Array.isArray(v.backplates) &&
-  v.backplates.every((p) => isObj(p) && isBevelShape3D(p.bevel) && isMaterial3D(p.face) && (p.side === undefined || isMaterial3D(p.side))) &&
+  isOwnSide(v.side) &&
+  isSolids3D(v) &&
   isObj(v.skew) &&
   has(v.skew, 'number', ['x', 'y']) &&
   isObj(v.ao) &&
@@ -240,7 +267,7 @@ export function deleteUserPreset(id: string) {
 }
 
 export function exportUserPresets(): Blob {
-  const file: PresetFile = { format: FILE_FORMAT, version: 9, presets: [...presets] };
+  const file: PresetFile = { format: FILE_FORMAT, version: 10, presets: [...presets] };
   return new Blob([JSON.stringify(file, null, 1)], { type: 'application/json' });
 }
 
@@ -260,8 +287,8 @@ export function importUserPresets(text: string): number {
     throw new MsgError(msg('Not a style preset file'));
   }
   const version = file.version;
-  if (version !== 4 && version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== 9)
-    throw new MsgError(msg('Unsupported preset file version {version} (expected 4 to 9)', { version: String(version) }));
+  if (version !== 4 && version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== 9 && version !== 10)
+    throw new MsgError(msg('Unsupported preset file version {version} (expected 4 to 10)', { version: String(version) }));
   const valid = file.presets.filter(isPreset).map((p) => ({ ...migratePreset(p, version), id: `user-${uid()}`, builtin: false }));
   if (valid.length === 0) throw new MsgError(msg('The file contains no usable presets'));
   commit([...presets, ...valid]);

@@ -11,8 +11,8 @@ import { compressHdrOutput } from './hdrResolve';
 //    by `specBoost` (Specular Multiplier); diffuse is untouched.
 // 2. Layer-space gradient: when the material has a gradient, the base colour is the
 //    gradient (linear / radial / reflected, Fill.scale / offset semantics) over a span box in
-//    layer space: 'layer' = the PART's bounds (so a face gradient spans the face, a band
-//    gradient spans that band); 'line' / 'char' = the per-vertex glyph boxes Geo3D records
+//    layer space: 'layer' = the PART's bounds (so a face gradient spans the face and bevel, a
+//    band gradient spans that band); 'line' / 'char' = the per-vertex glyph boxes Geo3D records
 //    in the aSpanLine / aSpanChar attributes (geometry without them falls back to 'layer').
 //    gradientAxis 'depth' runs the ramp front → back instead, from the per-vertex part z
 //    range Geo3D records in aZRange (side walls fading red → black); geometry without it
@@ -20,17 +20,17 @@ import { compressHdrOutput } from './hdrResolve';
 //    The emissive radiance is tinted by the same gradient colour, so a white emissive lifts
 //    the gradient's own hues (self-lit rainbow) instead of washing them out.
 // 2b. Image projection (USE_FACEIMAGE; Title3DProps.faceImage on an image source's face slots,
-//    edgeImage on its band and side slots): the picture projected straight on along z in the
+//    edgeImage on its bevel and side slots): the picture projected straight on along z in the
 //    mesh's own (unsheared) layer space, over the box the outline was traced in
 //    (src/text/trace.ts), so it registers with the extruded silhouette and wraps an inflated
 //    front the same way. Its colour replaces the base colour by the amount (after the gradient,
 //    before the pattern), so the slot's metalness, roughness and clearcoat light it. Face: the
 //    texture is premultiplied (filtering never pulls in the colour of transparent pixels) and
 //    un-premultiplied per sample; samples fainter than the traced edge alpha fade back to the
-//    face material (despeckled holes, filtered rims). Bands and sides (FACEIMAGE_EDGE): every
+//    face material (despeckled holes, filtered rims). Bevels and sides (FACEIMAGE_EDGE): every
 //    texel holds the colour of the nearest pixel inside the traced edge, opaque, so a side wall
-//    shows the colour of its outline point along the whole depth and bands grown outside the
-//    outline keep the colour of the edge they grow from (Element 3D extruded logos).
+//    shows the colour of its outline point along the whole depth and a bevel grown outside the
+//    outline keeps the colour of the edge it grows from (Element 3D extruded logos).
 // 3. Pattern (柄): the shared 2D/3D pattern GLSL (engine/patterns.ts) projected front-on in
 //    layer space recolours the base colour; `shade` keeps that much of the lighting on the
 //    marks (0 = flat print), `relief` bumps the normal along the pattern height.
@@ -713,13 +713,13 @@ export interface PartSpace {
 
 /** A picture projected straight on (Title3DProps.faceImage / edgeImage, header 2b). */
 export interface ImageProjection {
-  /** faceImageTexture (face slots) or edgeImageTexture (band and side slots) of the source bitmap. */
+  /** faceImageTexture (face slots) or edgeImageTexture (bevel and side slots) of the source bitmap. */
   texture: THREE.Texture;
   /** Layer-space box the picture fills, y-up: the fitted image box the outline was traced in. */
   box: { x0: number; y0: number; x1: number; y1: number };
   /** How much of the picture replaces the base colour, 0..1. */
   amount: number;
-  /** Face: alpha 0..1 of the traced edge (ImageSource.trace.threshold / 255). Bands and sides: null (the edge texture is opaque). */
+  /** Face: alpha 0..1 of the traced edge (ImageSource.trace.threshold / 255). Bevels and sides: null (the edge texture is opaque). */
   edge: number | null;
 }
 
@@ -770,7 +770,7 @@ export function faceImageTexture(bmp: ImageBitmap): THREE.Texture {
 }
 
 /**
- * Opaque, mipmapped GPU texture of an image source's bitmap for the bands and sides (header
+ * Opaque, mipmapped GPU texture of an image source's bitmap for the bevels and sides (header
  * 2b): every texel takes the straight colour of the nearest pixel whose alpha reaches
  * `threshold` (0..255, the traced edge), raw sRGB, rows top → bottom. Shared by every renderer;
  * rebuilt (the old one disposed) when the threshold changes.
@@ -852,7 +852,7 @@ function nearestInsideColours(px: Uint8ClampedArray, w: number, h: number, thres
   return out;
 }
 
-/** Project `img` on `m`, or with null nothing (backplates, other sources, amount 0). */
+/** Project `img` on `m`, or with null nothing (bands, other sources, amount 0). */
 export function applyImageProjection(m: PartMaterial, img: ImageProjection | null) {
   const on = img !== null && img.amount > 0;
   setDefine(m, 'USE_FACEIMAGE', on);

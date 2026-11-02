@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { migrateEffects, migrateProject, parseProjectFile, toBase64 } from '../../src/io/project';
-import { backplate3D, band3D, createBackgroundLayer, createProject, createTitle2DLayer, createTitle3DLayer, imageSource, material2D, material3D, solidFill } from '../../src/model/defaults';
-import { charSide, plateSide, sideMaterial } from '../../src/model/sides';
-import type { CharAdjust, EffectInstance, Material2D, Material3D, Project, Title2DLayer, Title3DLayer, Title3DProps } from '../../src/model/types';
+import { band3D, createBackgroundLayer, createProject, createTitle2DLayer, createTitle3DLayer, imageSource, material2D, material3D, solidFill } from '../../src/model/defaults';
+import { charBandSide, charSide, sideMaterial } from '../../src/model/bands';
+import type { Band3D, CharAdjust, EffectInstance, Material2D, Material3D, Project, Title2DLayer, Title3DLayer } from '../../src/model/types';
 
 // Loose JSON as it comes out of an older file.
 type Json = Record<string, any>;
@@ -23,7 +23,7 @@ function currentProject(): Project {
   };
   const t3 = p.layers[1] as Title3DLayer;
   t3.style3d.bevelPosition = 'inside';
-  t3.style3d.backplates = [backplate3D(4, 'chrome')];
+  t3.style3d.bands = [{ ...band3D(4, 'chrome'), fillCounters: true, depth: 10, bevel: { width: 1.5, depth: 1.5, profile: 'round', segments: 6, curve: 0 } }];
   if (t3.source.kind !== 'text') throw new Error('expected text');
   t3.source.tateChuYoko = false;
   t3.source.chars = { 0: { dx: 1, dy: 0, scale: 1.2, rotate: 0, face3d: { ...t3.style3d.face } } };
@@ -47,7 +47,9 @@ function currentProject(): Project {
 
 /**
  * `p` as an older `version` file would store it: every field added since v4 removed (no per-layer
- * or per-part lighting), and every 3D side stored (v4–v9 had no inherited sides).
+ * or per-part lighting), every 3D side stored (v4–v9 had no inherited sides), and 3D styles in
+ * the v4–v10 shape: the letter's bevel as its one ring (in the face's material) and the bands as
+ * backplates, which the v11 conversion reads back exactly.
  */
 function v4Like(p: Project, version: number): Json {
   const j: Json = structuredClone(p);
@@ -93,18 +95,30 @@ function v4Like(p: Project, version: number): Json {
         strip2D(r.material);
       }
     } else {
-      const s3 = l.style3d;
+      const { bevel, bands, side, ...s3 }: Json = l.style3d;
       for (const k of ['mode', 'inflate', 'envLock', 'bevelPosition', 'faceImage', 'edgeImage', 'lighting']) delete s3[k];
-      s3.side ??= structuredClone(s3.bands.at(-1)?.material ?? s3.face);
-      for (const b of s3.backplates) b.side ??= structuredClone(b.face);
+      s3.bands = [{ id: 'ring', ...bevel, material: structuredClone(s3.face) }];
+      s3.side = side ?? structuredClone(s3.face);
+      s3.backplates = bands.map((b: Band3D) => ({
+        id: b.id,
+        enabled: b.enabled,
+        grow: b.grow,
+        join: b.join,
+        fillCounters: b.fillCounters,
+        depth: b.depth,
+        zGap: b.offset,
+        bevel: b.bevel,
+        face: b.material,
+        side: b.side ?? structuredClone(b.material),
+      }));
       strip3D(s3.face);
       strip3D(s3.side);
       for (const b of s3.bands) strip3D(b.material);
       for (const b of s3.backplates) {
-        delete b.plate;
         strip3D(b.face);
         strip3D(b.side);
       }
+      l.style3d = s3;
     }
   }
   return j;
@@ -118,7 +132,7 @@ describe('migrateProject', () => {
     expect(JSON.stringify(old)).not.toMatch(/useGlobalLight|tateChuYoko|bevelPosition|gradientAxis|"surface"|"clip"|partEffects|"trace"|"dpi"|"erode"|"plate"|"weight"/);
     const snapshot = structuredClone(old);
     const got = migrateProject(old);
-    expect(got.version).toBe(10);
+    expect(got.version).toBe(11);
     expect(got).toEqual(want);
     // The input is not modified.
     expect(old).toEqual(snapshot);
@@ -179,11 +193,11 @@ describe('migrateProject', () => {
   });
 
   it.each([1, 2, 3])('refuses a version %i project, naming the version and the supported ones', (version) => {
-    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(new RegExp(`version ${version} project.*version 4 to 10`));
+    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(new RegExp(`version ${version} project.*version 4 to 11`));
   });
 
-  it.each([11, 0, '7', undefined])('refuses version %s as unsupported', (version) => {
-    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(/Unsupported project version .* \(expected 4 to 10\)/);
+  it.each([12, 0, '7', undefined])('refuses version %s as unsupported', (version) => {
+    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(/Unsupported project version .* \(expected 4 to 11\)/);
   });
 
   it('refuses non-projects', () => {
@@ -208,7 +222,7 @@ describe('v8 → v9 tiltY', () => {
 
   it('negates a v8 glyph’s tiltY and keeps its other 3D adjustments', () => {
     const got = migrateProject(withChars(8, { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, tiltX: 12, tiltY: 20, dz: 5 } }));
-    expect(got.version).toBe(10);
+    expect(got.version).toBe(11);
     expect(charsOf(got)[0]).toMatchObject({ tiltX: 12, tiltY: -20, dz: 5 });
   });
 
@@ -226,75 +240,167 @@ describe('v8 → v9 tiltY', () => {
   });
 });
 
-describe('v9 → v10 inherited sides', () => {
+describe('v10 → v11: the letter and its bands', () => {
   const mat = (preset: Material3D['preset'], o: Partial<Material3D> = {}): Material3D => ({ ...material3D(preset), ...o });
-  /** A 3D text title stored as `version` with `style` over the default one and letters `chars`. */
-  const stored = (version: number, style: Partial<Title3DProps>, chars: Record<number, CharAdjust> = {}): Json => {
+  const ring = (id: string, width: number, depth: number, material: Material3D, profile = 'round'): Json => ({ id, width, depth, profile, segments: 6, curve: 0, material });
+  const plate = (id: string, o: Json = {}): Json => ({
+    id,
+    enabled: true,
+    grow: 4,
+    join: 'round',
+    fillCounters: true,
+    plate: { kind: 'box', close: 0, corner: 2, slant: 8 },
+    depth: 7,
+    zGap: 1.5,
+    bevel: { width: 0.8, depth: 1.2, profile: 'chamfer', segments: 3, curve: 0.2 },
+    face: mat('blackGloss'),
+    ...o,
+  });
+  /** A v10 project: one 3D text title with rings `bands`, `backplates` and the old fields in `style`, letters `chars`, part effects `fx`. */
+  const stored = (style: Json, chars: Record<number, CharAdjust> = {}, fx: Json = {}): Json => {
     const t3 = createTitle3DLayer('確定');
     if (t3.source.kind !== 'text') throw new Error('expected text');
     t3.source.chars = chars;
-    return { ...structuredClone({ ...createProject(), layers: [{ ...t3, style3d: { ...t3.style3d, ...style } }] }), version };
+    const { bevel: _, bands: __, side: ___, ...rest } = t3.style3d;
+    const style3d = { ...rest, face: mat('gold'), depth: 10, bevelPosition: 'outside', bands: [], backplates: [], ...style };
+    return { ...structuredClone({ ...createProject(), layers: [{ ...t3, style3d, partEffects: fx }] }), version: 10 };
   };
-  const style = (p: Project) => (p.layers[0] as Title3DLayer).style3d;
+  const layerOf = (p: Project) => p.layers[0] as Title3DLayer;
   const charsOf = (p: Project) => {
-    const t3 = p.layers[0] as Title3DLayer;
+    const t3 = layerOf(p);
     if (t3.source.kind !== 'text') throw new Error('expected text');
     return t3.source.chars;
   };
-  const band = (m: Material3D) => ({ ...band3D(1, 1, 'custom', 'round'), material: m });
-  const plate = (face: Material3D, side: Material3D) => ({ ...backplate3D(2, 'custom'), face, side });
+  const dark = mat('custom', { color: '#3a1000', metalness: 1 });
 
-  it('a side equal to its outermost band, a plate edge equal to its front and a bandless side equal to the face inherit', () => {
-    const gold = mat('gold', { link: 'g' });
-    const got = migrateProject(stored(9, { bands: [band(mat('chrome')), band(gold)], side: { ...gold }, backplates: [plate(mat('blackGloss'), mat('blackGloss'))] }));
-    expect(got.version).toBe(10);
-    expect(style(got)).not.toHaveProperty('side');
-    expect(style(got).backplates[0]).not.toHaveProperty('side');
-    expect(sideMaterial(style(got))).toEqual(gold);
-    const flat = migrateProject(stored(9, { bands: [], face: mat('silver'), side: mat('silver') }));
-    expect(style(flat)).not.toHaveProperty('side');
+  it('backplates become bands exactly', () => {
+    const p1 = plate('p1');
+    const p2 = plate('p2', { enabled: false, grow: 2, join: 'miter', fillCounters: false, zGap: -3, face: mat('chrome'), side: mat('redMetal') });
+    const got = layerOf(migrateProject(stored({ backplates: [p1, p2] }))).style3d;
+    expect(got.bevel.width).toBe(0);
+    expect(got.depth).toBe(10);
+    const asBand = (p: Json): Band3D => ({
+      id: p.id,
+      enabled: p.enabled,
+      grow: p.grow,
+      join: p.join,
+      fillCounters: p.fillCounters,
+      shape: p.plate,
+      depth: p.depth,
+      offset: p.zGap,
+      bevel: p.bevel,
+      material: p.face,
+      ...(p.side ? { side: p.side } : {}),
+    });
+    expect(got.bands).toEqual([asBand(p1), asBand(p2)]);
   });
 
-  it('a side with another material or its own link stays, and so does an edge unlike its front', () => {
-    const other = migrateProject(stored(9, { bands: [band(mat('gold'))], side: mat('redMetal'), backplates: [plate(mat('gold'), mat('chrome'))] }));
-    expect(style(other).side?.preset).toBe('redMetal');
-    expect(style(other).backplates[0].side?.preset).toBe('chrome');
-    const linked = migrateProject(stored(9, { bands: [band(mat('gold'))], side: mat('gold', { link: 'own' }) }));
-    expect(style(linked).side?.link).toBe('own');
+  it('the first ring in the face’s material folds into the letter; the others become bands seated on the previous bevel, ending at the old back', () => {
+    const old = stored({ bands: [ring('r1', 1.6, 1.6, mat('gold', { link: 'g' }), 'chamfer'), ring('r2', 0.3, 0.6, dark, 'step'), ring('r3', 1, 1.2, mat('redMetal'))], backplates: [plate('p1')] });
+    const s = layerOf(migrateProject(old)).style3d;
+    expect(s.bevel).toEqual({ width: 1.6, depth: 1.6, profile: 'chamfer', segments: 6, curve: 0 });
+    expect(s.bevelPosition).toBe('outside');
+    // the old back: 10 behind the rings' end (1.6 + 0.6 + 1.2)
+    expect(s.depth).toBeCloseTo(10 + 0.6 + 1.2, 9);
+    expect(s.bands.map((b) => b.id)).toEqual(['r2', 'r3', 'p1']);
+    const [r2, r3, p1] = s.bands;
+    expect(r2).toMatchObject({ enabled: true, grow: 0.3, join: 'miter', fillCounters: false, shape: { kind: 'contour' }, bevel: { width: 0.3, depth: 0.6, profile: 'step' }, material: dark });
+    expect(r2.offset).toBeCloseTo(-s.depth, 9);
+    expect(r2.depth).toBeCloseTo(11.2, 9);
+    expect(r3.offset).toBeCloseTo(-r2.depth, 9);
+    expect(r3.depth).toBe(10);
+    // no own side: the old side wall showed the outermost ring, now that band's own material
+    expect(r3).not.toHaveProperty('side');
+    expect(s).not.toHaveProperty('side');
+    // 'outside' rings reach exactly as far as before: the plate keeps its grow
+    expect(p1.grow).toBe(4);
+    expect(p1.offset).toBe(1.5);
   });
 
-  it('letters keep the side they showed: an equal own side inherits, a letter owning its outermost band gets a copy', () => {
-    const gold = mat('gold');
+  it('the old side wall goes onto the outermost converted band, or onto the letter without one', () => {
+    const red = mat('redMetal');
+    const banded = layerOf(migrateProject(stored({ bands: [ring('r1', 1, 1, mat('gold')), ring('r2', 0.5, 0.5, dark)], side: red }))).style3d;
+    expect(banded.bands[0].side).toEqual(red);
+    expect(banded).not.toHaveProperty('side');
+    const bare = layerOf(migrateProject(stored({ bands: [ring('r1', 1, 1, mat('gold'))], side: red }))).style3d;
+    expect(bare.side).toEqual(red);
+    expect(bare.bands).toEqual([]);
+  });
+
+  it('a first ring unlike the face becomes a band too; the letter keeps no bevel', () => {
+    const s = layerOf(migrateProject(stored({ bands: [ring('r1', 0.3, 0.4, mat('whiteGloss')), ring('r2', 1.6, 1.6, mat('gold'))] }))).style3d;
+    expect(s.bevel.width).toBe(0);
+    expect(s.bands.map((b) => [b.id, b.grow])).toEqual([
+      ['r1', 0.3],
+      ['r2', 1.6],
+    ]);
+    expect(s.bands[0].offset).toBeCloseTo(-s.depth, 9);
+  });
+
+  it('inside rings: the letter takes the closest position and the plates keep their outer edge', () => {
+    const s = layerOf(migrateProject(stored({ bevelPosition: 'inside', bands: [ring('r1', 1, 1, mat('gold')), ring('r2', 0.5, 0.5, dark)], backplates: [plate('p1', { grow: 2 })] }))).style3d;
+    expect(s.bevelPosition).toBe('inside');
+    // the ring now grows 0.5 past the outline, where the old stack ended on it
+    expect(s.bands[1].grow).toBeCloseTo(1.5, 9);
+  });
+
+  it('in inflate mode the rings past the bevel become bands switched off, and the side wall is the letter’s', () => {
+    const s = layerOf(migrateProject(stored({ mode: 'inflate', bands: [ring('r1', 1, 1, mat('gold')), ring('r2', 0.5, 0.5, dark)], backplates: [plate('p1')] }))).style3d;
+    expect(s.bevel.width).toBe(1);
+    expect(s.depth).toBe(10);
+    expect(s.bands.map((b) => [b.id, b.enabled])).toEqual([
+      ['r2', false],
+      ['p1', true],
+    ]);
+    expect(s.side).toEqual(dark);
+    expect(s.bands[1].grow).toBe(4);
+  });
+
+  it('part effects follow their parts', () => {
+    const fx = (n: number) => [effect('outerGlow', { size: n })];
+    const old = stored({ bands: [ring('r1', 1, 1, mat('gold')), ring('r2', 0.5, 0.5, dark)], backplates: [plate('p1')] }, {}, { face: fx(1), 'band:r1': fx(2), 'band:r2': fx(3), side: fx(4), 'plate:p1': fx(5) });
+    const got = layerOf(migrateProject(old)).partEffects;
+    const sizes = (k: keyof typeof got) => got[k]!.map((e) => e.params.size);
+    expect(Object.keys(got).sort()).toEqual(['band:p1', 'band:r2', 'face']);
+    expect(sizes('face')).toEqual([1, 2]);
+    expect(sizes('band:r2')).toEqual([3, 4]);
+    expect(sizes('band:p1')).toEqual([5]);
+  });
+
+  it('letters keep their ring overrides on the converted bands and the side they showed', () => {
+    const white = mat('whiteGloss');
+    const red = mat('redMetal');
     const chars: Record<number, CharAdjust> = {
-      0: { dx: 0, dy: 0, scale: 1, rotate: 0, face3d: mat('whiteGloss'), side3d: { ...gold, link: 'g' } },
-      1: { dx: 0, dy: 0, scale: 1, rotate: 0, bands3d: [mat('redMetal')] },
-      2: { dx: 0, dy: 0, scale: 1, rotate: 0, bands3d: [mat('redMetal')], side3d: mat('redMetal') },
-      3: { dx: 0, dy: 0, scale: 1, rotate: 0, side3d: { ...gold } },
+      0: { dx: 0, dy: 0, scale: 1, rotate: 0, face3d: white, bands3d: [white, white] },
+      1: { dx: 0, dy: 0, scale: 1, rotate: 0, side3d: red },
     };
-    const old = stored(9, { bands: [band({ ...gold, link: 'g' })], side: { ...gold, link: 'g' } }, chars);
-    const oldStyle = old.layers[0].style3d as Title3DProps;
-    const got = migrateProject(old);
-    expect(style(got)).not.toHaveProperty('side');
+    const rings = [ring('r1', 1, 1, mat('gold')), ring('r2', 0.5, 0.5, dark)];
+    const got = migrateProject(stored({ bands: rings, backplates: [plate('p1')] }, chars));
+    const s = layerOf(got).style3d;
     const c = charsOf(got);
-    // 0's own side deep-equals its new neighbour, the layer's band (link included)
+    // 0's first ring is its face: the ring folds; its second ring is band 0 and covers that band's side wall
+    expect(s.bevel.width).toBe(1);
+    expect(c[0].bands3d).toEqual([white]);
+    expect(charBandSide(s, c[0], 0)).toEqual(white);
     expect(c[0]).not.toHaveProperty('side3d');
-    // 1 owns its band but showed the layer's side: it keeps an unlinked copy of it
-    expect(c[1].side3d).toEqual(gold);
-    // 2's own side equals its own band, its neighbour now
-    expect(c[2]).not.toHaveProperty('side3d');
-    // 3's own side lacks the band's link: it stays
-    expect(c[3].side3d).toEqual(gold);
-    // every letter shows what it showed (the renders stay the same)
-    for (const k of [0, 1, 2, 3]) expect({ ...charSide(style(got), c[k]), link: undefined }).toEqual({ ...(chars[k].side3d ?? oldStyle.side!), link: undefined });
+    expect(charSide(s, c[0])).toEqual(white);
+    // 1's own wall sat on the outer edge, now inside band 0: it has nowhere to show
+    expect(c[1]).not.toHaveProperty('side3d');
+    // without converted rings a letter keeps its own wall
+    const bare = migrateProject(stored({ bands: [ring('r1', 1, 1, mat('gold'))] }, chars));
+    expect(charsOf(bare)[1].side3d).toEqual(red);
+    expect(sideMaterial(layerOf(bare).style3d)).toEqual(mat('gold'));
   });
 
-  it('v10 data keeps an owned side equal to its neighbour; migrating twice equals once', () => {
-    const gold = mat('gold');
-    const v10 = migrateProject(stored(10, { bands: [band(gold)], side: { ...gold }, backplates: [plate(gold, { ...gold })] }));
-    expect(style(v10).side).toEqual(gold);
-    expect(plateSide(style(v10).backplates[0])).toEqual(gold);
-    expect(style(v10).backplates[0].side).toEqual(gold);
-    const once = migrateProject(stored(9, { bands: [band(gold)], side: { ...gold } }, { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, bands3d: [mat('chrome')] } }));
+  it('a ring overridden unlike the face on some letter does not fold', () => {
+    const chars: Record<number, CharAdjust> = { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, bands3d: [mat('redMetal')] } };
+    const got = migrateProject(stored({ bands: [ring('r1', 1, 1, mat('gold'))] }, chars));
+    expect(layerOf(got).style3d.bevel.width).toBe(0);
+    expect(charsOf(got)[0].bands3d).toEqual([mat('redMetal')]);
+  });
+
+  it('migrating twice equals once', () => {
+    const once = migrateProject(stored({ bands: [ring('r1', 1, 1, mat('gold')), ring('r2', 0.5, 0.5, dark)], backplates: [plate('p1')], side: mat('redMetal') }, { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, bands3d: [null, mat('chrome')] } }));
     expect(migrateProject(once)).toEqual(once);
   });
 });
@@ -371,7 +477,7 @@ describe('parseProjectFile', () => {
   it('upgrades an older file and notes it; decodes embedded blobs', () => {
     const b = parseProjectFile(file(4));
     expect(b.version).toBe(4);
-    expect(b.project.version).toBe(10);
+    expect(b.project.version).toBe(11);
     expect(b.notes).toHaveLength(1);
     expect([...new Uint8Array(b.fonts[0].data)]).toEqual([1, 2, 3]);
     expect(b.assets[0]).toMatchObject({ id: 'a1', mime: 'application/octet-stream' });
@@ -379,11 +485,11 @@ describe('parseProjectFile', () => {
   });
 
   it('a current file has no notes', () => {
-    expect(parseProjectFile(file(10)).notes).toEqual([]);
+    expect(parseProjectFile(file(11)).notes).toEqual([]);
   });
 
   it('refuses a file whose version disagrees with its project, and non-JSON', () => {
-    expect(() => parseProjectFile(file(10, 4))).toThrow(/Unsupported project version 10/);
+    expect(() => parseProjectFile(file(11, 4))).toThrow(/Unsupported project version 11/);
     expect(() => parseProjectFile('{')).toThrow('JSON parse failed');
     expect(() => parseProjectFile('{"format":"other"}')).toThrow('Not a Pachislop project file');
   });

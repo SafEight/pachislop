@@ -7,9 +7,9 @@ export type TitleLayer = Title2DLayer | Title3DLayer;
 
 export const isTitleLayer = (l: Layer | null | undefined): l is TitleLayer => l?.kind === 'title2d' || l?.kind === 'title3d';
 
-export type PartKind = 'face' | 'rim' | 'band' | 'side' | 'plate';
+export type PartKind = 'face' | 'rim' | 'band' | 'side';
 
-/** Kind and element id (rim / band / plate id; null for face and side) of a part key. */
+/** Kind and element id (rim / band id; null for face and side) of a part key. */
 export function parsePartKey(key: PartKey): { kind: PartKind; id: string | null } {
   const i = key.indexOf(':');
   if (i < 0) return { kind: key as 'face' | 'side', id: null };
@@ -18,26 +18,22 @@ export function parsePartKey(key: PartKey): { kind: PartKind; id: string | null 
 
 export const rimKey = (id: string): PartKey => `rim:${id}`;
 export const bandKey = (id: string): PartKey => `band:${id}`;
-export const plateKey = (id: string): PartKey => `plate:${id}`;
 
 /**
  * Every part the layer's style has, BACK to FRONT — the order the renderers stack them and the
  * order the engine composites per-part effect results in.
  * 2D: rims outermost first (rims are listed innermost first), then the face (absent when
- * `style.hideFace`). 3D: plates outermost first (listed innermost first), the side walls, the
- * bands from the side toward the face (listed face edge → side), then the face. Disabled
- * rims / plates are still parts (they can be re-enabled); renderers draw nothing for them.
+ * `style.hideFace`). 3D: bands outermost first (listed innermost first), the letter's side
+ * walls, then its face (and bevel). Disabled rims / bands are still parts (they can be
+ * re-enabled); renderers draw nothing for them.
  */
 export function layerParts(l: TitleLayer): PartKey[] {
   if (l.kind === 'title2d') {
     const rims = [...l.style.rims].reverse().map((r) => rimKey(r.id));
     return l.style.hideFace ? rims : [...rims, 'face'];
   }
-  const s = l.style3d;
-  const plates = [...s.backplates].reverse().map((p) => plateKey(p.id));
-  // Inflate mode ignores the bands: they are not parts then.
-  const bands = s.mode === 'inflate' ? [] : [...s.bands].reverse().map((b) => bandKey(b.id));
-  return [...plates, 'side', ...bands, 'face'];
+  const bands = [...l.style3d.bands].reverse().map((b) => bandKey(b.id));
+  return [...bands, 'side', 'face'];
 }
 
 /** Effects of part `key` (empty when it has none). */

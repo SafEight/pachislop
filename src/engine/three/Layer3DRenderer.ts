@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { getAsset, getFont, type AssetEntry, type FontEntry } from '../../assets/registry';
-import { bandKey, plateKey } from '../../model/parts';
+import { bandKey } from '../../model/parts';
 import { effectiveLighting, resolveEnvironment } from '../../model/lighting';
-import { charSide, plateSide, sideMaterial } from '../../model/sides';
-import type { Comp, Environment3D, Layer, Light3D, Material3D, PartKey, Title3DLayer } from '../../model/types';
+import { charBand, charBandSide, charFace, charSide } from '../../model/bands';
+import type { CharAdjust, Comp, Environment3D, Layer, Light3D, Material3D, PartKey, Title3DLayer } from '../../model/types';
 import type { LayerRenderContext, LayerRenderer } from '../contracts';
 import type { PassKit } from '../passkit';
 import { AOPass } from './ao';
@@ -16,14 +16,14 @@ import { decodeImage, getBitmap } from '../layer2d/images';
 import { imageFit } from '../../text/trace';
 import { applyImageProjection, applyMaterial3D, createPartMaterial, edgeImageTexture, faceImageTexture, setEnvLookup, type EnvState, type ImageProjection, type PartMaterial, type PartSpace } from './materials';
 import { Downsampler } from './resample';
-import { buildTitle, flatShapes, hasMaterialOverride, hasRig, imageTitleShapes, shapeShapes, svgTitleShapes, textShapes, type GlyphRig, type TitleShapes } from './title';
+import { BEVEL_SLOT, blockSize, buildTitle, FACE_SLOT, flatShapes, hasMaterialOverride, hasRig, imageTitleShapes, shapeShapes, svgTitleShapes, textShapes, type CharBlock, type GlyphRig, type TitleShapes } from './title';
 import { compressHdrOutput, compressInto, HdrExpand, setCompressionExposure } from './hdrResolve';
 import { createTonemapMaterial, TONEMAP_IDS } from './tonemap';
 
 // Element 3D replacement (stills): extruded text / parametric shapes / SVG logos / traced
-// transparent images with multi-band bevels and grown backplates, 保留 orbs, or static GLB
-// models; PBR materials with env reflections, lights, a tinted shadow catcher, SSAO and
-// an HDR glint pass.
+// transparent images with a bevelled letter and a stack of bands behind it, 保留 orbs, or
+// static GLB models; PBR materials with env reflections, lights, a tinted shadow catcher, SSAO
+// and an HDR glint pass.
 //
 // Lighting: environment, lights, tone mapping and exposure are the layer's effective lighting
 // (model/lighting.ts: each value the layer's own, else the comp's); each part reflects the
@@ -33,24 +33,24 @@ import { createTonemapMaterial, TONEMAP_IDS } from './tonemap';
 //                    ─ shadowCatcher (comp space, behind the layer)
 //                    ─ root (layer transform: position, rotation X→Y→Z, uniform scale × flip mirror)
 //                        ─ content ─ sheared (oblique-extrusion shear, Title3DProps.skew)
-//                                  │    ─ main Mesh (unrigged glyphs / shape + their shared backplates)
-//                                  │    ─ one Mesh per rigged glyph (CharAdjust dz / tilt) + its own backplates
+//                                  │    ─ main Mesh (unrigged glyphs / shape + their shared bands)
+//                                  │    ─ one Mesh per rigged glyph (CharAdjust dz / tilt) + its own bands
 //                                  ─ orb Mesh | GLB wrapper
 // Every title Mesh holds all parts with one group per material slot, sharing one material array.
 //
 // Layer space: comp px, y-up, the text block centred on the origin, FRONT AT z = 0.
-// Bevel bands sit by style3d.bevelPosition (title.ts): 'inside' is the Element 3D convention,
-// where the silhouette (side walls) is EXACTLY the glyph outline, so it lines up with a 2D
-// layer of the same text and counters stay open: the face is inset by the total band width and
-// the bands step down (or up, for 'inset') from the face edge to the outline. 'outside' keeps
-// the full glyph as the face and grows the bands outward like a stroke (the silhouette grows,
-// counters narrow); 'center' is half each way. The wall runs back by `depth` from the outermost
-// band edge; backplates (a base outline from src/text/plate.ts, pushed out to that edge, then
-// grown) sit behind the main solid, each behind the previous one. Inflate mode replaces the
-// face and bands with a puffy height field whose top is at
+// The letter's bevel sits by style3d.bevelPosition (title.ts): 'inside' is the Element 3D
+// convention, where the silhouette (side walls) is EXACTLY the glyph outline, so it lines up
+// with a 2D layer of the same text and counters stay open: the face is inset by the bevel width
+// and the bevel steps down (or up, for 'inset') from the face edge to the outline. 'outside'
+// keeps the full glyph as the face and grows the bevel outward like a stroke (the silhouette
+// grows, counters narrow); 'center' is half each way. The wall runs back by `depth` from the
+// bevel's end; the bands (a base outline from src/text/plate.ts, pushed out to the letter's
+// silhouette, then grown) sit behind the letter, each behind the previous solid (model/bands.ts).
+// Inflate mode replaces the face and bevel with a puffy height field whose top is at
 // z = 0 (inflate.ts). Text and shape outlines go through the layer's warp → distort → weight
 // (src/text/ink.ts) before any of this, so bevel widths stay even along the bend. The orb is
-// an ellipsoid filling the shape's bounds, front pole at z = 0; its backplates start at its
+// an ellipsoid filling the shape's bounds, front pole at z = 0; its bands start at its
 // equator.
 //
 // Oblique extrusion (skew): x += skew.x·(−z), y += skew.y·(−z) as the `sheared` group's
@@ -64,11 +64,12 @@ import { createTonemapMaterial, TONEMAP_IDS } from './tonemap';
 // flipX / flipY negate the root's x / y scale: a mirror about the layer position in layer space,
 // before the rotations. The lights and the shadow catcher are outside the root, so they stay put.
 //
-// Material slots: a block [face · bands 1..n · side (+ main back cap)] for the layer, then per
-// enabled backplate: face (+ its bevel), side (+ its back cap), then one block per character
-// with a 3D material override (CharAdjust face3d / bands3d / side3d, ascending char index; a
-// missing override falls back to the layer's material). Sides resolve through model/sides.ts (an
-// absent one follows its neighbour). The orb uses slot 0 only.
+// Material slots (title.ts): a block [face · bevel · side (+ the letter's back cap) · per band:
+// front (+ its bevel), side (+ its back cap)] for the layer, then one block per character with a
+// 3D material override (CharAdjust face3d / bands3d / side3d, ascending char index; a missing
+// override falls back to the layer's material). Absent materials resolve through
+// model/bands.ts. The bevel slot shows the face material and is apart only for the image
+// projection; a face gradient spans the face and bevel together. The orb uses slot 0 only.
 //
 // Reflections: style3d.envLock looks the environment up with the layer-space normal, so a
 // tilted title reflects what it reflects head-on (materials.ts).
@@ -103,8 +104,8 @@ import { createTonemapMaterial, TONEMAP_IDS } from './tonemap';
 // re-renders, exports await decodeImage) is traced into an outline (src/text/trace.ts) that
 // goes through the same pipeline as SVG and shapes; the layer's outline operations don't apply
 // (as in 2D). style3d.faceImage projects the picture straight on over the face slots and
-// style3d.edgeImage over the band and side slots, backplates never (materials.ts, header 2b),
-// in the fitted box the outline was traced in.
+// style3d.edgeImage over the bevel and side slots, bands never (materials.ts, header 2b), in the
+// fitted box the outline was traced in.
 
 const DEG = Math.PI / 180;
 /** Shadow blur radius at softness 1, as a fraction of the title's on-screen size. */
@@ -237,7 +238,13 @@ function disposeObject(o: THREE.Object3D) {
   });
 }
 
-/** Text char indices with a 3D material override, ascending (their slot blocks follow the backplates). */
+/** Union of two optional boxes (a fresh box; undefined when both are). */
+function unionBox(a: THREE.Box2 | undefined, b: THREE.Box2 | undefined): THREE.Box2 | undefined {
+  if (!a || !b) return (a ?? b)?.clone();
+  return a.clone().union(b);
+}
+
+/** Text char indices with a 3D material override, ascending (their slot blocks follow the layer's). */
 function overrideChars(layer: Title3DLayer): number[] {
   const src = layer.source;
   if (src.kind !== 'text') return [];
@@ -247,18 +254,19 @@ function overrideChars(layer: Title3DLayer): number[] {
     .sort((a, b) => a - b);
 }
 
+/** One material block (title.ts): letter `a`'s materials, or the layer's without `a`. */
+function blockMaterials(p: Title3DLayer['style3d'], a: CharAdjust | undefined): Material3D[] {
+  const face = charFace(p, a);
+  const out = [face, face, charSide(p, a)];
+  p.bands.forEach((_, i) => out.push(charBand(p, a, i), charBandSide(p, a, i)));
+  return out;
+}
+
 /** Material3D for every slot, in slot order (see header). */
 function slotMaterials(layer: Title3DLayer): Material3D[] {
   const p = layer.style3d;
-  const out = [p.face, ...p.bands.map((b) => b.material), sideMaterial(p)];
-  for (const bp of p.backplates) if (bp.enabled) out.push(bp.face, plateSide(bp));
-  if (layer.source.kind === 'text') {
-    const chars = layer.source.chars;
-    for (const k of overrideChars(layer)) {
-      const a = chars[k];
-      out.push(a.face3d ?? p.face, ...p.bands.map((b, i) => a.bands3d?.[i] ?? b.material), charSide(p, a));
-    }
-  }
+  const out = blockMaterials(p, undefined);
+  if (layer.source.kind === 'text') for (const k of overrideChars(layer)) out.push(...blockMaterials(p, layer.source.chars[k]));
   return out;
 }
 
@@ -279,28 +287,36 @@ export function layerEnvironments(comp: Comp, layer: Title3DLayer): Environment3
 }
 
 /**
- * Style part of every slot, parallel to slotMaterials: a block's face / band i / side, both
- * slots of a plate (face and side) that plate. Rigged glyphs and character overrides draw with
- * these same slots. Inflate mode leaves the band slots empty.
+ * Style part of every slot, parallel to slotMaterials: a block's face and bevel 'face', its side
+ * 'side', both slots of a band that band. Rigged glyphs and character overrides draw with these
+ * same slots. Inflate mode and the orb leave the bevel slots empty.
  */
 function slotParts(layer: Title3DLayer): PartKey[] {
-  const p = layer.style3d;
-  const block: PartKey[] = ['face', ...p.bands.map((b) => bandKey(b.id)), 'side'];
+  const block: PartKey[] = ['face', 'face', 'side', ...layer.style3d.bands.flatMap((b) => [bandKey(b.id), bandKey(b.id)])];
   const out = [...block];
-  for (const bp of p.backplates) if (bp.enabled) out.push(plateKey(bp.id), plateKey(bp.id));
   for (let n = overrideChars(layer).length; n > 0; n--) out.push(...block);
   return out;
 }
 
-/** First slot of every overriding char's block: right after the backplate slots (see header). */
-function charBlockSlots(layer: Title3DLayer): Map<number, number> {
+/** Image projection of every slot (see header): the face slots the face image, bevel and side slots the edge image, bands none. */
+function slotProjections(layer: Title3DLayer): ('face' | 'edges' | null)[] {
+  const block = ['face', 'edges', 'edges', ...layer.style3d.bands.flatMap(() => [null, null])] as const;
+  const out: ('face' | 'edges' | null)[] = [...block];
+  for (let n = overrideChars(layer).length; n > 0; n--) out.push(...block);
+  return out;
+}
+
+/** Every overriding char's material block: right after the layer's (see header), and which bands it overrides. */
+function charBlocks(layer: Title3DLayer): Map<number, CharBlock> {
   const p = layer.style3d;
-  const block = p.bands.length + 2;
-  let slot = block + 2 * p.backplates.filter((b) => b.enabled).length;
-  const out = new Map<number, number>();
+  const size = blockSize(p);
+  let slot = size;
+  const out = new Map<number, CharBlock>();
+  if (layer.source.kind !== 'text') return out;
   for (const k of overrideChars(layer)) {
-    out.set(k, slot);
-    slot += block;
+    const a = layer.source.chars[k];
+    out.set(k, { slot, bands: p.bands.map((_, i) => !!a.bands3d?.[i]) });
+    slot += size;
   }
   return out;
 }
@@ -322,10 +338,10 @@ function geometryKey(layer: Title3DLayer, outputScale: number): string {
     isOrb
       ? orbGridFor((size / 2) * Math.max(1, src.aspect) * outputScale)
       : p.mode === 'inflate'
-        ? [p.mode, p.inflate, p.bands.length, inflateScale(outputScale)]
-        : [p.bevelPosition, p.bevelPosition === 'inside' ? 0 : inflateScale(outputScale), p.bands.map((b) => [b.width, b.depth, b.profile, b.curve, effectiveSegments(b, outputScale)])],
-    p.backplates.map((b) => [b.enabled, b.grow, b.join, b.fillCounters, b.plate, b.depth, b.zGap, b.bevel, effectiveSegments(b.bevel, outputScale)]),
-    overrideChars(layer),
+        ? [p.mode, p.inflate, inflateScale(outputScale)]
+        : [p.bevelPosition, p.bevelPosition === 'inside' ? 0 : inflateScale(outputScale), p.bevel, effectiveSegments(p.bevel, outputScale)],
+    p.bands.map((b) => [b.enabled, b.grow, b.join, b.fillCounters, b.shape, b.depth, b.offset, b.bevel, effectiveSegments(b.bevel, outputScale)]),
+    [...charBlocks(layer)],
   ]);
 }
 
@@ -722,7 +738,7 @@ class Layer3DRendererImpl implements LayerRenderer {
       this.clearMeshes();
       const t = this.shapes!;
       if (t.parts.length || t.orb) {
-        const built = buildTitle(t, { ...p, curveSegments }, src.size, eps, charBlockSlots(layer), outputScale, draft);
+        const built = buildTitle(t, { ...p, curveSegments }, src.size, eps, charBlocks(layer), outputScale, draft);
         this.pivotZ = built.pivotZ;
         const add = (g: { geometry: THREE.BufferGeometry; bounds: (THREE.Box2 | undefined)[] }, parent: THREE.Object3D, rig?: GlyphRig) => {
           const mesh = new THREE.Mesh<THREE.BufferGeometry, PartMaterial[]>(g.geometry, []);
@@ -766,13 +782,18 @@ class Layer3DRendererImpl implements LayerRenderer {
     if (this.meshes.length) {
       const defs = slotMaterials(layer);
       while (this.mats.length < defs.length) this.mats.push(createPartMaterial());
-      const parts = slotParts(layer);
+      const projections = slotProjections(layer);
       const face = this.imageProjection(layer, 'face');
       const edges = this.imageProjection(layer, 'edges');
+      const size = blockSize(p);
       defs.forEach((def, i) => {
-        applyMaterial3D(this.mats[i], def, partEnv(def, layerEnv, env, ctx), ctx.kit, space(this.slotBounds[i]));
-        const part = parts[i];
-        applyImageProjection(this.mats[i], part === 'face' ? face : part === 'side' || part.startsWith('band:') ? edges : null);
+        // the face and bevel slots of a block are one part: a face gradient spans both
+        const k = i % size;
+        const pair = k === FACE_SLOT || k === BEVEL_SLOT ? i - k : -1;
+        const bounds = pair < 0 ? this.slotBounds[i] : unionBox(this.slotBounds[pair + FACE_SLOT], this.slotBounds[pair + BEVEL_SLOT]);
+        applyMaterial3D(this.mats[i], def, partEnv(def, layerEnv, env, ctx), ctx.kit, space(bounds));
+        const on = projections[i];
+        applyImageProjection(this.mats[i], on === 'face' ? face : on === 'edges' ? edges : null);
       });
       for (const { mesh } of this.meshes) if (mesh.material.length !== defs.length) mesh.material = this.mats.slice(0, defs.length);
       return;

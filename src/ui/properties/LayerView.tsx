@@ -40,8 +40,9 @@ function clickPart(layer: TitleLayer, part: PartKey, alone: boolean, e: RowClick
 
 /**
  * Appearance of a title: its parts front to back (face first, a hidden 2D face still listed so
- * its eye can bring it back), each with eye, swatch, name, a one-line summary and, for a rim or
- * band, its width field. Clicking a row selects the part and edits it right under its row
+ * its eye can bring it back; 3D: the letter's face, its side while it has a material of its own,
+ * then the bands), each with eye, swatch, name, a one-line summary and, for a rim or band, its
+ * width / grow field. Clicking a row selects the part and edits it right under its row
  * (Illustrator's Appearance panel); ⇧ / ⌘ select several, edited together in one block under
  * the last of them. `expanded`: the selected parts. GLB models only have their face material.
  */
@@ -72,7 +73,7 @@ function AppearanceList({ layer, expanded }: { layer: TitleLayer; expanded: read
             badge={<PartLinkBadge layer={layer} part={part} />}
             name={name}
             summary={summary}
-            width={width && <PartWidth refs={[width.ref]} max={width.max} label={name} />}
+            width={width && <PartWidth refs={[width.ref]} max={width.max} grow={width.grow} label={name} />}
             actions={
               <>
                 <PartActions layer={layer} part={part} />

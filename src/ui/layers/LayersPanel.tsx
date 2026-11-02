@@ -38,7 +38,7 @@ function ownersOf(node: NodeRef | null, layers: readonly Layer[]): EffectOwner[]
   return layers.some((x) => x.id === node.layerId) ? [{ layerId: node.layerId, part: null }] : [];
 }
 
-/** Delete / trash: the focused effect or mask, or the selected layers. A part can't be deleted here (its editor removes rims / plates). */
+/** Delete / trash: the focused effect or mask, or the selected layers. A part can't be deleted here (its editor removes rims / bands). */
 function deleteNode(node: NodeRef | null) {
   const st = useEditor.getState();
   if (node?.kind === 'effect') st.removeEffect({ layerId: node.layerId, part: node.part }, node.effectId);

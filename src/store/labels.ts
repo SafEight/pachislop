@@ -24,8 +24,8 @@ const NOUNS: Record<string, string> = {
   face: 'Face',
   face3d: 'Face',
   rims: 'Rim',
-  bands: 'Bevel band',
-  backplates: 'Plate',
+  bands: 'Band',
+  shape: 'Shape',
   side: 'Side',
   bevel: 'Bevel',
   finish: 'Finish',
@@ -69,9 +69,14 @@ const LEAVES: Record<string, string> = {
   fov: 'FOV',
 };
 
-/** Leaf keys whose word means something else elsewhere in the UI: their i18n context (“Close” = close a plate's gaps, not a dialog). */
+/** Leaf keys whose word means something else elsewhere in the UI: their i18n context (“Close” = close a plate shape's gaps, not a dialog). */
 const LEAF_CTX: Record<string, string> = {
   close: 'plate',
+};
+
+/** Nouns whose word means something else elsewhere in the UI: their i18n context (a 3D “Band”, not the band shape). */
+const NOUN_CTX: Record<string, string> = {
+  Band: 'bevel',
 };
 
 /** Transform keys → the verb a designer thinks in. */
@@ -115,15 +120,14 @@ function phrase(words: readonly Msg[]): Text {
   return words.length === 2 ? msg('{a} {b}', { a, b }) : msg('{a} {b} {c}', { a, b, c });
 }
 
-/** Name of a style part: Face, Side, Rim 2, Band 1, Plate 1 (rims / bands / plates counted from the face outward, as listed). */
+/** Name of a style part: Face, Side, Rim 2, Band 1 (rims / bands counted from the face outward, as listed). */
 export function partLabel(layer: TitleLayer, part: PartKey): Text {
   const { kind, id } = parsePartKey(part);
   if (kind === 'face') return 'Face';
   if (kind === 'side') return 'Side';
-  const list: readonly { id: string }[] =
-    layer.kind === 'title2d' ? (kind === 'rim' ? layer.style.rims : []) : kind === 'band' ? layer.style3d.bands : kind === 'plate' ? layer.style3d.backplates : [];
+  const list: readonly { id: string }[] = layer.kind === 'title2d' ? (kind === 'rim' ? layer.style.rims : []) : kind === 'band' ? layer.style3d.bands : [];
   const n = list.findIndex((x) => x.id === id) + 1;
-  return msg(kind === 'rim' ? 'Rim {n}' : kind === 'band' ? 'Band {n}' : 'Plate {n}', { n });
+  return msg(kind === 'rim' ? 'Rim {n}' : 'Band {n}', { n });
 }
 
 /** Name of a layer mask: Mask 1, Mask 2… in list order. */
@@ -197,10 +201,10 @@ export function describePath(layer: Layer | null, path: Path): Text {
     .map((k) => NOUNS[k] ?? '')
     .filter(Boolean);
   // Name the part (first noun) and the innermost group (last noun): "Rim bevel depth".
-  const words = (nouns.length > 1 && nouns[nouns.length - 1] !== nouns[0] ? [nouns[0], nouns[nouns.length - 1]] : nouns.slice(0, 1)).map((n) => msg(n));
+  const words = (nouns.length > 1 && nouns[nouns.length - 1] !== nouns[0] ? [nouns[0], nouns[nouns.length - 1]] : nouns.slice(0, 1)).map((n) => msg(n, undefined, NOUN_CTX[n]));
   if (typeof leaf === 'number') return phrase(words);
   const leafWord = capital(LEAVES[leaf] ?? (NOUNS[leaf] || humanize(leaf)));
-  if (leaf === 'rims' || leaf === 'bands' || leaf === 'backplates' || leaf === 'lights') return phrase([...words, msg(`${leafWord}s`)]);
+  if (leaf === 'rims' || leaf === 'bands' || leaf === 'lights') return phrase([...words, msg(`${leafWord}s`)]);
   return phrase([...words, msg(leafWord, undefined, LEAF_CTX[leaf])]);
 }
 

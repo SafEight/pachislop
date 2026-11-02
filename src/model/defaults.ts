@@ -13,11 +13,12 @@ import type {
   Vec2,
   AO3D,
   BackgroundLayer,
-  Backplate3D,
+  Band3D,
   Bevel2D,
   Curve,
   Reflection2D,
-  BevelBand3D,
+  BevelProfile3D,
+  BevelShape3D,
   Comp,
   Fill,
   Glass2D,
@@ -387,26 +388,28 @@ export function material3D(preset: MaterialPreset = 'gold'): Material3D {
   return preset === 'custom' ? base : { ...base, ...PRESET_VALUES[preset], preset };
 }
 
-export function band3D(width: number, depth: number, preset: MaterialPreset, profile: BevelBand3D['profile'] = 'round'): BevelBand3D {
-  return { id: uid(), width, depth, profile, segments: 6, curve: 0, material: material3D(preset) };
+/** A bevel cross-section (width 0 = none). */
+export function bevel3D(width: number, depth: number, profile: BevelProfile3D = 'round'): BevelShape3D {
+  return { width, depth, profile, segments: 6, curve: 0 };
 }
 
 export function ao3D(overrides: Partial<AO3D> = {}): AO3D {
   return { enabled: false, radius: 4, intensity: 1, ...overrides };
 }
 
-export function backplate3D(grow: number, preset: MaterialPreset): Backplate3D {
+/** A band growing `grow` % of size beyond the previous solid, sitting right behind it, in `preset`. */
+export function band3D(grow: number, preset: MaterialPreset): Band3D {
   return {
     id: uid(),
     enabled: true,
     grow,
     join: 'miter',
-    fillCounters: true,
-    plate: plateShape(),
-    depth: 10,
-    zGap: 0,
-    bevel: { width: 1.5, depth: 1.5, profile: 'round', segments: 6, curve: 0 },
-    face: material3D(preset),
+    fillCounters: false,
+    shape: plateShape(),
+    depth: 6,
+    offset: 0,
+    bevel: bevel3D(1, 1),
+    material: material3D(preset),
   };
 }
 
@@ -533,6 +536,7 @@ export function createTitle3DLayer(text = '確定'): Title3DLayer {
       inflate: { height: 12, profile: curve([0, 0], [0.35, 0.8], [1, 1]), smoothness: 0, detail: 1 },
       depth: 14,
       curveSegments: 8,
+      bevel: bevel3D(2.5, 2.5),
       bevelPosition: 'outside',
       envLock: false,
       skew: { x: 0, y: 0 },
@@ -540,8 +544,7 @@ export function createTitle3DLayer(text = '確定'): Title3DLayer {
       faceImage: 1,
       edgeImage: 0,
       lighting: noLighting(),
-      bands: [band3D(2.5, 2.5, 'gold', 'round')],
-      backplates: [],
+      bands: [],
       shadow: shadow3D(),
       glint: glint3D(),
       ao: ao3D(),
@@ -643,5 +646,5 @@ export function defaultComp(): Comp {
 
 /** A new project: the default comp and no layers (the viewport shows its checkerboard). */
 export function createProject(): Project {
-  return { version: 10, name: 'Untitled', comp: defaultComp(), layers: [] };
+  return { version: 11, name: 'Untitled', comp: defaultComp(), layers: [] };
 }

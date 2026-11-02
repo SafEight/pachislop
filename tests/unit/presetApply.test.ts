@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { backplate3D, band3D, createGroupLayer, createTitle2DLayer, createTitle3DLayer, defaultComp, material2D, rim2D, solidFill } from '../../src/model/defaults';
+import { band3D, createGroupLayer, createTitle2DLayer, createTitle3DLayer, defaultComp, material2D, rim2D, solidFill } from '../../src/model/defaults';
 import { effectiveLighting, LIGHTING_KEYS, lightingKeysSet } from '../../src/model/lighting';
 import type { Comp, EffectInstance, GeneratorLayer, Layer, Project, Title2DLayer, Title3DLayer } from '../../src/model/types';
 import { applyPreset, applyPresetToProject, canApplyPreset, presetFromLayer } from '../../src/presets/apply';
@@ -9,23 +9,16 @@ import type { StylePreset } from '../../src/presets/types';
 const rims = (ids: string[]) => ids.map((id) => rim2D(2, material2D(solidFill('#000000')), { id }));
 const glow = (tag: string): EffectInstance => ({ id: tag, type: 'outerGlow', enabled: true, params: { tag } }) as EffectInstance;
 const tagsOf = (list: EffectInstance[] | undefined) => (list ?? []).map((e) => e.params.tag);
-const proj = (layers: Layer[], comp: Comp = defaultComp()): Project => ({ version: 10, name: 'T', comp, layers });
+const proj = (layers: Layer[], comp: Comp = defaultComp()): Project => ({ version: 11, name: 'T', comp, layers });
 
 function title2d(rimIds: string[]): Title2DLayer {
   const l = createTitle2DLayer('A');
   return { ...l, style: { ...l.style, rims: rims(rimIds) } };
 }
 
-function title3d(plateIds: string[], bandIds: string[]): Title3DLayer {
+function title3d(bandIds: string[]): Title3DLayer {
   const l = createTitle3DLayer('A');
-  return {
-    ...l,
-    style3d: {
-      ...l.style3d,
-      backplates: plateIds.map((id) => ({ ...backplate3D(4, 'gold'), id })),
-      bands: bandIds.map((id) => ({ ...band3D(2, 2, 'gold'), id })),
-    },
-  };
+  return { ...l, style3d: { ...l.style3d, bands: bandIds.map((id) => ({ ...band3D(4, 'gold'), id })) } };
 }
 
 function preset2d(rimIds: string[], partEffects: StylePreset['partEffects'], extra: Partial<StylePreset> = {}): StylePreset {
@@ -62,8 +55,8 @@ describe('applyPreset part effects', () => {
     expect(out.partEffects.face![0].id).not.toBe(p.partEffects.face![0].id);
   });
 
-  it('3D: plate / band positions map by index; bands are dropped in inflate mode', () => {
-    const src = title3d(['p0', 'p1'], ['b0', 'b1']);
+  it('3D: band positions map by index, in inflate mode too', () => {
+    const src = title3d(['b0', 'b1', 'b2']);
     const preset: StylePreset = {
       id: 'p',
       name: 'P',
@@ -71,17 +64,17 @@ describe('applyPreset part effects', () => {
       kind: 'title3d',
       style3d: src.style3d,
       effects: [],
-      partEffects: { 'plate:1': [glow('plate1')], 'plate:2': [glow('nope')], 'band:0': [glow('band0')], side: [glow('side')] },
+      partEffects: { 'band:2': [glow('band2')], 'band:3': [glow('nope')], 'band:0': [glow('band0')], side: [glow('side')] },
       refSize: 200,
       builtin: true,
     };
-    const out = applyPreset(title3d([], []), preset, { applyFont: false }) as Title3DLayer;
-    expect(Object.keys(out.partEffects).sort()).toEqual(['band:b0', 'plate:p1', 'side']);
-    expect(tagsOf(out.partEffects['plate:p1'])).toEqual(['plate1']);
+    const out = applyPreset(title3d([]), preset, { applyFont: false }) as Title3DLayer;
+    expect(Object.keys(out.partEffects).sort()).toEqual(['band:b0', 'band:b2', 'side']);
+    expect(tagsOf(out.partEffects['band:b2'])).toEqual(['band2']);
 
     const inflate = { ...preset, style3d: { ...src.style3d, mode: 'inflate' as const } };
-    const flat = applyPreset(title3d([], []), inflate, { applyFont: false }) as Title3DLayer;
-    expect(Object.keys(flat.partEffects).sort()).toEqual(['plate:p1', 'side']);
+    const puffy = applyPreset(title3d([]), inflate, { applyFont: false }) as Title3DLayer;
+    expect(Object.keys(puffy.partEffects).sort()).toEqual(['band:b0', 'band:b2', 'side']);
   });
 
   it('round trip: presetFromLayer keys part effects by position, so a look moves between layers with different rim ids', () => {
@@ -140,7 +133,7 @@ describe('applyPreset effect transfer', () => {
   });
 
   it('converts a text title to the preset’s kind; refuses non-titles', () => {
-    const out = applyPreset(title2d([]), { ...preset2d([], {}), kind: 'title3d', style: undefined, style3d: title3d([], ['b']).style3d }, { applyFont: false });
+    const out = applyPreset(title2d([]), { ...preset2d([], {}), kind: 'title3d', style: undefined, style3d: title3d(['b']).style3d }, { applyFont: false });
     expect(out.kind).toBe('title3d');
     const group = createGroupLayer('g');
     expect(canApplyPreset(group, preset2d([], {}))).toBe(false);
@@ -161,7 +154,7 @@ describe('3D look lighting', () => {
 
   it('applying a 3D look gives the layer that lighting as its own (fresh light ids)', () => {
     const look = factoryStyle('f-3d-gold');
-    const out = applyPreset(title3d([], []), look, { applyFont: false });
+    const out = applyPreset(title3d([]), look, { applyFont: false });
     if (out.kind !== 'title3d' || !look.style3d) throw new Error('expected a 3D look');
     expect(out.style3d.lighting.environment).toEqual(look.style3d.lighting.environment);
     expect(out.style3d.lighting.lights?.map((l) => l.id)).not.toEqual(look.style3d.lighting.lights?.map((l) => l.id));
@@ -169,7 +162,7 @@ describe('3D look lighting', () => {
 
   it('a saved 3D look records the layer’s effective lighting as values it sets: its own, else the comp’s', () => {
     const comp = { ...defaultComp(), exposure: 1.7 };
-    const plain = title3d([], []);
+    const plain = title3d([]);
     expect(presetFromLayer(proj([plain], comp), plain.id, 'Look', 'User').style3d?.lighting).toEqual(effectiveLighting(comp, null));
     const own = { ...plain, style3d: { ...plain.style3d, lighting: { environment: { blur: 0.4 }, exposure: 0.5 } } };
     const saved = presetFromLayer(proj([own], comp), own.id, 'Look', 'User').style3d?.lighting;

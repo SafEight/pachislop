@@ -22,7 +22,7 @@ import type { PathCmd } from '../../text/layout';
 // the outward (away-from-fill) normal of an edge with direction d is (d.y, -d.x).
 //
 // Polygon booleans and offsets go through Clipper2, so overlapping glyph contours,
-// overlapping characters (negative tracking, per-character nudges) and grown backplate
+// overlapping characters (negative tracking, per-character nudges) and grown band
 // outlines always come out as clean, non-overlapping outer + hole sets.
 
 export type Contour = THREE.Vector2[];
@@ -38,7 +38,7 @@ const PRECISION = 2;
 const MITER_LIMIT = 2;
 /**
  * Vertices closer than this × eps to the line through their neighbours are dropped from every
- * clean outline: weighted glyphs, closed plate bases and round-joined plates come out of
+ * clean outline: weighted glyphs, closed band bases and round-joined bands come out of
  * Clipper as dense polylines, and the extruder's limits are quadratic in the vertex count.
  */
 const SIMPLIFY_EPS = 2;

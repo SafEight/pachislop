@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { getAsset } from '../../assets/registry';
 import { effectReach } from '../../effects/registry';
-import { bandsOutside } from '../../engine/three/bevel';
 import { decodeImage, getBitmap } from '../../engine/layer2d/images';
 import { followTarget, generatorParams, getGenerator } from '../../generators/registry';
+import { bandsGrow, letterOutside } from '../../model/bands';
 import { isTitleLayer, parsePartKey, type TitleLayer } from '../../model/parts';
-import type { CharAdjust, Comp, EffectInstance, GeneratorLayer, ImageSource, Layer, PartKey, Title2DLayer } from '../../model/types';
+import type { Band3D, BevelShape3D, CharAdjust, Comp, EffectInstance, GeneratorLayer, ImageSource, Layer, PartKey, Title2DLayer, Title3DLayer } from '../../model/types';
 import { outlinedShapeCmds, outlinedTextLayout } from '../../text/ink';
 import { cmdsBounds, type Bounds, type PathCmd, type TextLayout } from '../../text/layout';
 import { plateBaseCmds } from '../../text/plate';
@@ -109,7 +109,7 @@ export function sourceBounds(layer: Layer): Bounds | null {
 
 /**
  * Miter limits of the renderers, in multiples of the grow distance: 2D rims stroke on Canvas2D
- * (Title2DRenderer MITER_LIMIT; a sharper corner falls back to a bevel), 3D plates offset with
+ * (Title2DRenderer MITER_LIMIT; a sharper corner falls back to a bevel), 3D bands offset with
  * Clipper (outline.ts MITER_LIMIT; a sharper corner is squared off at the limit).
  */
 const RIM_MITER_LIMIT = 4;
@@ -196,18 +196,41 @@ function grownBounds(cmds: PathCmd[], g: number, join: 'miter' | 'round' | 'beve
   return out;
 }
 
-/** How far a 3D layer's bevel bands reach past its outline, layer px (bevelPosition 'outside' / 'center'); 0 for 2D layers, models and orbs. */
-function bandReach(layer: TitleLayer): number {
+/** How far a 3D letter's bevel reaches past its outline, layer px (model/bands.ts letterOutside); 0 for 2D layers, models and orbs. */
+function letterReach(layer: TitleLayer): number {
   if (layer.kind !== 'title3d') return 0;
   const src = layer.source;
   if (src.kind === 'model' || (src.kind === 'shape' && src.shape === 'orb')) return 0;
-  return (bandsOutside(layer.style3d) / 100) * src.size;
+  return (letterOutside(layer.style3d) / 100) * src.size;
+}
+
+/**
+ * How far each band's edge reaches beyond the outline, layer px, by band id: the letter's reach
+ * plus the running sum of the enabled bands' grows, as the engine stacks them (a disabled band
+ * counts its own grow, so it shows where it would sit). Empty for GLB models (no bands).
+ */
+function bandReaches(layer: Title3DLayer): Map<string, number> {
+  const out = new Map<string, number>();
+  if (layer.source.kind === 'model') return out;
+  const k = layer.source.size / 100;
+  let reach = letterReach(layer);
+  for (const b of layer.style3d.bands) {
+    const own = reach + Math.max(0, b.grow) * k;
+    out.set(b.id, own);
+    if (b.enabled) reach = own;
+  }
+  return out;
+}
+
+/** Box of band `b` grown `reach` from its base shape (contour / hull / box) of the outline `cmds`. */
+function bandBounds(cmds: PathCmd[], b: Band3D, reach: number, size: number, shear: number): Bounds {
+  return grownBounds(plateBaseCmds(cmds, b.shape, size, shear), reach, b.join, PLATE_MITER_LIMIT, 'square');
 }
 
 /**
  * Reach of the style outside the source box, layer px, for sources without vector outlines
- * (images / SVG / models): the running sum of rim widths (plus drops), or the outward band
- * reach plus the plate grows.
+ * (images / SVG / models): the running sum of rim widths (plus drops), or the letter's bevel
+ * reach plus the enabled bands' grows.
  */
 function uniformPad(layer: TitleLayer): number {
   const k = layer.source.size / 100;
@@ -221,7 +244,7 @@ function uniformPad(layer: TitleLayer): number {
     }
     return (grown + off) * k;
   }
-  return bandReach(layer) + layer.style3d.backplates.filter((b) => b.enabled).reduce((s, b) => s + b.grow, 0) * k;
+  return layer.source.kind === 'model' ? 0 : letterReach(layer) + bandsGrow(layer.style3d) * k;
 }
 
 const localBoundsCache = new WeakMap<Layer, Bounds>();
@@ -267,8 +290,8 @@ export const isFullFrame = (layer: Layer): boolean => layer.kind === 'generator'
 /**
  * Bounds of the layer's drawn content in layer space (y-up, unscaled), as rendered: the source
  * plus every enabled 2D rim (grown from its plate base by the running sum of widths, with its
- * join and drop offset), or the 3D bevel bands reaching past the outline (bevelPosition) and
- * every backplate grown from their outer edge; a generator's `bounds`, or with `layers` a
+ * join and drop offset), or the 3D letter's bevel reaching past the outline (bevelPosition) and
+ * every enabled band grown from that silhouette; a generator's `bounds`, or with `layers` a
  * following one's followBounds. Null for backgrounds / groups / adjustments / full-frame
  * generators / loading / empty. Used for the selection box, picking, snapping and aligning.
  * Memoized per (immutable) layer object, except following generators.
@@ -294,7 +317,7 @@ export function layerLocalBounds(layer: Layer, layers?: readonly Layer[]): Bound
   if (!cmds || cmds.length === 0) u = grow(b, uniformPad(layer));
   else {
     const shear = layer.source.kind === 'text' ? layer.source.shear : 0;
-    let grown = bandReach(layer);
+    let grown = letterReach(layer);
     if (layer.kind === 'title2d')
       for (const r of layer.style.rims) {
         if (!r.enabled || !(r.width > 0)) continue;
@@ -306,11 +329,8 @@ export function layerLocalBounds(layer: Layer, layers?: readonly Layer[]): Bound
       }
     else {
       if (grown > 0) u = union(u, grownBounds(cmds, grown, 'miter', PLATE_MITER_LIMIT, 'square'));
-      for (const p of layer.style3d.backplates) {
-        if (!p.enabled) continue;
-        grown += p.grow * k;
-        u = union(u, grownBounds(plateBaseCmds(cmds, p.plate, size, shear), grown, p.join, PLATE_MITER_LIMIT, 'square'));
-      }
+      const reach = bandReaches(layer);
+      for (const band of layer.style3d.bands) if (band.enabled) u = union(u, bandBounds(cmds, band, reach.get(band.id) ?? grown, size, shear));
     }
   }
   // An image still decoding has a square stand-in box (and a 3D one no trace yet): it must not stick.
@@ -372,37 +392,33 @@ export function rim2DFrame(layer: Title2DLayer, rimId: string): Rim2DFrame | nul
 }
 
 /**
- * Layer-space box of one style part as drawn: the face is the source box; a 2D rim its grown
- * plate (join and drop offset included); 3D bands and side walls the outline grown by the bands'
- * outward reach; a 3D backplate its grown plate. Null when there is no box or no such part.
+ * Layer-space box of one style part as drawn: the 2D face is the source box; a 2D rim its grown
+ * plate (join and drop offset included); the 3D face (with the letter's bevel) and side walls
+ * the letter's silhouette; a 3D band its grown base shape. Null when there is no box or no such
+ * part.
  */
 export function partLocalBounds(layer: TitleLayer, part: PartKey): Bounds | null {
   const b = sourceBounds(layer);
   if (!b) return null;
   const { kind, id } = parsePartKey(part);
-  if (kind === 'face') return b;
   if (layer.kind === 'title2d') {
+    if (kind === 'face') return b;
     const f = kind === 'rim' && id ? rim2DFrame(layer, id) : null;
     if (!f) return null;
     const rb = f.baseCmds ? grownBounds(f.baseCmds, f.grow, f.join, RIM_MITER_LIMIT, 'bevel') : grow(f.base, f.grow);
     return { x0: rb.x0 + f.dx, y0: rb.y0 + f.dy, x1: rb.x1 + f.dx, y1: rb.y1 + f.dy };
   }
   const cmds = sourceOutline(layer);
-  const reach = bandReach(layer);
-  if (kind === 'band' || kind === 'side') return !cmds || cmds.length === 0 ? grow(b, reach) : reach > 0 ? grownBounds(cmds, reach, 'miter', PLATE_MITER_LIMIT, 'square') : b;
-  const size = layer.source.size;
-  const k = size / 100;
-  const shear = layer.source.kind === 'text' ? layer.source.shear : 0;
-  let grown = reach;
-  for (const p of layer.style3d.backplates) {
-    if (p.id !== id) {
-      if (p.enabled) grown += p.grow * k;
-      continue;
-    }
-    grown += p.grow * k;
-    return !cmds || cmds.length === 0 ? grow(b, grown) : grownBounds(plateBaseCmds(cmds, p.plate, size, shear), grown, p.join, PLATE_MITER_LIMIT, 'square');
+  const pathed = !!cmds && cmds.length > 0;
+  if (kind === 'face' || kind === 'side') {
+    const reach = letterReach(layer);
+    return !pathed ? grow(b, reach) : reach > 0 ? grownBounds(cmds, reach, 'miter', PLATE_MITER_LIMIT, 'square') : b;
   }
-  return null;
+  const band = layer.style3d.bands.find((x) => x.id === id);
+  const reach = band && bandReaches(layer).get(band.id);
+  if (!band || reach === undefined) return null;
+  const shear = layer.source.kind === 'text' ? layer.source.shear : 0;
+  return pathed ? bandBounds(cmds, band, reach, layer.source.size, shear) : grow(b, reach);
 }
 
 /** The layer's flip as signs: −1 on a mirrored axis. */
@@ -606,14 +622,18 @@ export function glyphBoxes(layer: Layer): GlyphBox[] {
   return lay ? lay.glyphs.map((g) => ({ index: g.index, char: g.char, line: g.line, box: cmdsBounds(g.cmds), center: g.center, cmds: g.cmds })) : [];
 }
 
+/** How far a bevel drops in z from its start (% of size): its depth, −depth for 'inset' (it rises), 0 for 'tube' (back at its start height); 0 without a bevel. */
+const bevelDrop = (b: BevelShape3D): number => (b.width > 0 ? (b.profile === 'inset' ? -b.depth : b.profile === 'tube' ? 0 : b.depth) : 0);
+
 /**
- * Depth of the per-glyph tilt pivot on 3D layers: the middle of the main solid (Geo3D:
- * −(Σ band depth + side depth) / 2, % of size → layer px).
+ * Depth of the per-glyph tilt pivot on 3D layers: the middle of the letter's solid (title.ts
+ * pivotZ: half its back, the letter's bevel drop plus its depth; % of size → layer px).
  */
 export function glyphPivotZ(layer: Layer): number {
   if (layer.kind !== 'title3d') return 0;
   const s = layer.style3d;
-  return (-(s.bands.reduce((a, b) => a + b.depth, 0) + s.depth) / 2 / 100) * layer.source.size;
+  const drop = s.mode === 'extrude' ? bevelDrop(s.bevel) : 0;
+  return (-(drop + s.depth) / 2 / 100) * layer.source.size;
 }
 
 /**

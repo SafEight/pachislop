@@ -5,7 +5,7 @@ import { companionsOf, dissolveCompanionGroups, ownGroupOf, placeCompanions } fr
 import { defaultComp, layerBase, uid } from '../model/defaults';
 import { allLighting, effectiveLighting } from '../model/lighting';
 import { addLinkNames, freshLinks, linkedSlots, linkNamesOf, remapLayerLinks } from '../model/links';
-import { bandKey, isTitleLayer, layerParts, parsePartKey, plateKey, rimKey, type TitleLayer } from '../model/parts';
+import { bandKey, isTitleLayer, layerParts, parsePartKey, rimKey, type TitleLayer } from '../model/parts';
 import type { EffectInstance, GeneratorLayer, Layer, Lighting3D, PartEffects, PartKey, Project, Title3DProps } from '../model/types';
 import type { ApplyPreset, PresetPartKey, StylePreset } from './types';
 
@@ -25,7 +25,7 @@ import type { ApplyPreset, PresetPartKey, StylePreset } from './types';
 //   (environment, lights, tone mapping, exposure): applying one gives the layer that lighting of
 //   its own, so a look never changes the comp or another layer.
 // - Material links (Material2D.link / Material3D.link) of a look's style get fresh ids on every
-//   application (applyPreset), so a look's gold links its own plates, not another layer's; the
+//   application (applyPreset), so a look's gold links its own bands, not another layer's; the
 //   look's link names (StylePreset.links) go into the project's (applyPresetToProject). A pasted
 //   style (`keepLinks`) keeps the links the project has and drops the others.
 //
@@ -76,11 +76,10 @@ function relativeEffects(effects: EffectInstance[], x: number, y: number): Effec
   });
 }
 
-/** Ids of the rims / bands / plates of `l`, in style-list order (the PresetPartKey index). */
-function elementIds(l: TitleLayer, kind: 'rim' | 'band' | 'plate'): string[] {
+/** Ids of the rims / bands of `l`, in style-list order (the PresetPartKey index). */
+function elementIds(l: TitleLayer, kind: 'rim' | 'band'): string[] {
   if (l.kind === 'title2d') return kind === 'rim' ? l.style.rims.map((r) => r.id) : [];
-  if (kind === 'band') return l.style3d.bands.map((b) => b.id);
-  return kind === 'plate' ? l.style3d.backplates.map((p) => p.id) : [];
+  return kind === 'band' ? l.style3d.bands.map((b) => b.id) : [];
 }
 
 /** The part of `l` at look position `key`, or null when its style has no part there. */
@@ -90,9 +89,9 @@ function partAt(l: TitleLayer, key: PresetPartKey): PartKey | null {
   if (kind === 'face' || kind === 'side') part = kind;
   else {
     const elId = elementIds(l, kind)[Number(id)];
-    if (elId !== undefined) part = kind === 'rim' ? rimKey(elId) : kind === 'band' ? bandKey(elId) : plateKey(elId);
+    if (elId !== undefined) part = kind === 'rim' ? rimKey(elId) : bandKey(elId);
   }
-  // layerParts drops what the style draws no part for: a 2D side, bands in inflate mode, a hidden face.
+  // layerParts drops what the style draws no part for: a 2D side, a hidden face.
   return part && layerParts(l).includes(part) ? part : null;
 }
 

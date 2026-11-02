@@ -1,5 +1,6 @@
-import { bevel2D, erode2D, material2D, material3D, rim2D, solidFill, uid } from '../model/defaults';
+import { band3D, bevel2D, bevel3D, erode2D, material2D, material3D, rim2D, solidFill } from '../model/defaults';
 import { hexToRgb, sampleGradient } from '../model/gradient';
+import { bandsGrow, letterOutside } from '../model/bands';
 import type { EffectInstance, Gradient, Material2D, Material3D, Title2DLayer, Title3DLayer } from '../model/types';
 import { joinMsgs, msg, type Msg, type Text } from '../store/msg';
 
@@ -50,7 +51,7 @@ const RULES: Record<string, Text> = {
   thick: msg('Rims thicker than the strokes (≈{stem}% of the size for heavy faces) eat into the letters and flood the counters; use a heavy font or thinner rims (smallppt 縁取り文字).', { stem: STEM }),
   shadow: 'A hard black drop shadow reads cheap: opacity 0.5–0.7, a large soft blur and a small offset, tinted toward the face colour (marumarutelop; CGWORLD).',
   span: 'Rainbow titles carry the whole spectrum on EACH line (varietytelop 虹文字): a layer-wide ramp gives every line only part of it.',
-  noop: 'A switch that is on but changes nothing hides the reason a look doesn’t work: knockout needs rims to show and a face fill opacity below 100 % (as in Photoshop); かすれ needs an amount and an edge width; inflate ignores bevel bands.',
+  noop: 'A switch that is on but changes nothing hides the reason a look doesn’t work: knockout needs rims to show and a face fill opacity below 100 % (as in Photoshop); かすれ needs an amount and an edge width.',
 };
 
 // ---------- colour ----------
@@ -128,21 +129,25 @@ function insertRim2D(l: Title2DLayer, at: number, color: string): Title2DLayer {
   return { ...l, style: { ...l.style, rims } };
 }
 
+/** `l` with a thin separator band inserted before band `at`, seated where the solid in front of it ends its bevel. */
 function insertBand3D(l: Title3DLayer, at: number, color: string): Title3DLayer {
   const light = color === '#ffffff';
-  const material = light ? material3D('whiteGloss') : { ...material3D('custom'), color, metalness: 1, roughness: 0.4, reflectivity: 0.6 };
-  const bands = [...l.style3d.bands];
-  bands.splice(at, 0, { id: uid(), width: 0.4, depth: 0.6, profile: 'step', segments: 6, curve: 0, material });
-  return { ...l, style3d: { ...l.style3d, bands } };
+  const s = l.style3d;
+  const front = at > 0 ? s.bands[at - 1].depth : s.depth;
+  const band = { ...band3D(0.4, 'custom'), depth: front, offset: -front, bevel: bevel3D(0.4, 0.6, 'step') };
+  band.material = light ? material3D('whiteGloss') : { ...band.material, color, metalness: 1, roughness: 0.4, reflectivity: 0.6 };
+  const bands = [...s.bands];
+  bands.splice(at, 0, band);
+  return { ...l, style3d: { ...s, bands } };
 }
 
-/** Every 2D rim width × `k`; in 3D every bevel band width and backplate grow × `k`. */
+/** Every 2D rim width × `k`; in 3D the letter's bevel width and every band's grow and bevel width × `k`. */
 function scaleRims<L extends TitleLayer>(l: L, k: number): L {
   if (l.kind === 'title2d') return { ...l, style: { ...l.style, rims: l.style.rims.map((r) => ({ ...r, width: r.width * k })) } };
   const s = l.style3d;
   return {
     ...l,
-    style3d: { ...s, bands: s.bands.map((b) => ({ ...b, width: b.width * k })), backplates: s.backplates.map((p) => ({ ...p, grow: p.grow * k })) },
+    style3d: { ...s, bevel: { ...s.bevel, width: s.bevel.width * k }, bands: s.bands.map((b) => ({ ...b, grow: b.grow * k, bevel: { ...b.bevel, width: b.bevel.width * k } })) },
   };
 }
 
@@ -153,8 +158,8 @@ const multiLine = (l: TitleLayer) => l.source.kind === 'text' && l.source.text.t
 
 /**
  * Lettering rings, face then outward. Dropped bases (offset rims) are shadow weight, not a ring;
- * 3D bands that repeat the face material are the face's own bevel. Non-text sources (plates,
- * orbs) are not lettering: no rings.
+ * 3D bands right behind the letter in its own material read as the letter itself. Non-text
+ * sources (plates, orbs) are not lettering: no rings.
  */
 function rings(l: TitleLayer): { el: Element; insertAt: number | null }[] {
   if (!isText(l)) return [];
@@ -167,14 +172,11 @@ function rings(l: TitleLayer): { el: Element; insertAt: number | null }[] {
   }
   const s = l.style3d;
   const same = (m: Material3D) => m.preset === s.face.preset && m.color === s.face.color && JSON.stringify(m.gradient) === JSON.stringify(s.face.gradient);
-  const lead = s.bands.findIndex((b) => !same(b.material));
+  const lead = s.bands.findIndex((b) => b.enabled && !same(b.material));
   const first = lead < 0 ? s.bands.length : lead;
   const out = [{ el: element(msg('Face'), samples3D(s.face)), insertAt: null as number | null }];
   s.bands.forEach((b, i) => {
-    if (i >= first) out.push({ el: element(msg('Band {n}', { n: i + 1 }), samples3D(b.material)), insertAt: i });
-  });
-  s.backplates.forEach((p, i) => {
-    if (p.enabled) out.push({ el: element(msg('Plate {n}', { n: i + 1 }), samples3D(p.face)), insertAt: null });
+    if (i >= first && b.enabled) out.push({ el: element(msg('Band {n}', { n: i + 1 }), samples3D(b.material)), insertAt: i });
   });
   return out;
 }
@@ -224,11 +226,8 @@ function hueIssues(l: TitleLayer): LintIssue[] {
   return [{ id: 'hues', message: msg("{n} chromatic hues ({list}): the eye can't find the face.", { n: families.length, list }), rule: RULES.hues }];
 }
 
-/** Rim total (2D rims; 3D band widths + plate grows), % of size. */
-const rimTotal = (l: TitleLayer) =>
-  l.kind === 'title2d'
-    ? l.style.rims.reduce((s, r) => s + (r.enabled ? r.width : 0), 0)
-    : l.style3d.bands.reduce((s, b) => s + b.width, 0) + l.style3d.backplates.reduce((s, p) => s + (p.enabled ? p.grow : 0), 0);
+/** Rim total (2D rims; 3D the letter's bevel outside its outline + band grows), % of size. */
+const rimTotal = (l: TitleLayer) => (l.kind === 'title2d' ? l.style.rims.reduce((s, r) => s + (r.enabled ? r.width : 0), 0) : letterOutside(l.style3d) + bandsGrow(l.style3d));
 
 function thicknessIssues(l: TitleLayer): LintIssue[] {
   if (!isText(l)) return [];
@@ -324,20 +323,11 @@ function spanIssues(l: TitleLayer): LintIssue[] {
 
 /**
  * v5 settings that are on but render nothing (each fixable in one click): knockout without rims
- * or over an opaque face, かすれ at amount / edge 0, bevel bands under inflate.
+ * or over an opaque face, かすれ at amount / edge 0.
  */
 function noopIssues(l: TitleLayer): LintIssue[] {
   const out: LintIssue[] = [];
-  if (l.kind === 'title3d') {
-    if (l.style3d.mode === 'inflate' && l.style3d.bands.length > 0)
-      out.push({
-        id: 'inflate-bands',
-        message: msg('Inflate mode ignores the bevel bands: their edits change nothing.'),
-        rule: RULES.noop,
-        fix: { label: 'Remove the bands', apply: (x) => (x.kind === 'title3d' ? { ...x, style3d: { ...x.style3d, bands: [] } } : x) },
-      });
-    return out;
-  }
+  if (l.kind === 'title3d') return out;
   const { knockout, erode, rims, face } = l.style;
   if (knockout && !rims.some((r) => r.enabled && r.width > 0))
     out.push({

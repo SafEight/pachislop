@@ -23,6 +23,7 @@ import { GamutOverlay } from './GamutOverlay';
 import { engineHost } from './engineHost';
 import { addShapeLayer, addTextLayer } from './layerActions';
 import { isTyping, oneShot, useLatest, useSpaceHand } from './util';
+import { listedPart } from './layers/rows';
 import { DistortHandles } from './viewport/DistortHandles';
 import { drag, isDoublePress, press, type StageMap } from './viewport/drag';
 import { useFileDrop } from './viewport/FileDrop';
@@ -572,8 +573,8 @@ export function Viewport() {
   /** Move tool: select (Auto-Select), then drag to move; ⇧ adds / removes; ⌥-click: the title's part under the cursor; empty: marquee. */
   const onMovePress = (e: React.PointerEvent, s: EditorState, p: Pt) => {
     if (e.altKey && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
-      // ⌥-click on a title selects the style part under the cursor (face, rim, band, side, plate);
-      // an ⌥-drag still moves it (free-rotates a 3D title).
+      // ⌥-click on a title selects the style part under the cursor (face, rim, band, side); a 3D
+      // side that isn't listed is its letter's face. An ⌥-drag still moves it (free-rotates a 3D title).
       const layers = s.project.layers;
       const sel = layers.find((l) => l.id === s.selectedLayerId);
       const title = isTitleLayer(sel) && pickable(layers)(sel) && layerHit(comp, sel, p) ? sel : hitLeaf(comp, layers, p, isTitleLayer);
@@ -582,7 +583,8 @@ export function Viewport() {
         startLayerDrag(e, title, () => {
           const st = useEditor.getState();
           const part = engineHost.engine?.partAt(st.project, title.id, p, PART_PICK_PX / d);
-          if (part) st.selectNode({ kind: 'part', layerId: title.id, part });
+          const now = st.project.layers.find((l) => l.id === title.id);
+          if (part && isTitleLayer(now)) st.selectNode({ kind: 'part', layerId: title.id, part: listedPart(now, part) });
         });
         return;
       }
@@ -779,7 +781,7 @@ export function Viewport() {
   const groupBox = layer?.kind === 'group' && layer.visible ? unionCompBounds(shown.layers, [layer.id]) : null;
   const groupCentre = groupBox ? { x: (groupBox.x0 + groupBox.x1) / 2, y: (groupBox.y0 + groupBox.y1) / 2 } : null;
   const compBox: Bounds = { x0: -comp.width / 2, y0: -comp.height / 2, x1: comp.width / 2, y1: comp.height / 2 };
-  // Handles sit on the drawn content (source + rims / backplates; a generator's bounds, the comp
+  // Handles sit on the drawn content (source + rims / letter bevel and bands; a generator's bounds, the comp
   // box for full-frame ones); a faint outer box shows the effects' reach.
   const box = boxed && boxed.visible ? layerLocalBounds(boxed, shown.layers) : null;
   const corners = lview && box ? viewCorners(lview, box).map(S) : gen?.visible ? boundsCorners(compBox).map(S) : groupBox ? boundsCorners(groupBox).map(S) : null;
@@ -1162,7 +1164,7 @@ function drawMaskView(c: HTMLCanvasElement, img: ImageData) {
   c.getContext('2d')?.putImageData(img, 0, 0);
 }
 
-/** Axis-aligned comp box of a layer's content (source + rims / backplates, a generator's bounds; 3D layers projected; groups: their descendants), or null (full-frame generators too). */
+/** Axis-aligned comp box of a layer's content (source + rims / letter bevel and bands, a generator's bounds; 3D layers projected; groups: their descendants), or null (full-frame generators too). */
 function viewBounds(comp: Project['comp'], l: Layer, layers: readonly Layer[]): Bounds | null {
   if (l.kind === 'group') return unionCompBounds(layers, [l.id]);
   const b = layerLocalBounds(l, layers);

@@ -24,9 +24,9 @@ export const useSectionsOpen = create<Record<string, boolean>>(() => loadSection
 useSectionsOpen.subscribe((s) => localStorage.setItem(SECTIONS_KEY, JSON.stringify(s)));
 
 /**
- * The kind of node the sections below belong to (Properties: `title2d`, `part:title3d:plate`,
+ * The kind of node the sections below belong to (Properties: `title2d`, `part:title3d:band`,
  * `effect:dropShadow`…). A section's open state is remembered per scope and id, so closing a
- * plate's Side section closes it on every plate but not on a rim.
+ * band's Side wall section closes it on every band but not on a rim.
  */
 export const SectionScope = createContext('panel');
 

@@ -1,20 +1,21 @@
 import { compensateV4CharScale } from './migrateText';
-import { charScaleNote, collectBundle, installBundle, migrateProject, upgradeNote, type Bundle, type ProjectVersion } from './project';
+import { charScaleNote, collectBundle, installBundle, migrateProject, PROJECT_VERSION, upgradeNote, type Bundle, type ProjectVersion } from './project';
 import type { Project } from '../model/types';
 import { errorMsg, msg, type Msg } from '../store/msg';
 
 // Autosave: the project plus its referenced fonts/assets as a structured-clone record in
 // IndexedDB (ArrayBuffers stored natively, no base64). Builtin fonts are stored by id only and
-// lazy-load when first rendered. When there is no v10 autosave ('current-v10'), a v9, v8, v7, v6, v5 or v4 one
-// ('current-v9', 'current-v8', 'current-v7', 'current-v6', 'current-v5', 'current-v4', newest first) is upgraded through `migrateProject` (a v4 one
+// lazy-load when first rendered. When there is no v11 autosave ('current-v11'), a v10, v9, v8, v7, v6, v5 or v4 one
+// ('current-v10', 'current-v9', 'current-v8', 'current-v7', 'current-v6', 'current-v5', 'current-v4', newest first) is upgraded through `migrateProject` (a v4 one
 // then through `compensateV4CharScale`); autosaves of v1–v3 ('current', 'current-v2',
 // 'current-v3') can't be restored, so loading reports and deletes them.
 
 const DB = 'pachislot-visuals';
 const STORE = 'autosave';
-const KEY = 'current-v10';
+const KEY = 'current-v11';
 /** Autosaves of earlier versions that are upgraded, newest first, with the version they hold. */
 const UPGRADED_KEYS = [
+  { key: 'current-v10', version: 10 },
   { key: 'current-v9', version: 9 },
   { key: 'current-v8', version: 8 },
   { key: 'current-v7', version: 7 },
@@ -72,7 +73,7 @@ export async function loadAutosave(): Promise<AutosaveRestore> {
     await tx('readwrite', (s) => s.delete(key));
   }
   let found: { key: string; version: ProjectVersion; b: Stored } | null = null;
-  for (const { key, version } of [{ key: KEY, version: 10 } as const, ...UPGRADED_KEYS]) {
+  for (const { key, version } of [{ key: KEY, version: PROJECT_VERSION } as const, ...UPGRADED_KEYS]) {
     const b = (await tx('readonly', (s) => s.get(key))) as Stored | undefined;
     if (!b) continue;
     if (!found) found = { key, version, b };
@@ -91,7 +92,7 @@ export async function loadAutosave(): Promise<AutosaveRestore> {
   // Fonts first: the v4 char-scale compensation measures with them.
   const errors = await installBundle(b);
   const compensated = await compensateV4CharScale(project, version === 4);
-  const notes = version === 10 ? [] : [upgradeNote('The autosaved project', version), ...(compensated !== project ? [charScaleNote] : [])];
+  const notes = version === PROJECT_VERSION ? [] : [upgradeNote('The autosaved project', version), ...(compensated !== project ? [charScaleNote] : [])];
   return { kind: 'restored', project: compensated, errors, notes };
 }
 

@@ -1,4 +1,4 @@
-import type { BevelProfile3D, BevelShape3D, Title3DProps } from '../../model/types';
+import type { BevelProfile3D, BevelShape3D } from '../../model/types';
 
 // Bevel cross-sections (Element 3D Bevel Segments / Bevel Curve), shared by the extruder and
 // the Style3D cross-section preview. Pure maths, no three.js.
@@ -119,17 +119,4 @@ export function unitBevel(profile: BevelProfile3D, segments: number, curve: numb
  */
 export function effectiveSegments(shape: BevelShape3D, outputPxPerUnit: number): number {
   return Math.min(MAX_SEGMENTS, Math.ceil(bevelSegments(shape.segments) * Math.sqrt(Math.max(1, outputPxPerUnit))));
-}
-
-/** Share of the bevel band stack that lies outside the glyph outline (Title3DProps.bevelPosition). */
-export const BEVEL_OUTSIDE_SHARE: Record<Title3DProps['bevelPosition'], number> = { outside: 1, center: 0.5, inside: 0 };
-
-/**
- * How far the bevel bands reach past the glyph outline, % of size: the outermost band edge (the
- * extruded silhouette) sits this far out, and backplates grow from there. 0 in inflate mode,
- * whose front ignores the bands.
- */
-export function bandsOutside(p: Pick<Title3DProps, 'mode' | 'bands' | 'bevelPosition'>): number {
-  if (p.mode === 'inflate') return 0;
-  return p.bands.reduce((s, b) => s + Math.max(0, b.width), 0) * BEVEL_OUTSIDE_SHARE[p.bevelPosition];
 }

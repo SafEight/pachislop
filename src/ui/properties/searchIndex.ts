@@ -32,7 +32,7 @@ export type FindTarget =
 export interface Slot {
   key: string;
   target: FindTarget;
-  /** Crumbs before the page's own sections ("Plate 2", "Effects › Gaussian Blur", "Document"). */
+  /** Crumbs before the page's own sections ("Band 2", "Effects › Gaussian Blur", "Document"). */
   prefix: readonly string[];
   /** Section keys to open on the way (a part's Appearance section). */
   open: readonly string[];
@@ -96,8 +96,8 @@ const SYNONYMS: readonly (readonly string[])[] = [
   ['tilt', 'tilt x', 'tilt y', 'turn y', 'orbit', 'rotation x', 'rotation y', 'rotx', 'roty', '傾き', 'チルト', 'x 回転', 'y 回転'],
   ['gold', '金', 'ゴールド'],
   ['silver', '銀', 'シルバー'],
-  ['rim', 'stroke', 'border', 'band', '境界線', '縁', 'フチ', 'バンド'],
-  ['plate', 'backplate', '外枠', 'プレート'],
+  ['rim', 'stroke', 'border', '境界線', '縁', 'フチ'],
+  ['band', 'bevel copy', 'outline copy', 'z offset', '外枠', 'バンド'],
   ['color', 'colour', 'tint', '色', 'カラー'],
   ['glow', 'emissive', '光彩', 'グロー'],
   ['shine', 'gloss', 'specular', 'spec', '光沢', '艶'],

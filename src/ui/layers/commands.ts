@@ -115,7 +115,7 @@ export function newLayerItems(t: Translate): CtxEntry[] {
   const shapes = (dim: '2d' | '3d'): CtxItem[] => SHAPES.map((sh) => ({ label: t(sh.label), hint: t(sh.hint), onSelect: () => addShapeLayer(sh.kind, dim) }));
   return [
     { label: t('2D text'), shortcut: 'T', hint: t('Bevel + rim stack (Eye Candy / layer styles)'), onSelect: () => addTextLayer('2d') },
-    { label: t('3D text'), shortcut: '⇧T', hint: t('Extruded metal with bevel bands (Element 3D)'), onSelect: () => addTextLayer('3d') },
+    { label: t('3D text'), shortcut: '⇧T', hint: t('Extruded metal letters with bands stacked behind (Element 3D)'), onSelect: () => addTextLayer('3d') },
     {
       label: t('Shape', undefined, { ctx: 'layers' }),
       hint: t('Add shape: plates, bands, bursts, bubbles, orbs (2D or 3D). With a text layer selected, the shape goes just below it, fitted around it.'),

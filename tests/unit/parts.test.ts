@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { backplate3D, band3D, createTitle2DLayer, createTitle3DLayer, material2D, rim2D, solidFill } from '../../src/model/defaults';
+import { band3D, createTitle2DLayer, createTitle3DLayer, material2D, rim2D, solidFill } from '../../src/model/defaults';
 import { hasPartEffects, layerParts, parsePartKey, prunePartEffects } from '../../src/model/parts';
 import type { EffectInstance, Title2DLayer, Title3DLayer } from '../../src/model/types';
 
@@ -11,17 +11,9 @@ function title2d(rimIds: string[], hideFace = false): Title2DLayer {
   return { ...l, style: { ...l.style, rims: rimIds.map((id) => rim(id)), hideFace } };
 }
 
-function title3d(plateIds: string[], bandIds: string[], mode: 'extrude' | 'inflate' = 'extrude'): Title3DLayer {
+function title3d(bandIds: string[], mode: 'extrude' | 'inflate' = 'extrude'): Title3DLayer {
   const l = createTitle3DLayer('A');
-  return {
-    ...l,
-    style3d: {
-      ...l.style3d,
-      mode,
-      backplates: plateIds.map((id) => ({ ...backplate3D(4, 'gold'), id })),
-      bands: bandIds.map((id) => ({ ...band3D(2, 2, 'gold'), id })),
-    },
-  };
+  return { ...l, style3d: { ...l.style3d, mode, bands: bandIds.map((id) => ({ ...band3D(2, 'gold'), id })) } };
 }
 
 describe('layerParts', () => {
@@ -40,18 +32,17 @@ describe('layerParts', () => {
     expect(layerParts(l)).toEqual(['rim:off', 'rim:a', 'face']);
   });
 
-  it('3D: plates outermost first, side, bands side → face, face last', () => {
-    expect(layerParts(title3d(['p0', 'p1'], ['b0', 'b1', 'b2']))).toEqual(['plate:p1', 'plate:p0', 'side', 'band:b2', 'band:b1', 'band:b0', 'face']);
+  it('3D: bands outermost first (listed innermost first), the side, the face last', () => {
+    expect(layerParts(title3d(['b0', 'b1', 'b2']))).toEqual(['band:b2', 'band:b1', 'band:b0', 'side', 'face']);
   });
 
-  it('3D inflate: bands are not parts', () => {
-    expect(layerParts(title3d(['p0'], ['b0', 'b1'], 'inflate'))).toEqual(['plate:p0', 'side', 'face']);
+  it('3D inflate: the bands are parts too', () => {
+    expect(layerParts(title3d(['b0', 'b1'], 'inflate'))).toEqual(['band:b1', 'band:b0', 'side', 'face']);
   });
 
   it('does not reorder the style lists it reads', () => {
-    const l = title3d(['p0', 'p1'], ['b0', 'b1']);
+    const l = title3d(['b0', 'b1']);
     layerParts(l);
-    expect(l.style3d.backplates.map((p) => p.id)).toEqual(['p0', 'p1']);
     expect(l.style3d.bands.map((b) => b.id)).toEqual(['b0', 'b1']);
   });
 });
@@ -80,10 +71,10 @@ describe('prunePartEffects / hasPartEffects', () => {
     expect(prunePartEffects(l)).toEqual({});
   });
 
-  it('3D inflate prunes band effects, keeps side', () => {
-    const l = title3d([], ['b0'], 'inflate');
-    l.partEffects = { 'band:b0': [fx()], side: [fx()] };
-    expect(Object.keys(prunePartEffects(l))).toEqual(['side']);
+  it('3D prunes effects of bands that are gone, keeps the side', () => {
+    const l = title3d(['b0']);
+    l.partEffects = { 'band:b0': [fx()], 'band:gone': [fx()], side: [fx()] };
+    expect(Object.keys(prunePartEffects(l))).toEqual(['band:b0', 'side']);
   });
 
   it('hasPartEffects only counts enabled effects', () => {

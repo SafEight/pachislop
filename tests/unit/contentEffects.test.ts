@@ -5,7 +5,7 @@ import { contentEffects, contentEffectsOfLook } from '../../src/io/migrate/conte
 import type { StylePreset } from '../../src/presets/types';
 
 const fx = (type: string, params: EffectInstance['params'] = {}, enabled = true): EffectInstance => ({ id: `${type}-${Math.random()}`, type, enabled, params });
-const proj = (layers: Layer[]): Project => ({ version: 10, name: 'T', comp: defaultComp(), layers });
+const proj = (layers: Layer[]): Project => ({ version: 11, name: 'T', comp: defaultComp(), layers });
 const shape = (p: Project) => p.layers.map((l) => (l.kind === 'generator' ? `${l.generator.type}` : l.kind === 'group' ? `[${l.name}]` : l.name));
 const gens = (p: Project) => p.layers.filter((l): l is GeneratorLayer => l.kind === 'generator');
 

@@ -4,7 +4,7 @@
 // Coordinates: comp pixels, (0,0) = comp centre, +x right, +y UP, +z toward the viewer.
 //
 // SIZE-RELATIVE UNITS: every dimension inside a title style (rim widths and offsets, bevel
-// sizes, inner-glow size, 3D depth/bevel/backplate sizes) is a PERCENTAGE OF THE SOURCE
+// sizes, inner-glow size, 3D depth/bevel/band sizes) is a PERCENTAGE OF THE SOURCE
 // `size` (font em size for text, fitted size for SVG/image/model). Changing the font size
 // therefore keeps the whole look intact, and style presets transfer between layers.
 // Effect parameters (src/effects) stay in comp pixels.
@@ -142,9 +142,8 @@ export interface CharAdjust {
    * 3D layers only (Element 3D per-character offsets): push the glyph toward the viewer
    * (% of size, +z) and tilt it around its own centre (degrees, as the layer's Transform:
    * tiltX = top toward the viewer, as rotX; tiltY = right side away from the viewer, the front
-   * turning right, as rotY). The glyph, its bands and its own backplate stack
-   * (grown from that glyph alone) move as one rigid solid; the other glyphs share one plate.
-   * Absent = 0. 2D layers ignore them.
+   * turning right, as rotY). The glyph and its own band stack (grown from that glyph alone)
+   * move as one rigid solid; the other glyphs share one stack. Absent = 0. 2D layers ignore them.
    */
   dz?: number;
   tiltX?: number;
@@ -152,15 +151,14 @@ export interface CharAdjust {
   /**
    * Face material override for this character (split-colour words such as 激 red / アツ gold,
    * 赤文字 inside a セリフ). Rims stay continuous around the whole word. 2D layers read `face`,
-   * 3D layers read `face3d`; absent = the layer's face.
+   * 3D layers read `face3d` (the letter's face and bevel); absent = the layer's face.
    */
   face?: Material2D;
   face3d?: Material3D;
   /**
-   * 3D only: this glyph's bevel band materials (index-aligned with `style3d.bands`; a missing
-   * entry = the layer's band) and side material, so a white 元祖 loses the gold bands too. An
-   * absent `side3d` follows the glyph's neighbour (model/sides.ts: the layer's own side, else the
-   * glyph's outermost band, else its face).
+   * 3D only: this glyph's band materials (index-aligned with `style3d.bands`; a missing entry =
+   * the layer's band), so a white 元祖 loses the gold bands too, and its side-wall material. An
+   * absent `side3d` shows the layer's own side, else the glyph's face (model/bands.ts).
    */
   bands3d?: (Material3D | null)[];
   side3d?: Material3D;
@@ -220,7 +218,7 @@ export interface ImageSource {
   size: number; // px; fitted so the larger side equals this
   /**
    * How the image's alpha becomes an outline where one is needed (3D extrusion / inflate,
-   * backplates and bevels grown from the silhouette; Element 3D-style "extrude a logo PNG").
+   * bands and bevels grown from the silhouette; Element 3D-style "extrude a logo PNG").
    * 2D layers keep using the alpha directly and ignore it.
    */
   trace: ImageTrace;
@@ -335,7 +333,7 @@ export interface Distort {
 }
 
 /**
- * Base outline a rim / backplate grows from (北斗 / カバネリ one-piece plates):
+ * Base outline a rim / 3D band grows from (北斗 / カバネリ one-piece plates):
  * - 'contour': the element outline itself (follows every glyph bump); `close` > 0 first grows the
  *   outline by `close` and shrinks it back (morphological closing), bridging gaps between glyphs
  *   and filling notches narrower than ~2 × close;
@@ -766,7 +764,8 @@ export type BevelProfile3D = 'flat' | 'round' | 'chamfer' | 'cove' | 'step' | 'i
 
 /** Cross-section of one bevel (Element 3D Bevel Segments / Bevel Curve). */
 export interface BevelShape3D {
-  width: number; // % of size, extent in the outline plane (direction: Title3DProps.bevelPosition)
+  /** % of size, extent in the outline plane: the letter's by Title3DProps.bevelPosition, a band's inward from its edge. 0 = no bevel. */
+  width: number;
   depth: number; // % of size, extent in z
   profile: BevelProfile3D;
   /** Facets for curved profiles (round / cove / step), 1..24. Generators may add more at large export scales. */
@@ -776,36 +775,31 @@ export interface BevelShape3D {
 }
 
 /**
- * A ring of the bevel. Bands run from the face edge outward to the side wall, so a single
- * extrusion can show the multi-outline look (e.g. gold face, white band, red band). Where the
- * stack sits relative to the glyph outline is Title3DProps.bevelPosition: grown outward from it
- * like a stroke, or cut inward (Element 3D: the silhouette stays the glyph outline, the face is
- * inset by the total band width, thin strokes narrow the bevel and counters stay open).
+ * A band (Element 3D Bevel Copy 2..5 / 外枠 in 3D): a whole extruded copy of the letters' outline
+ * stacked behind the letter (or the previous band), grown outward by `grow` beyond it (counters
+ * optionally filled), with its own depth, bevel and material. Listed innermost first; band k grows
+ * by the SUM of `grow` of bands 0..k from the letter's silhouette. A band that grows past the
+ * previous solid shows as an outline around it; `offset` slides it back (or forward) in z.
  */
-export interface BevelBand3D extends BevelShape3D {
-  id: string;
-  material: Material3D;
-}
-
-/**
- * Backplate (Element 3D under-plate / 外枠 in 3D): the text outline grown by `grow`, counters
- * optionally filled, extruded as a separate solid behind the main extrusion. Listed innermost
- * first; plate k grows by the SUM of `grow` of plates 0..k.
- */
-export interface Backplate3D {
+export interface Band3D {
   id: string;
   enabled: boolean;
-  grow: number; // % of size
+  grow: number; // % of size, beyond the previous solid
   join: 'miter' | 'round';
   fillCounters: boolean;
-  /** Base outline the plate grows from (contour / hull / slanted box); see PlateShape. */
-  plate: PlateShape;
-  depth: number; // % of size
-  /** Gap behind the previous solid (% of size). */
-  zGap: number;
+  /** Base outline the band grows from (contour / hull / slanted box); see PlateShape. */
+  shape: PlateShape;
+  depth: number; // % of size, straight side wall behind the band's bevel
+  /**
+   * z gap behind the previous solid's back (% of size, Element 3D Z-Offset). Negative slides the
+   * band forward into the previous solid, at most to where that solid's bevel ends (its wall top),
+   * so a band never covers the solid in front of it.
+   */
+  offset: number;
   bevel: BevelShape3D;
-  face: Material3D;
-  /** Edge material; absent = the same as `face` (model/sides.ts). */
+  /** The band's front, bevel and side wall. */
+  material: Material3D;
+  /** Side-wall material of its own; absent = the same as `material` (model/bands.ts). */
   side?: Material3D;
 }
 
@@ -838,7 +832,7 @@ export interface Glint3D {
   tint: string;
 }
 
-/** Ambient occlusion on the 3D render (Element 3D SSAO): darkens crevices between bands and plates. */
+/** Ambient occlusion on the 3D render (Element 3D SSAO): darkens the crevices between the letter and its bands. */
 export interface AO3D {
   enabled: boolean;
   /** Sample radius, % of size. */
@@ -848,10 +842,11 @@ export interface AO3D {
 
 export interface Title3DProps {
   /**
-   * 'extrude': straight extrusion with bevel bands (Element 3D). 'inflate': a puffy height field
-   * built from the outline's distance field (Illustrator 3D Inflate / ぷっくり buttons): the front
-   * rises by `inflate.height` following `inflate.profile` (x = distance from the edge / max inset,
-   * y = height), the back is flat; bands are ignored, backplates and side still apply.
+   * 'extrude': the letter is a straight extrusion with one bevel (Element 3D). 'inflate': a puffy
+   * height field built from the outline's distance field (Illustrator 3D Inflate / ぷっくり
+   * buttons): the front rises by `inflate.height` following `inflate.profile` (x = distance from
+   * the edge / max inset, y = height), the back is flat; the letter's bevel is ignored, the bands
+   * and side still apply.
    * `inflate.smoothness` (0..100, Eye Candy's 滑らかさ): 0 shades the mesh's own facets; above 0
    * the shading follows the exact profile slope (no facet ripples on mirror finishes) and the
    * ridges along the middle of every stroke round off more as it grows. `inflate.detail` (1..4)
@@ -860,7 +855,7 @@ export interface Title3DProps {
    */
   mode: 'extrude' | 'inflate';
   inflate: { height: number; profile: Curve; smoothness: number; detail: number }; // height: % of size
-  depth: number; // % of size — straight side-wall depth of the main extrusion
+  depth: number; // % of size — straight side-wall depth of the letter behind its bevel
   curveSegments: number;
   /**
    * Counter-rotate the environment with the layer's own rotX / rotY, so reflections stay as they
@@ -873,6 +868,7 @@ export interface Title3DProps {
    * y = up, in units of depth (0 = straight back; 0.5 = the back moves half the depth).
    */
   skew: { x: number; y: number };
+  /** The letter's material: its face, bevel and (without `side`) side wall. */
   face: Material3D;
   /**
    * Image sources only: how much of the picture shows on the front face (0..1), projected
@@ -881,23 +877,25 @@ export interface Title3DProps {
    */
   faceImage: number;
   /**
-   * Image sources only: how much of the picture shows on the bevel bands and side walls (0..1),
+   * Image sources only: how much of the picture shows on the letter's side walls (0..1),
    * projected straight on like the face, so each edge takes the colour of the image at that
    * point of the outline (Element 3D-style extruded logo). Other sources ignore it.
    */
   edgeImage: number;
-  bands: BevelBand3D[]; // face edge → side; empty = no bevel
+  /** The letter's bevel (Element 3D Bevel): width 0 = none. Ignored in inflate mode and by the orb. */
+  bevel: BevelShape3D;
   /**
-   * Where the bevel bands sit relative to the glyph outline, like Photoshop's Stroke Position.
-   * 'outside': bands grow outward, the face keeps the full glyph shape and widening a band
-   * fattens the silhouette; 'inside': bands are cut inward from the outline (Element 3D), the
-   * silhouette stays put and widening a band shrinks the face; 'center': half each way.
-   * Backplates grow from the outermost band edge, so they never overlap the bands.
+   * Where the letter's bevel sits relative to the glyph outline, like Photoshop's Stroke Position.
+   * 'outside': it grows outward, the face keeps the full glyph shape and widening the bevel
+   * fattens the silhouette; 'inside': it is cut inward from the outline (Element 3D), the
+   * silhouette stays put and widening it shrinks the face; 'center': half each way. Bands grow
+   * from the outer edge of the bevel (the letter's silhouette).
    */
   bevelPosition: 'outside' | 'center' | 'inside';
-  /** Side-wall material; absent = the same as the outermost band, or the face without bands (model/sides.ts). */
+  /** The letter's side-wall material; absent = the same as `face` (model/bands.ts). */
   side?: Material3D;
-  backplates: Backplate3D[];
+  /** Stacked behind the letter, innermost first (Band3D). */
+  bands: Band3D[];
   shadow: Shadow3D;
   glint: Glint3D;
   ao: AO3D;
@@ -1025,10 +1023,11 @@ export type LayerMask = ShapeMask | GradientMask | LayerSourceMask;
 
 /**
  * A part of a title's style that can carry its own effects (an Outer Glow on the outermost rim
- * only, an Inner Shadow on the face only). 2D: 'face' and `rim:<Rim2D.id>`. 3D: 'face',
- * `band:<BevelBand3D.id>`, 'side' and `plate:<Backplate3D.id>`. See src/model/parts.ts.
+ * only, an Inner Shadow on the face only). 2D: 'face' and `rim:<Rim2D.id>`. 3D: 'face' (the
+ * letter's face and bevel), 'side' (the letter's side wall) and `band:<Band3D.id>`. See
+ * src/model/parts.ts.
  */
-export type PartKey = 'face' | 'side' | `rim:${string}` | `band:${string}` | `plate:${string}`;
+export type PartKey = 'face' | 'side' | `rim:${string}` | `band:${string}`;
 
 /** Effects per style part, run on that part's own pixels before the layer effects. Keys of parts that no longer exist are dropped by normalisation. */
 export type PartEffects = Partial<Record<PartKey, EffectInstance[]>>;
@@ -1246,7 +1245,7 @@ export interface Comp {
 }
 
 export interface Project {
-  version: 10;
+  version: 11;
   name: string;
   comp: Comp;
   /** Index 0 is the BOTTOM layer; last is drawn on top. */

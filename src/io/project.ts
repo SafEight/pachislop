@@ -2,9 +2,8 @@ import { addAsset, BUILTIN_FONTS, getAsset, listFonts, registerFont } from '../a
 import { getEffect } from '../effects/registry';
 import { createTitle3DLayer, defaultComp, erode2D, glass2D, imageTrace, material3D, noDistort, noWarp, plateShape, reflection2D, sheen2D } from '../model/defaults';
 import { noLighting } from '../model/lighting';
-import { inheritCharSides, inheritSides } from '../model/sides';
 import type {
-  Backplate3D,
+  Band3D,
   Bevel2D,
   CharAdjust,
   EffectInstance,
@@ -16,6 +15,7 @@ import type {
   Material2D,
   Material3D,
   PartEffects,
+  PartKey,
   Project,
   Rim2D,
   Satin2D,
@@ -23,6 +23,7 @@ import type {
   TitleStyle2D,
 } from '../model/types';
 import { errorMsg, msg, MsgError, type Msg } from '../store/msg';
+import { convertBands, isLegacyStyle3D, type BandsConversion, type LegacyStyle3D } from './migrate/bands';
 import { contentEffects } from './migrate/contentEffects';
 import { effectDedupe } from './migrate/effectDedupe';
 import { generatorParams } from './migrate/generatorParams';
@@ -30,7 +31,7 @@ import { materialEffects } from './migrate/materialEffects';
 
 // `.pslot.json` project files: the Project JSON plus every referenced non-builtin font and binary
 // asset, base64-encoded, so a file is self-contained. Builtin fonts are referenced by id only (they
-// ship with the app and load lazily). Version 10 is written; version 4 to 9 files (and autosaves)
+// ship with the app and load lazily). Version 11 is written; version 4 to 10 files (and autosaves)
 // are upgraded by `migrateProject`; versions 1–3 are rejected with a clear message.
 
 export const PROJECT_EXT = '.pslot.json';
@@ -43,9 +44,12 @@ interface EmbeddedBlob {
 }
 
 /** Project versions this app opens (older ones are upgraded on load). */
-export type ProjectVersion = 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export type ProjectVersion = 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 
-const isSupported = (v: unknown): v is ProjectVersion => v === 4 || v === 5 || v === 6 || v === 7 || v === 8 || v === 9 || v === 10;
+/** The version written (Project.version). */
+export const PROJECT_VERSION = 11;
+
+const isSupported = (v: unknown): v is ProjectVersion => typeof v === 'number' && Number.isInteger(v) && v >= 4 && v <= PROJECT_VERSION;
 
 export interface ProjectFile {
   format: 'pslot';
@@ -61,7 +65,7 @@ export interface Bundle {
   assets: { id: string; name: string; mime: string; data: ArrayBuffer }[];
   /** Project version the data was saved as (4: see `compensateV4CharScale`). */
   version: ProjectVersion;
-  /** Notes about the load (e.g. a v9 file upgraded to v10); empty for current files. */
+  /** Notes about the load (e.g. a v10 file upgraded to v11); empty for current files. */
   notes: Msg[];
 }
 
@@ -133,7 +137,7 @@ export async function installBundle(b: Omit<Bundle, 'notes' | 'version'>): Promi
 }
 
 // ---------------------------------------------------------------------------------------------
-// v4 / v5 / v6 / v7 / v8 / v9 → v10 migration
+// v4 / v5 / v6 / v7 / v8 / v9 / v10 → v11 migration
 //
 // Every function below fills fields that are MISSING with their current value and keeps whatever
 // is present, so it is idempotent and safe on current data (user presets of any version go through
@@ -174,12 +178,16 @@ export async function installBundle(b: Omit<Bundle, 'notes' | 'version'>): Promi
 // the viewer; before, + brought the right side toward the viewer). It is read by version, like the
 // v8 lighting (a v8 tilt and a v9 one look alike): a v4–v8 text layer's stored tiltY is negated
 // (`flipTiltY`, `migrateChars`); absent or 0 stays as is, so every glyph keeps its tilt.
-// v10 made side materials optional (model/sides.ts): an absent `Title3DProps.side`,
-// `Backplate3D.side` or `CharAdjust.side3d` follows its neighbour (the outermost band or the face,
-// the plate's front, the letter's own). In v4–v9 data every side was stored; one that deep-equals
-// its neighbour (link ids included) now inherits (`inherit`, `migrateLayer`), and a letter keeps
-// the side it showed (inheritCharSides), so every render stays the same. Read by version: a v10
-// side the user owns may equal its neighbour on purpose (just owned, not yet edited).
+// v10 made side materials optional: an absent `Title3DProps.side`, `Backplate3D.side` or
+// `CharAdjust.side3d` followed its neighbour (the outermost band or the face, the plate's front,
+// the letter's own); in v4–v9 data every side was stored. The v11 conversion reads both: each
+// side resolves to what it showed.
+// v11 replaced the bevel rings and backplates by the letter (one bevel) and its bands
+// (model/bands.ts): every v4–v10 3D style goes through `convertBands` (io/migrate/bands.ts, see
+// its header for what renders the same and what comes closest), the letters' overrides and the
+// part effects with it (`migrateLayer`): a ring folded into the letter's bevel hands its effects
+// to the face, a converted ring or plate keeps its id as a band, a side wall that moved onto a
+// band hands its effects to that band.
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -259,20 +267,20 @@ function migrateMaterial3D(m: Material3D, legacy: LegacyLighting | null): Materi
   };
 }
 
-function migrateBackplate3D(b: Backplate3D, legacy: LegacyLighting | null): Backplate3D {
-  return { ...b, plate: filled(plateShape(), b.plate), face: migrateMaterial3D(b.face, legacy), ...(b.side ? { side: migrateMaterial3D(b.side, legacy) } : {}) };
+function migrateBand3D(b: Band3D, legacy: LegacyLighting | null): Band3D {
+  return { ...b, shape: filled(plateShape(), b.shape), material: migrateMaterial3D(b.material, legacy), ...(b.side ? { side: migrateMaterial3D(b.side, legacy) } : {}) };
 }
 
 /**
- * A 3D title style (v4 to v8) with every current field present; `legacy` (v4–v7 data, see the v8
- * notes): its lighting converted to overrides, `docBlur` = the environment blur of the document
- * the style was in (what a layer without its own lighting had).
+ * A 3D title style with every field of its shape present: a v11 one (letter and bands), or a
+ * v4–v10 one (rings and backplates) still in that shape, for `convertBands`. `legacy` (v4–v7
+ * data, see the v8 notes): its lighting converted to overrides, `docBlur` = the environment blur
+ * of the document the style was in (what a layer without its own lighting had).
  */
-export function migrateStyle3D(s: Title3DProps, legacy?: { docBlur: number }): Title3DProps {
+export function migrateStyle3D<S extends Title3DProps | LegacyStyle3D>(s: S, legacy?: { docBlur: number }): S {
   const lighting = legacy ? legacyLayerLighting(s.lighting as unknown as Lighting3D | null) : s.lighting;
   const parts = legacyParts(lighting, legacy);
-  return {
-    ...s,
+  const common = {
     mode: s.mode ?? 'extrude',
     // Files from before inflate.smoothness / detail get 0 / 1: the mesh-normal shading and grid they were drawn with.
     inflate: filled(createTitle3DLayer().style3d.inflate, s.inflate),
@@ -284,8 +292,13 @@ export function migrateStyle3D(s: Title3DProps, legacy?: { docBlur: number }): T
     edgeImage: s.edgeImage ?? 0,
     face: migrateMaterial3D(s.face, parts),
     ...(s.side ? { side: migrateMaterial3D(s.side, parts) } : {}),
+  };
+  if (!isLegacyStyle3D(s)) return { ...s, ...common, bands: (s as Title3DProps).bands.map((b) => migrateBand3D(b, parts)) };
+  return {
+    ...s,
+    ...common,
     bands: s.bands.map((b) => ({ ...b, material: migrateMaterial3D(b.material, parts) })),
-    backplates: s.backplates.map((b) => migrateBackplate3D(b, parts)),
+    backplates: s.backplates.map((b) => ({ ...b, plate: filled(plateShape(), b.plate), face: migrateMaterial3D(b.face, parts), ...(b.side ? { side: migrateMaterial3D(b.side, parts) } : {}) })),
   };
 }
 
@@ -369,11 +382,25 @@ function migrateChars(chars: Record<number, CharAdjust>, is3D: boolean, legacy: 
   return out;
 }
 
+/** Part effects keyed by the parts of a v4–v10 style `old`, keyed by the parts of its conversion (see the v11 notes); lists that land on one part are joined. */
+function convertPartEffects(fx: PartEffects, old: LegacyStyle3D, conv: BandsConversion): PartEffects {
+  const keyOf = (to: 'face' | 'side' | number): PartKey => (typeof to === 'number' ? `band:${conv.style3d.bands[to].id}` : to);
+  const out: PartEffects = {};
+  for (const [key, list] of Object.entries(fx) as [PartKey, EffectInstance[]][]) {
+    const ring = old.bands.findIndex((b) => key === `band:${b.id}`);
+    const plate = old.backplates.findIndex((p) => key === `plate:${p.id}`);
+    const to: PartKey =
+      ring >= 0 ? keyOf(conv.part({ kind: 'band', index: ring })) : plate >= 0 ? keyOf(conv.part({ kind: 'plate', index: plate })) : key === 'side' ? keyOf(conv.part('side')) : key;
+    out[to] = [...(out[to] ?? []), ...list];
+  }
+  return out;
+}
+
 /**
  * `legacy`: v4–v7 data (see the v8 notes), in a document whose environment blur is `docBlur`;
- * `flipTiltY`: v4–v8 data (see the v9 notes); `inherit`: v4–v9 data (see the v10 notes).
+ * `flipTiltY`: v4–v8 data (see the v9 notes). A v4–v10 3D style converts (the v11 notes).
  */
-function migrateLayer(l: Layer, legacy: { docBlur: number } | undefined, flipTiltY: boolean, inherit: boolean): Layer {
+function migrateLayer(l: Layer, legacy: { docBlur: number } | undefined, flipTiltY: boolean): Layer {
   const effects = migrateEffects(l.effects ?? []);
   const clip = l.clip ?? false;
   const masks = l.masks ?? [];
@@ -381,10 +408,17 @@ function migrateLayer(l: Layer, legacy: { docBlur: number } | undefined, flipTil
   // generator params stay as stored: generatorParams fills the defaults at render time
   if (l.kind === 'background' || l.kind === 'group' || l.kind === 'adjustment' || l.kind === 'generator') return { ...l, clip, masks, transform, effects };
   const ops = { warp: filled(noWarp(), l.warp), distort: filled(noDistort(), l.distort), weight: l.weight ?? 0 };
-  const filledStyle = l.kind === 'title3d' ? migrateStyle3D(l.style3d, legacy) : null;
-  const style3d = filledStyle && inherit ? inheritSides(filledStyle) : filledStyle;
+  const filledStyle = l.kind === 'title3d' ? migrateStyle3D(l.style3d as Title3DProps | LegacyStyle3D, legacy) : null;
   const charLegacy = filledStyle ? legacyParts(filledStyle.lighting, legacy) : null;
-  const chars = l.source.kind === 'text' ? migrateChars(l.source.chars ?? {}, l.kind === 'title3d', charLegacy, flipTiltY) : {};
+  let chars = l.source.kind === 'text' ? migrateChars(l.source.chars ?? {}, l.kind === 'title3d', charLegacy, flipTiltY) : {};
+  let partEffects = Object.fromEntries(Object.entries(l.partEffects ?? {}).map(([k, fx]) => [k, migrateEffects(fx ?? [])])) as PartEffects;
+  let style3d = filledStyle as Title3DProps | null;
+  if (filledStyle && isLegacyStyle3D(filledStyle)) {
+    const conv = convertBands(filledStyle, { orb: l.source.kind === 'shape' && l.source.shape === 'orb', chars: Object.values(chars) });
+    style3d = conv.style3d;
+    chars = Object.fromEntries(Object.entries(chars).map(([k, c]) => [k, conv.char(c)]));
+    partEffects = convertPartEffects(partEffects, filledStyle, conv);
+  }
   const source =
     l.source.kind === 'text'
       ? {
@@ -393,20 +427,19 @@ function migrateLayer(l: Layer, legacy: { docBlur: number } | undefined, flipTil
           vScale: l.source.vScale ?? 1,
           tsume: l.source.tsume ?? 0,
           tateChuYoko: l.source.tateChuYoko ?? false,
-          chars: filledStyle && style3d && inherit ? inheritCharSides(filledStyle, style3d, chars) : chars,
+          chars,
           lines: l.source.lines ?? {},
         }
       : l.source.kind === 'image'
         ? { ...l.source, trace: filled(imageTrace(), l.source.trace) }
         : l.source;
-  const partEffects = Object.fromEntries(Object.entries(l.partEffects ?? {}).map(([k, fx]) => [k, migrateEffects(fx ?? [])])) as PartEffects;
   const common = { ...ops, clip, masks, transform, effects, partEffects };
   if (l.kind === 'title2d') return { ...l, ...common, source: source as typeof l.source, style: migrateStyle2D(l.style) };
-  return { ...l, ...common, source: source as typeof l.source, style3d: style3d ?? migrateStyle3D(l.style3d, legacy) };
+  return { ...l, ...common, source: source as typeof l.source, style3d: style3d! };
 }
 
 /**
- * A version 4 to 10 project as a complete version 10 project (see the migration notes above).
+ * A version 4 to 11 project as a complete version 11 project (see the migration notes above).
  * Throws on anything else.
  */
 export function migrateProject(json: unknown): Project {
@@ -418,12 +451,11 @@ export function migrateProject(json: unknown): Project {
   const environment = migrateEnvironment(p.comp.environment);
   const legacy = version < 8 ? { docBlur: environment.blur } : undefined;
   const flipTiltY = version < 9;
-  const inherit = version < 10;
   const filledIn: Project = {
     ...p,
-    version: 10,
+    version: PROJECT_VERSION,
     comp: { ...p.comp, globalLight: filled(comp.globalLight, p.comp.globalLight), dpi: p.comp.dpi ?? comp.dpi, environment },
-    layers: p.layers.map((l) => migrateLayer(l, legacy, flipTiltY, inherit)),
+    layers: p.layers.map((l) => migrateLayer(l, legacy, flipTiltY)),
   };
   // The migration steps of src/io/migrate/, in order.
   return contentEffects(materialEffects(effectDedupe(generatorParams(filledIn))));
@@ -431,8 +463,8 @@ export function migrateProject(json: unknown): Project {
 
 function unsupported(version: unknown): Msg {
   return version === 1 || version === 2 || version === 3
-    ? msg('This is a version {version} project; this version of the app opens version 4 to 10 projects only', { version })
-    : msg('Unsupported project version {version} (expected 4 to 10)', { version: String(version) });
+    ? msg('This is a version {version} project; this version of the app opens version 4 to {latest} projects only', { version, latest: PROJECT_VERSION })
+    : msg('Unsupported project version {version} (expected 4 to {latest})', { version: String(version), latest: PROJECT_VERSION });
 }
 
 /**
@@ -440,7 +472,7 @@ function unsupported(version: unknown): Msg {
  * upgraded on load; `version` is the one it was saved as.
  */
 export const upgradeNote = (what: string, version: ProjectVersion): Msg =>
-  msg('{what} was made with an earlier version (v{version}) and has been upgraded to v10', { what: msg(what), version });
+  msg('{what} was made with an earlier version (v{version}) and has been upgraded to v{latest}', { what: msg(what), version, latest: PROJECT_VERSION });
 
 /** Added after `upgradeNote` when `compensateV4CharScale` moved glyphs back to their v4 positions. */
 export const charScaleNote: Msg = msg(
@@ -454,7 +486,7 @@ export function serializeProject(project: Project): string {
   const b = collectBundle(project);
   const file: ProjectFile = {
     format: 'pslot',
-    version: 10,
+    version: PROJECT_VERSION,
     project,
     fonts: b.fonts.map((f) => ({ id: f.id, name: f.name, data: toBase64(f.data) })),
     assets: b.assets.map((a) => ({ id: a.id, name: a.name, mime: a.mime, data: toBase64(a.data) })),
@@ -484,7 +516,7 @@ export function parseProjectFile(text: string): Bundle {
       data: fromBase64(a.data),
     })),
     version,
-    notes: version === 10 ? [] : [upgradeNote('This project file', version)],
+    notes: version === PROJECT_VERSION ? [] : [upgradeNote('This project file', version)],
   };
 }
 

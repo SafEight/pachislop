@@ -1,22 +1,28 @@
 import { useId } from 'react';
-import { BEVEL_OUTSIDE_SHARE, unitBevel } from '../../../engine/three/bevel';
+import { unitBevel } from '../../../engine/three/bevel';
 import { curveFn } from '../../../engine/layer2d/contours';
-import { plateSide, sideMaterial } from '../../../model/sides';
+import { BEVEL_OUTSIDE_SHARE, bandSide, sideMaterial } from '../../../model/bands';
 import type { BevelShape3D, Material3D, Title3DProps } from '../../../model/types';
 import type { Translate } from '../../../store/msg';
 import { useT } from '../../i18n';
 import { material3DCss, presetLabel } from './shared';
 
-// Cross-section of the extruded title, cut through a stroke: the face on the left at z = 0,
-// the bevel bands outward to the side wall (or, in inflate mode, the inflate profile from the
-// stroke's middle down to the outline), the side wall, then each enabled backplate stacked
-// behind. A dashed line marks the glyph outline: the bands sit outside, across or inside it
-// per bevelPosition. Mirrors buildTitle in engine/three/title.ts (same stacking rules), drawn
-// in % of size with x outward and z growing downward (deeper).
+// Cross-section of the extruded title, cut through a stroke: the letter's face on the left at
+// z = 0, its bevel outward to its side wall (or, in inflate mode, the inflate profile from the
+// stroke's middle down to the outline), the side wall, then each enabled band stacked behind,
+// innermost first. A dashed line marks the glyph outline: the letter's bevel sits outside,
+// across or inside it per bevelPosition. Mirrors the engine (engine/three/title.ts, the rules in
+// model/bands.ts): band k's edge is the letter's silhouette grown by the running sum of grows,
+// its front at the previous solid's back + offset but never in front of 0.25 % behind where the
+// previous solid's bevel ends, its bevel inward from its edge, its wall from the bevel's end.
+// Colours are the materials (own side walls on the walls). Drawn in % of size with x outward
+// and z growing downward (deeper).
 
 const W = 200;
 const H = 90;
 const PAD = 6;
+/** A band's front never comes nearer than this behind the previous solid's wall top, % of size (engine rule). */
+const BAND_LEAD = 0.25;
 /** Longest straight wall drawn, × the largest bevel width / depth. */
 const WALL_MAX = 1.5;
 /** Face stub width, × the largest bevel width / depth. */
@@ -74,86 +80,93 @@ interface Mark {
   z1: number;
 }
 
+/** A solid's wall in the section: where its wall top and back really are and where they are drawn (a long wall is drawn shorter), % of size. */
+interface Wall {
+  top: number;
+  back: number;
+  shownTop: number;
+  shownBack: number;
+}
+
+/** Where the real depth `z` (behind `w`'s wall top) is drawn: scaled along a shortened wall, 1:1 past its back. */
+function shownZ(w: Wall, z: number): number {
+  if (z >= w.back) return w.shownBack + (z - w.back);
+  return w.shownTop + ((z - w.top) * (w.shownBack - w.shownTop)) / Math.max(w.back - w.top, 1e-9);
+}
+
 /**
  * Regions (back to front), surface outlines and wall breaks of the whole cross-section.
  * Real proportions would make a deep side wall dwarf a 1 % bevel, so every straight wall is
  * drawn at most WALL_MAX × the largest bevel extent (with a break mark), and the face is a
  * short stub.
  */
-function crossSection(t: Translate, st: Title3DProps, activeBand: number, activePlate: number, activeSide: boolean) {
+function crossSection(t: Translate, st: Title3DProps, activeBand: number, activeSide: boolean) {
   const inflate = st.mode === 'inflate';
-  const bands = inflate ? [] : st.bands;
+  const bevel = inflate ? null : st.bevel;
+  const bevelW = bevel ? pos(bevel.width) : 0;
+  const bands = st.bands.map((b, i) => ({ b, i })).filter(({ b }) => b.enabled);
   const height = pos(st.inflate.height);
-  const bandsW = bands.reduce((s, b) => s + pos(b.width), 0);
-  const growTotal = st.backplates.reduce((s, p) => s + (p.enabled ? pos(p.grow) : 0), 0);
-  const shapes = [...bands, ...st.backplates.filter((p) => p.enabled).map((p) => p.bevel)];
+  const growTotal = bands.reduce((s, { b }) => s + pos(b.grow), 0);
+  const shapes = [...(bevel && bevelW > 0 ? [bevel] : []), ...bands.map(({ b }) => b.bevel).filter((v) => v.width > 0)];
   // inflate: walls are drawn against a quarter of the rise, so a tall dome doesn't let deep
-  // walls dwarf the plates
-  const maxBevel = Math.max(inflate ? height / 4 : 0, ...shapes.flatMap((b) => [pos(b.width), pos(b.depth)]));
-  // no bevel at all: scale walls against the plate steps instead (or 1 % of size)
+  // walls dwarf the bands
+  const maxBevel = Math.max(inflate ? height / 4 : 0, ...shapes.flatMap((v) => [pos(v.width), pos(v.depth)]));
+  // no bevel at all: scale walls against the band steps instead (or 1 % of size)
   const ref = maxBevel > 0 ? maxBevel : Math.max(growTotal, 1);
   const wallMax = WALL_MAX * ref;
-  const faceW = Math.max(FACE_STUB * ref, 0.15 * bandsW);
+  const faceW = Math.max(FACE_STUB * ref, 0.15 * bevelW);
 
   const breaks: Break[] = [];
-  /** Shown length of a wall of `len` starting at `top`; records a break when shortened. */
-  const wall = (key: string, label: string, x: number, top: number, len: number) => {
-    if (len <= wallMax) return len;
-    breaks.push({ key, x, z: top + wallMax / 2, label: t('{part} shortened (really {depth} % deep)', { part: label, depth: +len.toFixed(2) }) });
-    return wallMax;
+  /** A wall of `len` from wall top `top` (drawn at `shownTop`); records a break when it is drawn shorter. */
+  const wall = (key: string, label: string, x: number, top: number, shownTop: number, len: number): Wall => {
+    const shown = Math.min(len, wallMax);
+    if (len > wallMax) breaks.push({ key, x, z: shownTop + wallMax / 2, label: t('{part} shortened (really {depth} % deep)', { part: label, depth: +len.toFixed(2) }) });
+    return { top, back: top + len, shownTop, shownBack: shownTop + shown };
   };
 
-  const main: Region[] = [];
-  // inflate: the profile from the stroke's middle (left, top at z = 0) out to the outline; the
-  // stroke's half-width is drawn at 2.5 × the rise so the curve reads at any height
+  // the letter: face stub (inflate: the profile from the stroke's middle, top at z = 0, out to
+  // the outline; the stroke's half-width is drawn at 2.5 × the rise so the curve reads at any
+  // height), its bevel, its side wall
   const profile = curveFn(st.inflate.profile);
   const halfW = 2.5 * height;
   const inflateFront: Pt[] = Array.from({ length: INFLATE_SAMPLES + 1 }, (_, k) => [(halfW * k) / INFLATE_SAMPLES, height * (1 - profile(1 - k / INFLATE_SAMPLES))]);
-  const front: Pt[] = inflate ? inflateFront : [[0, 0], [faceW, 0]];
-  const outlines: Outline[] = [{ key: 'face', pts: front, active: false }];
-  let [x, z] = front[front.length - 1];
-  const bandSurfaces = bands.map((b, i) => {
-    const pts = bevelPoints(b, x, z, pos(b.width), pos(b.depth));
-    [x, z] = pts[pts.length - 1];
-    outlines.push({ key: `band${i}`, pts, active: i === activeBand });
-    return pts;
-  });
-  const sil = x;
-  let wallTop = z;
-  let zBack = wallTop + wall('wall', t('Side wall'), sil, wallTop, pos(st.depth));
-  outlines.push({ key: 'wall', pts: [[sil, wallTop], [sil, zBack]], active: activeSide });
-  // the glyph outline: the bands' outside share lies beyond it (inflate fronts end on it)
-  const glyph: Mark = { x: sil - bandsW * BEVEL_OUTSIDE_SHARE[st.bevelPosition], z0: Math.min(0, ...bandSurfaces.flat().map((p) => p[1])), z1: zBack };
+  const stub: Pt[] = inflate ? inflateFront : [[0, 0], [faceW, 0]];
+  const [x0, z0] = stub[stub.length - 1];
+  const front = bevel && bevelW > 0 ? [...stub, ...bevelPoints(bevel, x0, z0, bevelW, pos(bevel.depth))] : stub;
+  const [sil, top] = front[front.length - 1];
+  let prev = wall('wall', t('Side wall'), sil, top, top, pos(st.depth));
+  const outlines: Outline[] = [
+    { key: 'face', pts: front, active: false },
+    { key: 'wall', pts: [[sil, prev.shownTop], [sil, prev.shownBack]], active: activeSide },
+  ];
+  // the glyph outline: the bevel's outside share lies beyond it (inflate fronts end on it)
+  const glyph: Mark = { x: sil - bevelW * BEVEL_OUTSIDE_SHARE[st.bevelPosition], z0: Math.min(0, ...front.map((p) => p[1])), z1: prev.shownBack };
+  const letter: Region[] = [
+    { key: 'side', pts: [[0, prev.shownTop], [sil, prev.shownTop], [sil, prev.shownBack], [0, prev.shownBack]], mat: sideMaterial(st), label: t('Side wall') },
+    { key: 'face', pts: column(front, prev.shownTop), mat: st.face, label: inflate ? t('Inflated face') : t('Face') },
+  ];
 
-  main.push({ key: 'side', pts: [[0, wallTop], [sil, wallTop], [sil, zBack], [0, zBack]], mat: sideMaterial(st), label: t('Side wall') });
-  main.push({ key: 'face', pts: column(front, wallTop), mat: st.face, label: inflate ? t('Inflated face') : t('Face') });
-  bands.forEach((b, i) => {
-    main.push({ key: `band${i}`, pts: column(bandSurfaces[i], wallTop), mat: b.material, label: t('Band {n} · {preset}', { n: i + 1, preset: presetLabel(t, b.material.preset) }) });
-  });
-
-  // backplates, innermost first: cumulative grow, front at the previous back + zGap (a
-  // negative gap sinks it, but never in front of the previous wall top)
-  const plates: Region[][] = [];
-  let grow = 0;
-  st.backplates.forEach((p, i) => {
-    if (!p.enabled) return;
-    grow += pos(p.grow);
-    const xo = sil + grow;
-    const bw = pos(p.bevel.width);
-    const zFront = Math.max(zBack + p.zGap, wallTop);
-    const bevel = bevelPoints(p.bevel, xo - bw, zFront, bw, pos(p.bevel.depth));
-    const front: Pt[] = [[0, zFront], ...bevel];
-    wallTop = bevel[bevel.length - 1][1];
-    zBack = wallTop + wall(`plate${i}`, t('Plate {n} wall', { n: i + 1 }), xo, wallTop, pos(p.depth));
-    plates.push([
-      { key: `plate${i}side`, pts: [[0, wallTop], [xo, wallTop], [xo, zBack], [0, zBack]], mat: plateSide(p), label: t('Plate {n} side', { n: i + 1 }) },
-      { key: `plate${i}face`, pts: column(front, wallTop, 0), mat: p.face, label: t('Plate {n} · {preset}', { n: i + 1, preset: presetLabel(t, p.face.preset) }) },
+  // the bands, innermost first
+  const stack: Region[][] = [];
+  let edge = sil;
+  for (const { b, i } of bands) {
+    edge += pos(b.grow);
+    const n = i + 1;
+    const zFront = Math.max(prev.back + b.offset, prev.top + BAND_LEAD);
+    const shownFront = shownZ(prev, zFront);
+    const bw = Math.min(pos(b.bevel.width), edge);
+    const surface: Pt[] = [[0, shownFront], ...(bw > 0 ? bevelPoints(b.bevel, edge - bw, shownFront, bw, pos(b.bevel.depth)) : [[edge, shownFront] as Pt])];
+    const drop = surface[surface.length - 1][1] - shownFront;
+    prev = wall(`band${i}`, t('Band {n} side', { n }), edge, zFront + drop, shownFront + drop, pos(b.depth));
+    stack.push([
+      { key: `band${i}side`, pts: [[0, prev.shownTop], [edge, prev.shownTop], [edge, prev.shownBack], [0, prev.shownBack]], mat: bandSide(b), label: t('Band {n} side', { n }) },
+      { key: `band${i}face`, pts: column(surface, prev.shownTop, 0), mat: b.material, label: t('Band {n} · {preset}', { n, preset: presetLabel(t, b.material.preset) }) },
     ]);
-    outlines.push({ key: `plate${i}`, pts: [...front, [xo, zBack]], active: i === activePlate });
-  });
+    outlines.push({ key: `band${i}`, pts: [...surface, [edge, prev.shownBack]], active: i === activeBand });
+  }
 
-  // deeper solids first so nearer ones cover them where a negative gap overlaps
-  const regions = [...plates.reverse().flat(), ...main];
+  // deeper solids first so nearer ones cover them where a band slides forward
+  const regions = [...stack.reverse().flat(), ...letter];
   // highlighted outlines last so they stay on top
   outlines.sort((a, b) => Number(a.active) - Number(b.active));
   return { regions, outlines, breaks, glyph };
@@ -220,28 +233,15 @@ function paint(m: Material3D, id: string) {
   };
 }
 
-/** Inline cross-section of the band stack and backplates (face left, deeper = lower); the active band, plate or side wall is outlined. */
-export function BevelPreview({
-  st,
-  activeBand = -1,
-  activePlate = -1,
-  activeSide = false,
-}: {
-  st: Title3DProps;
-  activeBand?: number;
-  activePlate?: number;
-  activeSide?: boolean;
-}) {
+/** Inline cross-section of the letter and its bands (face left, deeper = lower); the active band or the letter's side wall is outlined. */
+export function BevelPreview({ st, activeBand = -1, activeSide = false }: { st: Title3DProps; activeBand?: number; activeSide?: boolean }) {
   const uid = useId().replace(/:/g, '');
   const t = useT();
-  const { regions, outlines, breaks, glyph } = crossSection(t, st, activeBand, activePlate, activeSide);
+  const { regions, outlines, breaks, glyph } = crossSection(t, st, activeBand, activeSide);
   const { pt, str: map } = fitter(regions.flatMap((r) => r.pts));
   const paints = regions.map((r) => paint(r.mat, `${uid}-${r.key}`));
-  const plates = st.backplates.filter((p) => p.enabled).length;
-  const bands = t(st.bands.length === 1 ? '{n} band' : '{n} bands', { n: st.bands.length });
-  const label = plates
-    ? t('Bevel cross-section: face, {bands}, side wall, {plates}', { bands, plates: t(plates === 1 ? '{n} backplate' : '{n} backplates', { n: plates }) })
-    : t('Bevel cross-section: face, {bands}, side wall', { bands });
+  const n = st.bands.filter((b) => b.enabled).length;
+  const label = n ? t('Cross-section: the letter and {bands}', { bands: t(n === 1 ? '{n} band' : '{n} bands', { n }) }) : t('Cross-section: the letter');
   return (
     <svg
       role="img"

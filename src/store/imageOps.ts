@@ -1,5 +1,5 @@
 import { Euler, Vector3 } from 'three';
-import { ao3D, band3D, createGroupLayer, createTitle2DLayer, createTitle3DLayer, erode2D, glint3D, material2D, material3D, shadow3D, solidFill } from '../model/defaults';
+import { ao3D, bevel3D, createGroupLayer, createTitle2DLayer, createTitle3DLayer, erode2D, glint3D, material2D, material3D, shadow3D, solidFill } from '../model/defaults';
 import { isTitleLayer, type TitleLayer } from '../model/parts';
 import type { BevelShape3D, Fill, Layer, Material2D, Material3D, Pattern, PlateShape, SvgSource, Title2DLayer, Title3DProps, TitleStyle2D, Transform } from '../model/types';
 import { applyPreset } from '../presets/apply';
@@ -34,19 +34,19 @@ const plainMaterial3D = (): Material3D => ({ ...material3D('custom'), color: '#f
 /**
  * The plain 3D image look: the picture on the face and around the edges (faceImage / edgeImage
  * 1) over neutral plastic, a shallow extrusion with one small round bevel inside the picture's
- * silhouette (`size` is the image's long side, so thin spikes stay thin), no plates or glint,
+ * silhouette (`size` is the image's long side, so thin spikes stay thin), no bands or glint,
  * light AO; the comp's environment and lights stay.
  */
 export function plainImageStyle3D(): Title3DProps {
   return {
     ...createTitle3DLayer().style3d,
     depth: 5,
+    bevel: bevel3D(0.5, 0.5),
     bevelPosition: 'inside',
     face: plainMaterial3D(),
     faceImage: 1,
     edgeImage: 1,
-    bands: [{ ...band3D(0.5, 0.5, 'custom', 'round'), material: plainMaterial3D() }],
-    backplates: [],
+    bands: [],
     shadow: shadow3D({ softness: 0.8 }),
     glint: glint3D(),
     ao: ao3D({ enabled: true, intensity: 0.5 }),
@@ -100,7 +100,7 @@ function scaleStyleUnits(l: TitleLayer, k: number): TitleLayer {
     return { ...l, source, style: { ...s, face: mat(s.face), rims, erode: { ...s.erode, edge: s.erode.edge * k, scale: s.erode.scale * k } } } as TitleLayer;
   }
   const mat = (m: Material3D): Material3D => ({ ...m, flakeScale: m.flakeScale * k, pattern: pattern(m.pattern), surface: { ...m.surface, scale: m.surface.scale * k } });
-  const bevel = <B extends BevelShape3D>(b: B): B => ({ ...b, width: b.width * k, depth: b.depth * k });
+  const bevel = (b: BevelShape3D): BevelShape3D => ({ ...b, width: b.width * k, depth: b.depth * k });
   const s = l.style3d;
   const style3d: Title3DProps = {
     ...s,
@@ -108,16 +108,16 @@ function scaleStyleUnits(l: TitleLayer, k: number): TitleLayer {
     depth: s.depth * k,
     face: mat(s.face),
     ...(s.side ? { side: mat(s.side) } : {}),
-    bands: s.bands.map((b) => ({ ...bevel(b), material: mat(b.material) })),
-    backplates: s.backplates.map((p) => ({
-      ...p,
-      grow: p.grow * k,
-      depth: p.depth * k,
-      zGap: p.zGap * k,
-      plate: plate(p.plate),
-      bevel: bevel(p.bevel),
-      face: mat(p.face),
-      ...(p.side ? { side: mat(p.side) } : {}),
+    bevel: bevel(s.bevel),
+    bands: s.bands.map((b) => ({
+      ...b,
+      grow: b.grow * k,
+      depth: b.depth * k,
+      offset: b.offset * k,
+      shape: plate(b.shape),
+      bevel: bevel(b.bevel),
+      material: mat(b.material),
+      ...(b.side ? { side: mat(b.side) } : {}),
     })),
     glint: { ...s.glint, radius: s.glint.radius * k, length: s.glint.length * k },
     ao: { ...s.ao, radius: s.ao.radius * k },

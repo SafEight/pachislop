@@ -20,7 +20,7 @@ import type { Contour, ShapeContours } from './outline';
 // medial-axis ridges round off: a mirror finish then shows no facet ripples at the grid step.
 //
 // Fields depend only on the outline and the grid step, so they are cached per shape: height,
-// profile, depth and plate edits only re-emit the triangles.
+// profile, depth and band edits only re-emit the triangles.
 
 /** Grid nodes across the largest inset (≈ half the widest stroke) at the estimated scale. */
 const NODES_PER_INSET = 12;

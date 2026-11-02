@@ -26,12 +26,19 @@ export type PanelRow =
 
 /**
  * A title's parts FRONT to back (face first, as a stack reads in PS). A 2D face switched off
- * (`hideFace`) is no part of the style but stays listed so its eye can turn it back on.
+ * (`hideFace`) is no part of the style but stays listed so its eye can turn it back on. A 3D
+ * side is listed while the title owns a side material (`style3d.side`) or the side carries
+ * effects; else it is part of the letter, which its face row stands for.
  */
 export function listedParts(l: TitleLayer): PartKey[] {
   const parts = layerParts(l).reverse();
   if (l.kind === 'title2d' && l.style.hideFace) parts.unshift('face');
-  return parts;
+  return parts.filter((p) => p === listedPart(l, p));
+}
+
+/** The listed part standing for `part` (a viewport pick, say): a 3D side that isn't listed is its letter's face. */
+export function listedPart(l: TitleLayer, part: PartKey): PartKey {
+  return l.kind === 'title3d' && part === 'side' && !l.style3d.side && !partEffectsOf(l, 'side').length ? 'face' : part;
 }
 
 /** Twirl state of layer `l`: groups default open, everything else closed; null when it has nothing to list. */

@@ -3,7 +3,7 @@ import type { RenderFrame } from '../contracts';
 import type { PassKit } from '../passkit';
 
 // Screen-space ambient occlusion for 3D layers (Element 3D SSAO), Scalable-AO style
-// (McGuire et al. 2012): darkens the crevices between bevel bands, letters and backplates.
+// (McGuire et al. 2012): darkens the crevices between the letters and the bands behind them.
 //
 //   scene ─ normal / depth prepass (view-space normal + linear depth, AO grid)
 //         ─ AO: a spiral of taps over a disc of the world-space radius projected at the
@@ -99,8 +99,8 @@ void main() {
     float vv = dot( v, v );
     float vn = dot( v, N );
     // falloff by the distance ALONG the surface, not in 3D: the face of a letter standing far
-    // above the plate (behind which its wall is hidden from the camera) still shades the
-    // plate at its foot, out to one radius; only very tall occluders (8 radii) fade out
+    // above a band (behind which its wall is hidden from the camera) still shades the
+    // band at its foot, out to one radius; only very tall occluders (8 radii) fade out
     float t = max( vv - vn * vn, 0.0 ) / r2;
     float f = max( 1.0 - t, 0.0 ) * clamp( 1.0 - vn / ( 8.0 * uRadius ), 0.0, 1.0 );
     sum += f * f * max( ( vn - bias ) / ( sqrt( vv ) + 0.01 * uRadius ), 0.0 );
@@ -129,7 +129,7 @@ void main() {
     float qz = texelFetch( tND, q, 0 ).a;
     if ( qz <= 0.0 ) continue;
     float x = float( i ) / ${BLUR_RADIUS / 2}.0;
-    // depth-aware: taps across a depth jump (letter over plate) don't bleed
+    // depth-aware: taps across a depth jump (letter over band) don't bleed
     float w = exp( -0.5 * x * x ) * exp( -abs( qz - z ) / ( 0.02 * z ) );
     s += texelFetch( tAO, q, 0 ).r * w;
     ws += w;

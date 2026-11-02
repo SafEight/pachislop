@@ -1,12 +1,9 @@
 import { useRef } from 'react';
-import type { Backplate3D, BevelProfile3D, Glint3D, Material3D, PlateShape, Title3DLayer, Title3DProps } from '../../../model/types';
-import { bandKey } from '../../../model/parts';
-import { sideMaterial } from '../../../model/sides';
-import { partLabel } from '../../../store/labels';
-import { formatMsg } from '../../../store/msg';
+import { bandSide, sideMaterial } from '../../../model/bands';
+import type { Band3D, BevelProfile3D, Glint3D, Material3D, PlateShape, Title3DLayer, Title3DProps } from '../../../model/types';
 import { refKey } from '../../../store/paths';
 import { useEditor, type PropRef, type Refs } from '../../../store/store';
-import { Menu, NumberField, RefCheck, RefColor, RefNum, Row, Section, Seg } from '../../controls';
+import { RefCheck, RefColor, RefNum, Row, Section, Seg } from '../../controls';
 import { useOpenSection } from '../../sectionMemory';
 import { useT } from '../../i18n';
 import { oneShot, useGesture, useMixed, useRefValue } from '../../util';
@@ -14,14 +11,16 @@ import { BevelPreview } from './BevelPreview';
 import { CurveEditor } from './CurveEditor';
 import { PlateIcon, Profile3DIcon } from './icons';
 import { Material3DSection } from './Material3DEditor';
-import { ownPlateSides, ownSides, refsOf, sideSameAs } from '../parts';
+import { ownBandSides, ownSides, refsOf } from '../parts';
 import { material3DCss, sub, tOpts } from './shared';
 import { IconChoice, SwatchTitle } from './widgets';
 
-// Element 3D replacement split by part: the face, the side walls, each bevel band and each
-// backplate get their own editor (Properties › part node). What belongs to no part sits on the
-// layer node: its Shape section (extrude / inflate, depth, skew, bevel position and the bands as a
-// compact list) and its Render passes (glint, AO, shadow catcher); lighting is Lighting3D's.
+// Element 3D replacement split by part (model/bands.ts): the letter's face (its material covers
+// the face, bevel and side walls), its side walls while they have a material of their own, and
+// each band (a whole extruded outline copy stacked behind) get their own editor (Properties ›
+// part node). What belongs to no part sits on the layer node: its Shape section (extrude /
+// inflate, the letter's depth and bevel, skew) and its Render passes (glint, AO, shadow
+// catcher); lighting is Lighting3D's.
 
 const PROFILES: readonly { value: BevelProfile3D; label: string }[] = [
   { value: 'flat', label: 'Flat (ledge)' },
@@ -42,28 +41,28 @@ const JOINS = [
 const SEGMENTS_TIP = 'Bevel segments: facets of curved profiles (round, cove, step, or any riser bent by Curve). Large exports add more automatically.';
 const CURVE_TIP = 'Bevel curve: bends the profile. > 0 fuller / rounder (stays high, drops late), < 0 pinched toward a cove (drops right at the inner edge).';
 
-const PLATE_KINDS: readonly { value: PlateShape['kind']; label: string; title: string }[] = [
-  { value: 'contour', label: 'Contour', title: 'The plate follows the letters (Close bridges the gaps between them)' },
+const BAND_SHAPES: readonly { value: PlateShape['kind']; label: string; title: string }[] = [
+  { value: 'contour', label: 'Contour', title: 'The band follows the letters (Close bridges the gaps between them)' },
   { value: 'hull', label: 'Hull', title: 'Convex hull of the whole title: one smooth slab' },
   { value: 'box', label: 'Box', title: 'A box around the title with cut corners, leaning by Slant (北斗 / カバネリ plates); italic text adds its shear' },
 ];
-const PLATE_OPTIONS = PLATE_KINDS.map((p) => ({ ...p, icon: <PlateIcon kind={p.value} /> }));
+const SHAPE_OPTIONS = BAND_SHAPES.map((p) => ({ ...p, icon: <PlateIcon kind={p.value} /> }));
 
 const MODES = [
-  { value: 'extrude', label: 'Extrude', title: 'Flat face with bevel bands and a straight side wall (Element 3D)' },
-  { value: 'inflate', label: 'Inflate', title: 'Puffy surface rising from the outline (ぷっくり buttons, 保留 icons); bevel bands are ignored' },
+  { value: 'extrude', label: 'Extrude', title: 'Flat face with one bevel and a straight side wall, the bands stacked behind (Element 3D)' },
+  { value: 'inflate', label: 'Inflate', title: 'Puffy surface rising from the outline (ぷっくり buttons, 保留 icons); the letter’s bevel is ignored, the bands still apply' },
 ] as const;
 
 const BEVEL_POSITIONS = [
-  { value: 'outside', label: 'Outside', title: 'Bands grow outward from the glyph outline like a Photoshop stroke: the face keeps the whole letter and wider bands fatten the silhouette' },
-  { value: 'center', label: 'Center', title: 'Bands straddle the glyph outline, half inside and half outside' },
-  { value: 'inside', label: 'Inside', title: 'Bands are cut inward from the glyph outline (Element 3D): the silhouette stays put and wider bands shrink the face' },
+  { value: 'outside', label: 'Outside', title: 'The bevel grows outward from the glyph outline like a Photoshop stroke: the face keeps the whole letter and a wider bevel fattens the silhouette' },
+  { value: 'center', label: 'Center', title: 'The bevel straddles the glyph outline, half inside and half outside' },
+  { value: 'inside', label: 'Inside', title: 'The bevel is cut inward from the glyph outline (Element 3D): the silhouette stays put and a wider bevel shrinks the face' },
 ] as const;
 
-/** Plates whose grow adds nothing beyond the previous plate are hidden behind it (or disabled). */
-function plateHidden(p: Backplate3D): string | null {
-  if (!p.enabled) return 'Disabled: not rendered';
-  if (p.grow <= 0) return 'Hidden: no grow beyond the previous solid, so it sits fully behind it. Raise Grow to show it.';
+/** A band whose grow adds nothing beyond the solid in front of it is hidden behind it (or disabled). */
+function bandHidden(b: Band3D): string | null {
+  if (!b.enabled) return 'Disabled: not rendered';
+  if (b.grow <= 0) return 'Hidden: no grow beyond the previous solid, so it sits fully behind it. Raise Grow to show it.';
   return null;
 }
 
@@ -145,7 +144,7 @@ function GlintSection({ refp, glint }: { refp: Refs; glint: Glint3D }) {
   );
 }
 
-const AO_TIP = 'Ambient occlusion (Element 3D SSAO): darkens the crevices where bands meet and where backplates sit behind the letters, so the stack reads as separate solids.';
+const AO_TIP = 'Ambient occlusion (Element 3D SSAO): darkens the crevices between the letter and its bands, so the stack reads as separate solids.';
 
 /** Element 3D SSAO: screen-space ambient occlusion over the 3D render. */
 function AOSection({ refp }: { refp: Refs }) {
@@ -268,19 +267,20 @@ const styleRef = (layer: Title3DLayer, ...path: (string | number)[]): PropRef =>
 /** The same style3d path on every layer of `layers`, as one target or a list. */
 const styleRefs = (layers: readonly Title3DLayer[], ...path: (string | number)[]) => refsOf(layers.map((l) => styleRef(l, ...path)));
 
-/** A band or backplate of a title, by its index in `style3d.bands` / `style3d.backplates`. */
+/** A band of a title, by its index in `style3d.bands`. */
 export interface Stack3DTarget {
   layer: Title3DLayer;
   index: number;
 }
 
 /**
- * The face of a 3D title: its material; on a GLB model the one material applied over the whole
- * model. An image source adds how much of its picture shows on the face and on the bands and
- * sides, above the material that lights it. Like every part editor here it renders on the part
- * page or inline under a part row; `id` (default "part") prefixes its sections' remembered open
- * state, unique on the page. `layers`: the titles whose faces are edited together (one for a
- * single part); the model note and image rows show when they apply to all of them.
+ * The letter of a 3D title: its material (the face, bevel and, without a side of its own, side
+ * walls); on a GLB model the one material applied over the whole model. An image source adds how
+ * much of its picture shows on the face and on the letter's bevel and side walls, above the
+ * material that lights it. Like every part editor here it renders on the part page or inline
+ * under a part row; `id` (default "part") prefixes its sections' remembered open state, unique on
+ * the page. `layers`: the titles whose faces are edited together (one for a single part); the
+ * model note and image rows show when they apply to all of them.
  */
 export function Face3DEditor({ layers, id = 'part' }: { layers: readonly Title3DLayer[]; id?: string }) {
   const t = useT();
@@ -316,7 +316,7 @@ export function Face3DEditor({ layers, id = 'part' }: { layers: readonly Title3D
             display={100}
             unit="%"
             defaultValue={0}
-            title={t("How much of the picture shows on the bevel bands and sides: each edge takes the colour of the picture at its outline, lit by that part's material (0 = the materials alone)")}
+            title={t("How much of the picture shows on the letter's bevel and side walls: each edge takes the colour of the picture at its outline, lit by the letter's material (0 = the materials alone)")}
           />
         </>
       )}
@@ -325,8 +325,8 @@ export function Face3DEditor({ layers, id = 'part' }: { layers: readonly Title3D
 }
 
 /**
- * A side material that follows its neighbour (model/sides.ts), in place of its editor: the
- * section names what it follows over its swatch, and Own gives it a copy to edit on its own.
+ * A side wall without a material of its own (model/bands.ts), in place of its editor: the section
+ * names what it shows over its swatch, and Own gives it a copy to edit on its own.
  */
 function InheritedMaterial({ id, title, sameAs, mat, onOwn }: { id: string; title: string; sameAs: string; mat: Material3D; onOwn: () => void }) {
   const t = useT();
@@ -351,37 +351,48 @@ function InheritedMaterial({ id, title, sameAs, mat, onOwn }: { id: string; titl
 }
 
 /**
- * The straight side walls of the extrusion: their material (what they follow while they have
- * none of their own, with Own), then their depth (shown in the cross-section of a single title).
+ * The letter's straight side walls: their own material (while they have none, what they show,
+ * with Own; ✕ hands them back to the face), then the letter's depth (shown in the cross-section
+ * of a single title).
  */
 export function SideEditor({ layers, id = 'part' }: { layers: readonly Title3DLayer[]; id?: string }) {
   const t = useT();
   const st = layers[0].style3d;
   const inherited = layers.filter((l) => !l.style3d.side);
-  const sameAs = new Set(inherited.map((l) => formatMsg(sideSameAs(l), t)));
   return (
     <>
       {inherited.length ? (
         <InheritedMaterial
           id={`${id}-material`}
           title={t('Material')}
-          sameAs={sameAs.size === 1 && inherited.length === layers.length ? [...sameAs][0] : t('Same as its neighbour on {n} of {total} layers', { n: inherited.length, total: layers.length })}
+          sameAs={inherited.length === layers.length ? t('Same as face') : t('Same as face on {n} of {total} layers', { n: inherited.length, total: layers.length })}
           mat={sideMaterial(inherited[0].style3d)}
           onOwn={() => ownSides(inherited, true)}
         />
       ) : (
-        <Material3DSection id={`${id}-material`} title={t('Material')} refp={styleRefs(layers, 'side')} mat={sideMaterial(st)} defaultOpen />
+        <Material3DSection id={`${id}-material`} title={t('Material')} refp={styleRefs(layers, 'side')} mat={sideMaterial(st)} defaultOpen>
+          <Row label={t('Side')} title={t('The side walls show the face material again')}>
+            <button className="small" onClick={() => ownSides(layers, false)}>
+              ✕ {t('Same as face')}
+            </button>
+          </Row>
+        </Material3DSection>
       )}
       <Section id={`${id}-geometry`} title={t('Geometry')}>
         {layers.length === 1 && <BevelPreview st={st} activeSide />}
         {layers.some((l) => l.style3d.mode === 'inflate') && <div className="hint-line">{t('Inflate mode: the side wall is the inflated rim, its depth still applies.')}</div>}
-        <RefNum label={t('Depth')} refp={styleRefs(layers, 'depth')} min={0} max={100} step={0.1} unit="%" title={t('Straight side-wall depth')} />
+        <RefNum label={t('Depth')} refp={styleRefs(layers, 'depth')} min={0} max={100} step={0.1} unit="%" title={t("Straight side-wall depth of the letter behind its bevel")} />
       </Section>
     </>
   );
 }
 
-/** Bevel bands, one or several edited together: their material, then their cross-section (shown in the bevel preview for a single band). */
+/**
+ * Bands, one or several edited together: their material first (and their side wall: the band's
+ * material, with Own, or one of its own, with ✕), then their geometry: how far they grow beyond
+ * the solid in front, their own extrusion and z offset, the base shape they grow from (shape rows
+ * show while every band has that shape), joins, counters and their bevel.
+ */
 export function BandEditor({ bands, id = 'part' }: { bands: readonly Stack3DTarget[]; id?: string }) {
   const t = useT();
   const setAt = useEditor((s) => s.setAt);
@@ -389,68 +400,50 @@ export function BandEditor({ bands, id = 'part' }: { bands: readonly Stack3DTarg
   const st = layer.style3d;
   const band = st.bands[index];
   const refp = refsOf(bands.map((b) => styleRef(b.layer, 'bands', b.index)));
-  const profile = useRefValue(sub(refp, 'profile'));
-  return (
-    <>
-      <Material3DSection id={`${id}-material`} title={t('Material')} refp={sub(refp, 'material')} mat={band.material} defaultOpen />
-      <Section id={`${id}-geometry`} title={t('Geometry')}>
-        {bands.length === 1 && <BevelPreview st={st} activeBand={index} />}
-        {bands.some((b) => b.layer.style3d.mode === 'inflate') && <div className="hint-line">{t('Inflate mode: the puffy front replaces the bands (they apply again in Extrude).')}</div>}
-        <RefNum label={t('Width')} refp={sub(refp, 'width')} min={0} max={10} step={0.05} unit="%" title={t('Extent in the outline plane')} />
-        <RefNum label={t('Depth')} refp={sub(refp, 'depth')} min={0} max={10} step={0.05} unit="%" title={t('Extent in z')} />
-        <IconChoice label={t('Profile')} value={band.profile} mixed={profile.mixed} options={tOpts(t, PROFILE_OPTIONS)} onChange={(v) => setAt(sub(refp, 'profile'), v)} />
-        <RefNum label={t('Segments')} refp={sub(refp, 'segments')} min={1} max={24} integer clamp defaultValue={6} title={t(SEGMENTS_TIP)} />
-        <RefNum label={t('Curve')} refp={sub(refp, 'curve')} min={-1} max={1} step={0.01} clamp defaultValue={0} title={t(CURVE_TIP)} />
-      </Section>
-    </>
-  );
-}
-
-/**
- * Backplates (外枠), one or several edited together: their front and edge materials, then their
- * geometry (outline growth and shape, their own extrusion, and their bevel with the bands'
- * Profile / Segments / Curve names). Shape-specific rows show while every plate has that shape.
- */
-export function PlateEditor({ plates, id = 'part' }: { plates: readonly Stack3DTarget[]; id?: string }) {
-  const t = useT();
-  const setAt = useEditor((s) => s.setAt);
-  const { layer, index } = plates[0];
-  const st = layer.style3d;
-  const plate = st.backplates[index];
-  const refp = refsOf(plates.map((p) => styleRef(p.layer, 'backplates', p.index)));
-  const shapeRef = sub(refp, 'plate');
+  const shapeRef = sub(refp, 'shape');
   const shape = useRefValue(sub(shapeRef, 'kind'));
   const join = useRefValue(sub(refp, 'join'));
   const profile = useRefValue(sub(refp, 'bevel', 'profile'));
   const kind = shape.mixed ? null : (shape.value as PlateShape['kind']);
-  const hidden = plates.length === 1 ? plateHidden(plate) : null;
-  const inheritedEdges = plates.filter((p) => !p.layer.style3d.backplates[p.index].side);
+  const hidden = bands.length === 1 ? bandHidden(band) : null;
+  const inheritedSides = bands.filter((b) => !b.layer.style3d.bands[b.index].side);
   return (
     <>
-      <Material3DSection id={`${id}-material`} title={t('Front material')} refp={sub(refp, 'face')} mat={plate.face} defaultOpen note={hidden ? t(hidden) : undefined} />
-      {inheritedEdges.length ? (
+      <Material3DSection id={`${id}-material`} title={t('Material')} refp={sub(refp, 'material')} mat={band.material} defaultOpen note={hidden ? t(hidden) : undefined} />
+      {inheritedSides.length ? (
         <InheritedMaterial
-          id={`${id}-material-edge`}
-          title={t('Edge material')}
-          sameAs={inheritedEdges.length === plates.length ? t('Same as front') : t('Same as front on {n} of {total} plates', { n: inheritedEdges.length, total: plates.length })}
-          mat={plate.face}
-          onOwn={() => ownPlateSides(inheritedEdges, true)}
+          id={`${id}-material-side`}
+          title={t('Side wall')}
+          sameAs={inheritedSides.length === bands.length ? t('Same as band') : t('Same as band on {n} of {total} bands', { n: inheritedSides.length, total: bands.length })}
+          mat={band.material}
+          onOwn={() => ownBandSides(inheritedSides, true)}
         />
       ) : (
-        <Material3DSection id={`${id}-material-edge`} title={t('Edge material')} refp={sub(refp, 'side')} mat={plate.side ?? plate.face} defaultOpen>
-          <Row label={t('Edge material')} title={t('The edge follows the front material again')}>
-            <button className="small" onClick={() => ownPlateSides(plates, false)}>
-              ✕ {t('Same as front')}
+        <Material3DSection id={`${id}-material-side`} title={t('Side wall')} refp={sub(refp, 'side')} mat={bandSide(band)} defaultOpen>
+          <Row label={t('Side wall')} title={t("The side wall shows the band's material again")}>
+            <button className="small" onClick={() => ownBandSides(bands, false)}>
+              ✕ {t('Same as band')}
             </button>
           </Row>
         </Material3DSection>
       )}
       <Section id={`${id}-geometry`} title={t('Geometry')}>
-        {plates.length === 1 && <BevelPreview st={st} activePlate={index} />}
-        <RefNum label={t('Grow')} refp={sub(refp, 'grow')} min={0} max={15} step={0.05} unit="%" title={t('Outline growth beyond the previous plate')} />
-        <IconChoice label={t('Shape')} value={plate.plate.kind} mixed={shape.mixed} options={tOpts(t, PLATE_OPTIONS)} onChange={(v) => setAt(sub(shapeRef, 'kind'), v)} />
+        {bands.length === 1 && <BevelPreview st={st} activeBand={index} />}
+        <RefNum label={t('Grow')} refp={sub(refp, 'grow')} min={0} max={15} step={0.05} unit="%" title={t('Outline growth beyond the solid in front of it (the letter or the previous band)')} />
+        <RefNum label={t('Depth')} refp={sub(refp, 'depth')} min={0} max={60} step={0.1} unit="%" title={t("Straight side-wall depth behind the band's bevel")} />
+        <RefNum
+          label={t('Offset')}
+          refp={sub(refp, 'offset')}
+          min={-60}
+          max={20}
+          step={0.1}
+          unit="%"
+          defaultValue={0}
+          title={t("Gap behind the previous solid's back (Element 3D Z-Offset); negative slides the band forward, at most to where the previous solid's bevel ends")}
+        />
+        <IconChoice label={t('Shape')} value={band.shape.kind} mixed={shape.mixed} options={tOpts(t, SHAPE_OPTIONS)} onChange={(v) => setAt(sub(shapeRef, 'kind'), v)} />
         {kind === 'contour' && (
-          <RefNum label={t('Close', undefined, { ctx: 'plate' })} refp={sub(shapeRef, 'close')} min={0} max={10} step={0.05} unit="%" defaultValue={0} title={t('Bridge gaps and notches narrower than about twice this (% of size), so the plate runs as one piece behind the letters')} />
+          <RefNum label={t('Close', undefined, { ctx: 'plate' })} refp={sub(shapeRef, 'close')} min={0} max={10} step={0.05} unit="%" defaultValue={0} title={t('Bridge gaps and notches narrower than about twice this (% of size), so the band runs as one piece behind the letters')} />
         )}
         {kind === 'box' && (
           <>
@@ -458,16 +451,14 @@ export function PlateEditor({ plates, id = 'part' }: { plates: readonly Stack3DT
             <RefNum label={t('Slant')} refp={sub(shapeRef, 'slant')} min={-45} max={45} step={0.5} unit="deg" defaultValue={0} title={t("Lean of the box sides (positive leans right); the text's italic shear is added")} />
           </>
         )}
-        <Row label={t('Joins')} title={t('How the plate turns the corners of the letters')}>
-          <Seg value={plate.join} mixed={join.mixed} options={tOpts(t, JOINS)} onChange={(v) => setAt(sub(refp, 'join'), v)} />
+        <Row label={t('Joins')} title={t('How the band turns the corners of the letters')}>
+          <Seg value={band.join} mixed={join.mixed} options={tOpts(t, JOINS)} onChange={(v) => setAt(sub(refp, 'join'), v)} />
         </Row>
-        <RefCheck label={t('Fill counters')} refp={sub(refp, 'fillCounters')} title={t('Fill the holes of 口, B, O… so the plate is solid')} />
-        <RefNum label={t('Depth')} refp={sub(refp, 'depth')} min={0} max={60} step={0.1} unit="%" />
-        <RefNum label={t('Z gap')} refp={sub(refp, 'zGap')} min={0} max={20} step={0.1} unit="%" title={t('Gap behind the previous solid')} />
+        <RefCheck label={t('Fill counters')} refp={sub(refp, 'fillCounters')} title={t('Fill the holes of 口, B, O… so the band is solid')} />
         <div className="sub-head">{t('Bevel')}</div>
-        <RefNum label={t('Bevel width')} refp={sub(refp, 'bevel', 'width')} min={0} max={10} step={0.05} unit="%" />
-        <RefNum label={t('Bevel depth')} refp={sub(refp, 'bevel', 'depth')} min={0} max={10} step={0.05} unit="%" />
-        <IconChoice label={t('Profile')} value={plate.bevel.profile} mixed={profile.mixed} options={tOpts(t, PROFILE_OPTIONS)} onChange={(v) => setAt(sub(refp, 'bevel', 'profile'), v)} />
+        <RefNum label={t('Bevel width')} refp={sub(refp, 'bevel', 'width')} min={0} max={10} step={0.05} unit="%" title={t("Inward from the band's edge; 0 = no bevel")} />
+        <RefNum label={t('Bevel depth')} refp={sub(refp, 'bevel', 'depth')} min={0} max={10} step={0.05} unit="%" title={t('Extent in z')} />
+        <IconChoice label={t('Profile')} value={band.bevel.profile} mixed={profile.mixed} options={tOpts(t, PROFILE_OPTIONS)} onChange={(v) => setAt(sub(refp, 'bevel', 'profile'), v)} />
         <RefNum label={t('Segments')} refp={sub(refp, 'bevel', 'segments')} min={1} max={24} integer clamp defaultValue={6} title={t(SEGMENTS_TIP)} />
         <RefNum label={t('Curve')} refp={sub(refp, 'bevel', 'curve')} min={-1} max={1} step={0.01} clamp defaultValue={0} title={t(CURVE_TIP)} />
       </Section>
@@ -476,11 +467,10 @@ export function PlateEditor({ plates, id = 'part' }: { plates: readonly Stack3DT
 }
 
 /**
- * The 3D shape of titles (the layer node's Shape section): extrude or inflate, depth, the inflate
- * profile, outline detail, skew, and the bevel bands as a compact list (width, depth, profile;
- * the name opens the band part) with their position and cross-section. GLB models have none.
- * Several layers (a multi-selection) edit together; their bands are listed by position, as far
- * as every layer has that band.
+ * The 3D shape of titles (the layer node's Shape section): extrude or inflate, the letter's depth,
+ * the inflate profile, the letter's one bevel (its cross-section and where it sits on the glyph
+ * outline), outline detail, skew, and the cross-section of the letter and its bands. GLB models
+ * have none. Several layers (a multi-selection) edit together.
  */
 export function Shape3DSection({ layers }: { layers: readonly Title3DLayer[] }) {
   const t = useT();
@@ -491,15 +481,14 @@ export function Shape3DSection({ layers }: { layers: readonly Title3DLayer[] }) 
   const base = styleRefs(layers);
   const profileRef = sub(base, 'inflate', 'profile');
   const inflate = st.mode === 'inflate';
-  const [modeMixed, profileMixed, positionMixed] = useMixed(sub(base, 'mode'), profileRef, sub(base, 'bevelPosition'));
-  const bands = Math.min(...layers.map((l) => l.style3d.bands.length));
+  const [modeMixed, profileMixed, positionMixed, bevelMixed] = useMixed(sub(base, 'mode'), profileRef, sub(base, 'bevelPosition'), sub(base, 'bevel', 'profile'));
   const title = layers.every((l) => l.source.kind === 'shape') ? t('3D shape') : t('Shape', undefined, { ctx: '3d' });
   return (
     <Section id="shape3d" title={single ? title : `${title} · ${t('{n} layers', { n: layers.length })}`}>
       <Row label={t('Mode')} title={t('How the front is built')}>
         <Seg value={st.mode} mixed={modeMixed} options={tOpts(t, MODES)} onChange={(v) => setAt(sub(base, 'mode'), v)} />
       </Row>
-      <RefNum label={t('Depth')} refp={sub(base, 'depth')} min={0} max={100} step={0.1} unit="%" title={t('Extrusion depth: the straight side wall, % of size')} />
+      <RefNum label={t('Depth')} refp={sub(base, 'depth')} min={0} max={100} step={0.1} unit="%" title={t("Extrusion depth: the letter's straight side wall behind its bevel, % of size")} />
       {inflate && (
         <>
           <RefNum label={t('Height')} refp={sub(base, 'inflate', 'height')} min={0} max={60} step={0.1} unit="%" defaultValue={12} title={t('How far the surface rises above its outline at the top of the profile (% of size)')} />
@@ -542,111 +531,18 @@ export function Shape3DSection({ layers }: { layers: readonly Title3DLayer[] }) 
           <RefNum label={t('Skew Y')} refp={sub(base, 'skew', 'y')} min={-1} max={1} step={0.01} unit="x" defaultValue={0} title={t('Oblique extrusion: the back shifts up by this × its depth (negative = down)')} />
         </div>
       </div>
-      <div className="sub-head">{t('Bevel bands ({n})', { n: bands })}</div>
-      <Row label={t('Position')} title={t('Where the bevel bands sit on the glyph outline, like the Position of a Photoshop stroke. Backplates grow from the outermost band edge.')}>
+      <div className="sub-head">{t('Bevel')}</div>
+      {inflate && <div className="hint-line">{t('Inflate mode: the puffy front replaces the letter’s bevel (it applies again in Extrude); the bands still apply.')}</div>}
+      <RefNum label={t('Bevel width')} refp={sub(base, 'bevel', 'width')} min={0} max={10} step={0.05} unit="%" title={t("The letter's bevel across the outline plane (% of size); 0 = a sharp edge. Position sets where it sits.")} />
+      <RefNum label={t('Bevel depth')} refp={sub(base, 'bevel', 'depth')} min={0} max={10} step={0.05} unit="%" title={t('Extent in z')} />
+      <IconChoice label={t('Profile')} value={st.bevel.profile} mixed={bevelMixed} options={tOpts(t, PROFILE_OPTIONS)} onChange={(v) => setAt(sub(base, 'bevel', 'profile'), v)} />
+      <RefNum label={t('Segments')} refp={sub(base, 'bevel', 'segments')} min={1} max={24} integer clamp defaultValue={6} title={t(SEGMENTS_TIP)} />
+      <RefNum label={t('Curve')} refp={sub(base, 'bevel', 'curve')} min={-1} max={1} step={0.01} clamp defaultValue={0} title={t(CURVE_TIP)} />
+      <Row label={t('Position')} title={t("Where the letter's bevel sits on the glyph outline, like the Position of a Photoshop stroke. The bands grow from the letter's silhouette.")}>
         <Seg value={st.bevelPosition} mixed={positionMixed} options={tOpts(t, BEVEL_POSITIONS)} onChange={(v) => setAt(sub(base, 'bevelPosition'), v)} />
       </Row>
-      {inflate && <div className="hint-line">{t('Inflate mode: the puffy front replaces the bands (they apply again in Extrude).')}</div>}
-      <BandList layers={layers} count={bands} />
       {single && <BevelPreview st={st} />}
     </Section>
-  );
-}
-
-/** The bevel bands inline, inner to outer: name (opens the band part), width, depth, profile; the first `count`, of every layer of `layers` together. */
-function BandList({ layers, count }: { layers: readonly Title3DLayer[]; count: number }) {
-  const t = useT();
-  if (!count) return null;
-  return (
-    <div className={`band-list ${layers[0].style3d.mode === 'inflate' ? 'off' : ''}`} role="table" aria-label={t('Bevel bands')}>
-      <div className="band-row head" role="row">
-        <span role="columnheader" />
-        <span role="columnheader" title={t('Extent in the outline plane')}>
-          {t('Width')}
-        </span>
-        <span role="columnheader" title={t('Extent in z')}>
-          {t('Depth')}
-        </span>
-        <span role="columnheader">{t('Profile')}</span>
-      </div>
-      {layers[0].style3d.bands.slice(0, count).map((band, i) => (
-        <BandListRow key={band.id} layers={layers} index={i} />
-      ))}
-    </div>
-  );
-}
-
-/** Band `index` of every layer of `layers` as one row of BandList (one layer: its name opens the band part). */
-function BandListRow({ layers, index }: { layers: readonly Title3DLayer[]; index: number }) {
-  const t = useT();
-  const setAt = useEditor((s) => s.setAt);
-  const setEachAt = useEditor((s) => s.setEachAt);
-  const selectNode = useEditor((s) => s.selectNode);
-  const layer = layers[0];
-  const band = layer.style3d.bands[index];
-  const refp = styleRefs(layers, 'bands', index);
-  const [widthMixed, depthMixed, profileMixed] = useMixed(sub(refp, 'width'), sub(refp, 'depth'), sub(refp, 'profile'));
-  const part = bandKey(band.id);
-  const name = formatMsg(partLabel(layer, part), t);
-  const profile = profileMixed ? undefined : PROFILE_OPTIONS.find((p) => p.value === band.profile);
-  const shift = (key: 'width' | 'depth') => (d: number, c: string) => setEachAt(sub(refp, key), (v) => Math.max(0, (typeof v === 'number' ? v : 0) + d), c);
-  return (
-    <div className="band-row" role="row">
-      {layers.length === 1 ? (
-        <button className="link band-name" role="cell" title={t('Edit {part}: material, segments and curve', { part: name })} onClick={() => selectNode({ kind: 'part', layerId: layer.id, part })}>
-          {name}
-        </button>
-      ) : (
-        <span className="band-name" role="cell" title={t('{part} of the {n} layers', { part: name, n: layers.length })}>
-          {name}
-        </span>
-      )}
-      <span role="cell">
-        <NumberField
-          id={refKey(sub(refp, 'width'))}
-          label={t('{part} width', { part: name })}
-          value={band.width}
-          mixed={widthMixed}
-          onOffset={shift('width')}
-          min={0}
-          max={10}
-          step={0.05}
-          unit="%"
-          slider={false}
-          onChange={(v, c) => setAt(sub(refp, 'width'), v, c)}
-        />
-      </span>
-      <span role="cell">
-        <NumberField
-          id={refKey(sub(refp, 'depth'))}
-          label={t('{part} depth', { part: name })}
-          value={band.depth}
-          mixed={depthMixed}
-          onOffset={shift('depth')}
-          min={0}
-          max={10}
-          step={0.05}
-          unit="%"
-          slider={false}
-          onChange={(v, c) => setAt(sub(refp, 'depth'), v, c)}
-        />
-      </span>
-      <span role="cell">
-        <Menu
-          className="band-profile"
-          label={profile?.icon ?? (profileMixed ? '—' : band.profile)}
-          title={t('{part} profile: {profile}', { part: name, profile: profileMixed ? '—' : t(profile?.label ?? band.profile) })}
-          items={PROFILE_OPTIONS.map((p) => ({
-            label: (
-              <span className="band-profile-item">
-                {p.icon} {t(p.label)}
-              </span>
-            ),
-            onClick: () => setAt(sub(refp, 'profile'), p.value),
-          }))}
-        />
-      </span>
-    </div>
   );
 }
 

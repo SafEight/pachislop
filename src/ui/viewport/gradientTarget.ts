@@ -1,5 +1,5 @@
 import { isTitleLayer, layerParts, parsePartKey, type TitleLayer } from '../../model/parts';
-import { sideMaterial, sideSource } from '../../model/sides';
+import { sideMaterial } from '../../model/bands';
 import type { GradientSpan, PartKey, Project } from '../../model/types';
 import type { Text } from '../../store/msg';
 import { partLabel } from '../../store/labels';
@@ -53,14 +53,11 @@ function partGradient(layer: TitleLayer, part: PartKey): FillGradient | null {
   }
   const s = layer.style3d;
   const bi = kind === 'band' ? s.bands.findIndex((b) => b.id === id) : -1;
-  const pi = kind === 'plate' ? s.backplates.findIndex((p) => p.id === id) : -1;
-  // An inherited side shows its neighbour's material: its gradient is that one's.
-  const si = sideSource(s);
-  const sidePath: Path = s.side ? ['style3d', 'side'] : si === null ? ['style3d', 'face'] : ['style3d', 'bands', si, 'material'];
+  // A side without a material of its own shows the face: its gradient is the face's.
   const base: Path | null =
-    kind === 'face' ? ['style3d', 'face'] : kind === 'side' ? sidePath : bi >= 0 ? ['style3d', 'bands', bi, 'material'] : pi >= 0 ? ['style3d', 'backplates', pi, 'face'] : null;
+    kind === 'face' ? ['style3d', 'face'] : kind === 'side' ? ['style3d', s.side ? 'side' : 'face'] : bi >= 0 ? ['style3d', 'bands', bi, 'material'] : null;
   if (!base) return null;
-  const m = kind === 'face' ? s.face : kind === 'side' ? sideMaterial(s) : bi >= 0 ? s.bands[bi].material : s.backplates[pi].face;
+  const m = kind === 'face' ? s.face : kind === 'side' ? sideMaterial(s) : s.bands[bi].material;
   if (!m.gradient || m.gradient.stops.length < 2 || m.gradientAxis === 'depth') return null;
   return {
     params: { kind: m.gradientKind, angle: m.gradientAngle, scale: m.gradientScale, offset: m.gradientOffset },

@@ -2,8 +2,7 @@ import type { Companion } from '../generators/fromEffect';
 import { particleGlow } from '../generators/particles';
 import { createGeneratorLayer } from '../generators/registry';
 import {
-  backplate3D,
-  band3D,
+  bevel3D,
   createAdjustmentLayer,
   createBackgroundLayer,
   createGroupLayer,
@@ -23,7 +22,7 @@ import {
 } from '../model/defaults';
 import { freshLinks, withoutLink, type MaterialLinks } from '../model/links';
 import { bandKey, rimKey, type TitleLayer } from '../model/parts';
-import { sideMaterial, withCharSide } from '../model/sides';
+import { bandSide, sideMaterial, withCharSide } from '../model/bands';
 import type {
   Adjustment,
   AdjustmentLayer,
@@ -49,7 +48,7 @@ import type {
   Warp,
 } from '../model/types';
 import { applyPreset, placeLook } from './apply';
-import { companion, factoryStyle, fx, orbLook, type OrbFinish } from './factory';
+import { companion, factoryStyle, fx, letter3D, orbLook, plate, ring, type OrbFinish } from './factory';
 import { applyColourway, applyColourwayToProject } from './colourways';
 import { ownGroupOf } from '../model/companions';
 import { noLighting } from '../model/lighting';
@@ -186,7 +185,9 @@ function text<L extends TitleLayer>(layer: L, o: TitleOpts): L {
     const adj = chars[+i] ?? NO_ADJUST;
     if (t.kind === 'title2d') chars[+i] = { ...adj, face: withoutLink(t.style.face) };
     else if (t.kind === 'title3d' && base.kind === 'title3d') {
-      const own = { ...adj, face3d: withoutLink(t.style3d.face), bands3d: t.style3d.bands.map((b) => withoutLink(b.material)) };
+      // A letter's own band covers that band's side wall too: a band with a wall of its own (the
+      // look's deep wall) takes the colourway's wall paint, the larger part it shows.
+      const own = { ...adj, face3d: withoutLink(t.style3d.face), bands3d: t.style3d.bands.map((b) => withoutLink(bandSide(b))) };
       chars[+i] = withCharSide(base.style3d, own, withoutLink(sideMaterial(t.style3d)));
     }
   }
@@ -212,26 +213,30 @@ const shape3D = (name: string, kind: ShapeKind, size: number, o: LayerOpts & { s
   shape(createTitle3DLayer(name), name, kind, size, o);
 
 /**
- * PUSH button dome: an ellipse extruded shallow with one deep round band in the face material
- * (the bevel IS the dome), a thin dark edge, a chrome ring plate and a black outer plate. The
- * bands sit inside the ellipse, so the shape's size stays the button's footprint.
+ * PUSH button dome: an ellipse extruded shallow whose letter bevel is one deep round inside the
+ * face (the bevel IS the dome, so the shape's size stays the button's footprint), a thin dark
+ * edge ring around it, a chrome ring plate and a black outer plate. The edge ring grows outside
+ * the footprint, so the first plate grows that much less: the rims keep their size.
  */
-function dome(layer: Title3DLayer, ring = true): Title3DLayer {
-  const s = layer.style3d;
-  const edge = { ...band3D(0.8, 1, 'custom', 'step'), material: { ...material3D('custom'), color: '#1a0c02', metalness: 1, roughness: 0.35 } };
-  const chrome = { ...backplate3D(5, 'chrome'), depth: 6 };
-  chrome.bevel = { ...chrome.bevel, width: 2.5, depth: 2.5 };
-  const black = { ...backplate3D(2.5, 'blackGloss'), depth: 4 };
-  black.bevel = { ...black.bevel, width: 1, depth: 1 };
+function dome(layer: Title3DLayer, chromeRing = true): Title3DLayer {
+  const dark = (color: string) => ({ ...material3D('custom'), color, metalness: 1, roughness: 0.35 });
+  const edge = 0.8;
+  const chrome = plate(5 - edge, 'chrome', { depth: 6, bevel: bevel3D(2.5, 2.5) });
+  const black = plate(chromeRing ? 2.5 : 2.5 - edge, 'blackGloss', { depth: 4, bevel: bevel3D(1, 1) });
   return {
     ...layer,
     style3d: {
-      ...s,
-      depth: 6,
+      ...layer.style3d,
       curveSegments: 24,
       bevelPosition: 'inside',
-      bands: [{ ...band3D(30, 24, 'custom', 'round'), material: structuredClone(s.face) }, edge],
-      backplates: ring ? [chrome, black] : [black],
+      ...letter3D({
+        depth: 6,
+        bevel: bevel3D(30, 24),
+        rings: [ring(edge, 1, dark('#1a0c02'), 'step')],
+        // the candy look's dark wall
+        side: { ...dark('#4a0010'), reflectivity: 0.7 },
+        plates: chromeRing ? [chrome, black] : [black],
+      }),
     },
   };
 }
@@ -297,7 +302,7 @@ function project(name: string, layers: Layer[], o: { width?: number; height?: nu
   const pending = lit.flatMap((l: WithLook<Layer>) => (l[LOOK] ? [{ id: l.id, look: l[LOOK] }] : []));
   const materialLinks: MaterialLinks = Object.assign({}, ...lit.map((l: WithLook<Layer>) => l[LINKS] ?? {}));
   let out: Project = {
-    version: 10,
+    version: 11,
     name,
     comp,
     layers: lit.map((l: WithLook<Layer>) => {
@@ -642,10 +647,6 @@ export const TEMPLATES: Template[] = [
       const darkMetal = { ...material3D('custom'), color: '#1a0800', metalness: 1, roughness: 0.4, reflectivity: 0.6 };
       const face = { ...s.face, pattern: { ...s.face.pattern, color: '#6a300a', opacity: 0.85, scale: 15, relief: 0.2 } };
       const warmBand = { ...material3D('gold'), reflectivity: 0.8 };
-      const darkPlate = { ...backplate3D(4.4, 'custom'), depth: 7, face: darkMetal };
-      darkPlate.bevel = { ...darkPlate.bevel, width: 0.8, depth: 0.8 };
-      const goldPlate = { ...backplate3D(1.8, 'gold'), depth: 5 };
-      goldPlate.bevel = { ...goldPlate.bevel, width: 1.2, depth: 1.2 };
       const title: Title3DLayer = {
         ...t,
         weight: -1.8,
@@ -653,11 +654,15 @@ export const TEMPLATES: Template[] = [
         style3d: {
           ...s,
           face,
-          bands: [
-            { ...band3D(1.2, 1.2, 'custom', 'round'), material: warmBand },
-            { ...band3D(0.6, 0.6, 'custom', 'step'), material: darkMetal },
-          ],
-          backplates: [darkPlate, goldPlate],
+          // the warm band is not the patterned face: the letter has no bevel, both rings are bands
+          ...letter3D({
+            depth: 10,
+            bevel: bevel3D(0, 0),
+            rings: [ring(1.2, 1.2, warmBand, 'round'), ring(0.6, 0.6, darkMetal, 'step')],
+            // the look's dark wall, on its edge ring
+            side: bandSide(s.bands[0]),
+            plates: [plate(4.4, 'custom', { depth: 7, bevel: bevel3D(0.8, 0.8), material: darkMetal }), plate(1.8, 'gold', { depth: 5, bevel: bevel3D(1.2, 1.2) })],
+          }),
         },
       };
       return project(
@@ -981,10 +986,10 @@ export const TEMPLATES: Template[] = [
     id: 't-bigbonus-3d-groups',
     name: 'BIG BONUS 3D (band glow, nested groups, Photo Filter)',
     build: () => {
-      // Band 1 (the face-edge bevel) alone glows, a part effect: the gold bevel lights up without
-      // haloing the plates. The title group (with its own hero sparkle) sits inside the plate +
-      // rays group, so the stamp moves and recolours as one; a warming Photo Filter on top grades
-      // everything below it.
+      // Band 1 (the edge ring hugging the letters' gold bevel) alone glows, a part effect: the
+      // letters' edge lights up without haloing the plates. The title group (with its own hero
+      // sparkle) sits inside the plate + rays group, so the stamp moves and recolours as one; a
+      // warming Photo Filter on top grades everything below it.
       const t = title3D('BIG BONUS', { preset: 'f-3d-gold', size: 220, tracking: 30, shear: 6, rotX: 6, rotY: -10 });
       const band1 = t.style3d.bands[0];
       if (!band1) throw new Error('unreachable');

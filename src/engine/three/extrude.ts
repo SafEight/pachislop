@@ -18,16 +18,16 @@ import { interiorPoint, offsetShapes, shapeContains, subtractContours, type Cont
 // untangled (see `untangle`). Overlap between SEPARATE shapes is fine: the depth buffer
 // shows their union.
 //
-// Outward bands (Title3DProps.bevelPosition 'outside' / 'center') can't be per-vertex rings:
+// An outward bevel (Title3DProps.bevelPosition 'outside' / 'center') can't be per-vertex rings:
 // they would cross between touching glyphs and fold in notches and counters. `extrudeOutward`
-// grows them as Clipper offsets of the whole glyph set instead (one ring per profile point,
+// grows its rings as Clipper offsets of the whole glyph set instead (one ring per profile point,
 // points closer than the outline precision sharing one; touching glyphs unioned, counters
 // closing up) and fills each ring step as a triangulated annulus lifted to the two rings'
 // heights; see there.
 //
 // All parts are written to a MeshBuilder by material slot; positions are layer space.
 
-const MAX_MITER = 2; // same limit as Clipper's miter joins for backplates (outline.ts)
+const MAX_MITER = 2; // same limit as Clipper's miter joins for bands (outline.ts)
 const CREASE_COS = Math.cos((32 * Math.PI) / 180);
 
 export interface ProfilePoint {

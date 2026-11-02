@@ -26,7 +26,7 @@ export interface PerfCase {
 /** The heaviest 3D template: 3D plates with a band glow, nested groups and a Photo Filter. */
 const HEAVY_3D = 't-bigbonus-3d-groups';
 
-const comp = (name: string, layers: Layer[]): Project => ({ version: 10, name, comp: defaultComp(), layers });
+const comp = (name: string, layers: Layer[]): Project => ({ version: 11, name, comp: defaultComp(), layers });
 
 function withEffect(type: string, params: Record<string, number>) {
   const fx = makeEffect(type);

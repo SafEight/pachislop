@@ -4,7 +4,7 @@ import { Swatch } from './style/widgets';
 // Appearance rows (Illustrator's Appearance panel): a list of materials, each a row with eye,
 // swatch, link badge, name + summary, an optional width field and hover actions; clicking a row
 // edits it right under its row, ⇧ / ⌘ select several, edited together under the last of them.
-// The layer's Appearance (its parts) and the Letters section (a letter's face, bands and side)
+// The layer's Appearance (its parts) and the Letters section (a letter's face, side and bands)
 // both list theirs with these.
 
 /** A row click, as the selection handlers read it. */
@@ -42,7 +42,7 @@ export interface AppearanceRowProps {
   open: boolean;
   /** Hidden part: name and swatch dimmed. */
   off?: boolean;
-  /** Uses another's material (a letter's part that is the layer's, a 3D side that follows its neighbour): swatch muted. */
+  /** Uses another's material (a letter's part that is the layer's, a 3D side that shows the face): swatch muted. */
   inherited?: boolean;
   title: string;
   onClick: (e: RowClick) => void;
@@ -54,7 +54,7 @@ export interface AppearanceRowProps {
   badge?: ReactNode;
   name: string;
   summary?: string;
-  /** Field on the row itself (a rim's or band's width). */
+  /** Field on the row itself (a rim's width, a band's grow). */
   width?: ReactNode;
   /** Buttons shown on hover and while selected. */
   actions?: ReactNode;

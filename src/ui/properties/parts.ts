@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import { backplate3D, band3D, material2D, rim2D, solidFill, uid } from '../../model/defaults';
-import { bandKey, parsePartKey, partEffectsOf, plateKey, rimKey, type TitleLayer } from '../../model/parts';
+import { band3D, material2D, rim2D, solidFill, uid } from '../../model/defaults';
+import { bandKey, parsePartKey, partEffectsOf, rimKey, type TitleLayer } from '../../model/parts';
 import { withoutLink, type AnyMaterial } from '../../model/links';
-import { sideMaterial, sideNeighbour, sideSource } from '../../model/sides';
-import type { Backplate3D, Material3D, PartKey, Title3DLayer, Title3DProps } from '../../model/types';
+import { sideMaterial } from '../../model/bands';
+import type { Band3D, MaterialPreset, PartKey, Title3DLayer, Title3DProps } from '../../model/types';
 import { formatMsg, msg, type Text, type Translate } from '../../store/msg';
 import { partLabel } from '../../store/labels';
 import { useEditor, type PropRef, type Refs } from '../../store/store';
@@ -11,11 +11,13 @@ import { oneShot } from '../util';
 import { FILL_KINDS, fillCss, material3DCss, presetLabel } from './style/shared';
 
 // Style parts as Properties shows and edits them: swatches, one-line summaries, and the stack
-// operations (add / remove / duplicate / reorder) of rims, bands and plates. Each operation is
-// one undo step (replaceLayer) and keeps `partEffects` in step: a removed part takes its
-// effects with it, a duplicate gets copies with fresh ids. Part names come from `partLabel`.
+// operations (add / remove / duplicate / reorder) of 2D rims and 3D bands. Each operation is one
+// undo step (replaceLayer) and keeps `partEffects` in step: a removed part takes its effects with
+// it, a duplicate gets copies with fresh ids. Band operations keep the letters' own band
+// materials (CharAdjust.bands3d, index-aligned with the bands) with their bands. Part names come
+// from `partLabel`.
 
-export type StackKind = 'rim' | 'band' | 'plate';
+export type StackKind = 'rim' | 'band';
 
 /** Targets as the Ref* controls take them: one as a plain ref (single-part editing unchanged), several as a list. */
 export const refsOf = (list: readonly PropRef[]): Refs => (list.length === 1 ? list[0] : list);
@@ -33,23 +35,38 @@ export const partScope = (layer: TitleLayer, parts: readonly PartKey[]): string 
   return `part:${layer.kind}:${kinds.size === 1 ? [...kinds][0] : 'mixed'}`;
 };
 
-/** The rim / band / plate list a stack kind lives in, as stored (rims and plates innermost first, bands face edge → side). */
+/** The rim / band list a stack kind lives in, as stored (innermost first). */
 function stackOf(l: TitleLayer, kind: StackKind): readonly { id: string }[] {
   if (l.kind === 'title2d') return kind === 'rim' ? l.style.rims : [];
-  return kind === 'band' ? l.style3d.bands : kind === 'plate' ? l.style3d.backplates : [];
+  return kind === 'band' ? l.style3d.bands : [];
 }
 
-/** `l` with stack `kind` replaced by `items` (items of that stack, reordered / filtered / extended). */
-function withStack(l: TitleLayer, kind: StackKind, items: readonly { id: string }[]): TitleLayer {
+/**
+ * `l` with its stack (2D rims, 3D bands) replaced by `items` (reordered / filtered / extended);
+ * `from[i]` = the old index whose letter overrides item i takes over (null: none), for 3D bands.
+ */
+function withStack(l: TitleLayer, items: readonly { id: string }[], from: readonly (number | null)[]): TitleLayer {
   if (l.kind === 'title2d') return { ...l, style: { ...l.style, rims: items as typeof l.style.rims } };
-  return kind === 'band'
-    ? { ...l, style3d: { ...l.style3d, bands: items as typeof l.style3d.bands } }
-    : { ...l, style3d: { ...l.style3d, backplates: items as typeof l.style3d.backplates } };
+  const next: Title3DLayer = { ...l, style3d: { ...l.style3d, bands: items as Band3D[] } };
+  const src = l.source;
+  if (src.kind !== 'text' || !Object.values(src.chars).some((a) => a.bands3d)) return next;
+  const chars = Object.fromEntries(
+    Object.entries(src.chars).map(([k, a]) => {
+      if (!a.bands3d) return [k, a];
+      const { bands3d, ...rest } = a;
+      const moved = from.map((j) => (j === null ? null : (bands3d[j] ?? null)));
+      return [k, moved.some(Boolean) ? { ...rest, bands3d: moved } : rest];
+    }),
+  );
+  return { ...next, source: { ...src, chars } };
 }
 
-const keyOf = (kind: StackKind, id: string): PartKey => (kind === 'rim' ? rimKey(id) : kind === 'band' ? bandKey(id) : plateKey(id));
+/** 0..n−1: every item stays where its letter overrides are. */
+const indices = (n: number) => Array.from({ length: n }, (_, i): number | null => i);
 
-/** Stack kind and array index of a rim / band / plate part (null for face / side or a missing part). */
+const keyOf = (kind: StackKind, id: string): PartKey => (kind === 'rim' ? rimKey(id) : bandKey(id));
+
+/** Stack kind and array index of a rim / band part (null for face / side or a missing part). */
 export function stackPos(l: TitleLayer, key: PartKey): { kind: StackKind; index: number } | null {
   const { kind, id } = parsePartKey(key);
   if (kind === 'face' || kind === 'side' || !id) return null;
@@ -57,7 +74,7 @@ export function stackPos(l: TitleLayer, key: PartKey): { kind: StackKind; index:
   return index < 0 ? null : { kind, index };
 }
 
-/** The material a part shows (a plate's face material, a side's inherited one), or null when the part is gone. */
+/** The material a part shows (a band's material, a side's inherited one), or null when the part is gone. */
 export function partMaterial(l: TitleLayer, key: PartKey): AnyMaterial | null {
   const { kind } = parsePartKey(key);
   const pos = stackPos(l, key);
@@ -65,18 +82,17 @@ export function partMaterial(l: TitleLayer, key: PartKey): AnyMaterial | null {
   const s = l.style3d;
   if (kind === 'face') return s.face;
   if (kind === 'side') return sideMaterial(s);
-  if (!pos) return null;
-  return pos.kind === 'band' ? s.bands[pos.index].material : s.backplates[pos.index].face;
+  return pos ? s.bands[pos.index].material : null;
 }
 
-/** Whether `key` is a 3D side that follows its neighbour (model/sides.ts). */
+/** Whether `key` is a 3D title side without a material of its own: it shows the face's (model/bands.ts). */
 export const isInheritedSide = (l: TitleLayer, key: PartKey): boolean => l.kind === 'title3d' && key === 'side' && !l.style3d.side;
 
-/** What the title's side follows while it has no material of its own: “Same as Band 2” / “Same as face”. */
-export function sideSameAs(l: Title3DLayer): Text {
-  const i = sideSource(l.style3d);
-  return i === null ? msg('Same as face') : msg('Same as {part}', { part: partLabel(l, bandKey(l.style3d.bands[i].id)) });
-}
+/** What the title's side follows while it has no material of its own. */
+export const SIDE_SAME_AS: Text = msg('Same as face');
+
+/** What a band's side wall follows while it has no material of its own. */
+export const BAND_SIDE_SAME_AS: Text = msg('Same as band');
 
 /** Every 3D title of the project restyled by `fn` (a title it leaves alone: its own style back), one undo step. */
 function editStyles(fn: (l: Title3DLayer) => Title3DProps, label: Text) {
@@ -95,8 +111,9 @@ function editStyles(fn: (l: Title3DLayer) => Title3DProps, label: Text) {
 }
 
 /**
- * Give the side of every title of `layers` that follows its neighbour an unlinked copy of what it
- * shows (`own`), or let every one follow its neighbour again; one undo step.
+ * Give the side walls of every title of `layers` that shows its face there an unlinked copy of
+ * the face (`own`: the side can then differ, Element 3D's separate side material), or let every
+ * one show the face again; one undo step.
  */
 export function ownSides(layers: readonly Title3DLayer[], own: boolean) {
   const ids = new Set(layers.map((l) => l.id));
@@ -104,31 +121,32 @@ export function ownSides(layers: readonly Title3DLayer[], own: boolean) {
   editStyles(
     ({ id, style3d: s }) => {
       if (!ids.has(id) || !!s.side === own) return s;
-      if (own) return { ...s, side: structuredClone(withoutLink(sideNeighbour(s))) };
+      if (own) return { ...s, side: structuredClone(withoutLink(s.face)) };
       const { side: _, ...rest } = s;
       return rest;
     },
-    own ? msg('Own {part}', { part }) : msg('{part}: {source}', { part, source: sideSameAs(layers[0]) }),
+    own ? msg('Own {part}', { part }) : msg('{part}: {source}', { part, source: SIDE_SAME_AS }),
   );
 }
 
-/** The same for the edges of plates (`index` in each layer's `style3d.backplates`): a copy of the plate's front, or following it again. */
-export function ownPlateSides(plates: readonly { layer: Title3DLayer; index: number }[], own: boolean) {
+/** The same for the side walls of bands (`index` in each layer's `style3d.bands`): a copy of the band's material, or showing it again. */
+export function ownBandSides(bands: readonly { layer: Title3DLayer; index: number }[], own: boolean) {
   const at = new Map<string, Set<number>>();
-  for (const { layer, index } of plates) at.set(layer.id, (at.get(layer.id) ?? new Set()).add(index));
-  const edge = (p: Backplate3D): Backplate3D => {
-    if (!!p.side === own) return p;
-    if (own) return { ...p, side: structuredClone(withoutLink(p.face)) };
-    const { side: _, ...rest } = p;
+  for (const { layer, index } of bands) at.set(layer.id, (at.get(layer.id) ?? new Set()).add(index));
+  const wall = (b: Band3D): Band3D => {
+    if (!!b.side === own) return b;
+    if (own) return { ...b, side: structuredClone(withoutLink(b.material)) };
+    const { side: _, ...rest } = b;
     return rest;
   };
-  const part = msg('Edge material');
+  const { layer, index } = bands[0];
+  const part = bands.length === 1 ? msg('{part} side', { part: partLabel(layer, bandKey(layer.style3d.bands[index].id)) }) : msg('{n} band sides', { n: bands.length });
   editStyles(
     ({ id, style3d: s }) => {
       const picked = at.get(id);
-      return picked ? { ...s, backplates: s.backplates.map((p, i) => (picked.has(i) ? edge(p) : p)) } : s;
+      return picked ? { ...s, bands: s.bands.map((b, i) => (picked.has(i) ? wall(b) : b)) } : s;
     },
-    own ? msg('Own {part}', { part }) : msg('{part}: {source}', { part, source: msg('Same as front') }),
+    own ? msg('Own {part}', { part }) : msg('{part}: {source}', { part, source: BAND_SIDE_SAME_AS }),
   );
 }
 
@@ -143,11 +161,14 @@ export function partSwatch(l: TitleLayer, key: PartKey): string {
 
 const pct = (v: number) => `${+v.toFixed(2)}%`;
 
-/** Where a rim's or band's width lives and its field's maximum (null for other parts): the number most often changed, edited right on the part's row. */
-export function partWidth(l: TitleLayer, key: PartKey): { ref: PropRef; max: number } | null {
+/**
+ * The number most often changed on a rim's or band's Appearance row, edited right on the row: a
+ * rim's width, a band's grow (`grow`), with the field's maximum; null for other parts.
+ */
+export function partWidth(l: TitleLayer, key: PartKey): { ref: PropRef; max: number; grow: boolean } | null {
   const pos = stackPos(l, key);
-  if (pos?.kind === 'rim') return { ref: { layerId: l.id, path: ['style', 'rims', pos.index, 'width'] }, max: 8 };
-  if (pos?.kind === 'band') return { ref: { layerId: l.id, path: ['style3d', 'bands', pos.index, 'width'] }, max: 10 };
+  if (pos?.kind === 'rim') return { ref: { layerId: l.id, path: ['style', 'rims', pos.index, 'width'] }, max: 8, grow: false };
+  if (pos?.kind === 'band') return { ref: { layerId: l.id, path: ['style3d', 'bands', pos.index, 'grow'] }, max: 15, grow: true };
   return null;
 }
 
@@ -160,69 +181,64 @@ export function materialSummary(t: Translate, m: AnyMaterial): string[] {
 }
 
 /**
- * One-line summary for the Appearance list, e.g. "Gold · fx 2" / "Linear · bevel 3% · fx 1"; a side
- * that follows its neighbour says which ("Same as Band 2"); a rim's or band's width is the field
- * on its row (partWidth).
+ * One-line summary for the Appearance list, e.g. "Gold · bevel 2.5% · fx 2" (a 3D face names the
+ * letter's bevel) / "Linear · bevel 3% · fx 1"; a side without a material of its own says what it
+ * shows ("Same as face"), a band with a side wall of its own says so; a rim's width and a band's
+ * grow are the field on its row (partWidth).
  */
 export function partSummary(t: Translate, l: TitleLayer, key: PartKey): string {
   const mat = partMaterial(l, key);
-  const out = l.kind === 'title3d' && isInheritedSide(l, key) ? [formatMsg(sideSameAs(l), t)] : mat ? materialSummary(t, mat) : [];
-  const pos = stackPos(l, key);
-  if (l.kind === 'title3d' && pos?.kind === 'plate') out.push(`+${pct(l.style3d.backplates[pos.index].grow)}`);
+  const out = isInheritedSide(l, key) ? [formatMsg(SIDE_SAME_AS, t)] : mat ? materialSummary(t, mat) : [];
+  if (l.kind === 'title3d') {
+    const s = l.style3d;
+    // the letter's bevel, where it renders: Extrude mode, not on a GLB model or an orb
+    const src = l.source;
+    if (key === 'face' && s.bevel.width > 0 && s.mode === 'extrude' && src.kind !== 'model' && !(src.kind === 'shape' && src.shape === 'orb')) out.push(t('bevel {n}', { n: pct(s.bevel.width) }));
+    const pos = stackPos(l, key);
+    if (pos && s.bands[pos.index].side) out.push(t('own side'));
+  }
   const fx = partEffectsOf(l, key).length;
   if (fx) out.push(t('fx {n}', { n: fx }));
   return out.join(' · ');
 }
 
-/** Whether a plate material reads as black (dark, unsaturated finish). */
-function isBlackish(m: Material3D): boolean {
-  if (m.preset === 'blackGloss') return true;
-  if (m.gradient) return false;
-  const c = parseInt(m.color.slice(1, 7), 16);
-  const r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
-  return Math.max(r, g, b) < 64;
+/** Materials of new bands by their index (cycling): green, gold, red, blue, chrome, black outlines stacked behind. */
+const BAND_PALETTE: readonly MaterialPreset[] = ['greenMetal', 'gold', 'redMetal', 'blueMetal', 'chrome', 'blackGloss'];
+
+/** New outermost band: 2 % beyond the last one, its shape, join and counter filling continued, in the palette's next colour. */
+function newBand(l: Title3DLayer): Band3D {
+  const bands = l.style3d.bands;
+  const added = band3D(2, BAND_PALETTE[bands.length % BAND_PALETTE.length]);
+  const prev = bands[bands.length - 1];
+  return prev ? { ...added, shape: { ...prev.shape }, join: prev.join, fillCounters: prev.fillCounters } : added;
 }
 
-/**
- * New outermost plate: 2 % beyond every other plate, its base shape continued, a colour that
- * contrasts with the outermost plate that actually shows (black after a coloured one, else red).
- * A plate shows when it is enabled and grows beyond the previous solid.
- */
-function newPlate(l: Title3DLayer): Backplate3D {
-  const plates = l.style3d.backplates;
-  const shown = [...plates].reverse().find((p) => p.enabled && p.grow > 0);
-  const added = backplate3D(2, shown && isBlackish(shown.face) ? 'redMetal' : 'blackGloss');
-  const prev = [...plates].reverse().find((p) => p.enabled);
-  if (prev) added.plate = { ...prev.plate };
-  return added;
-}
+const ADD_LABEL: Record<StackKind, string> = { rim: 'Add rim', band: 'Add band' };
 
-const ADD_LABEL: Record<StackKind, string> = { rim: 'Add rim', band: 'Add band', plate: 'Add plate' };
-
-/**
- * Add a rim (2D, outside the outermost), a band (3D, at the side-wall end) or a plate (3D,
- * outside every other plate) and select the new part.
- */
+/** Add a rim (2D, outside the outermost) or a band (3D, behind the last one) and select the new part. */
 export function addPart(l: TitleLayer, kind: StackKind) {
-  const added = l.kind === 'title2d' ? rim2D(2, material2D(solidFill('#000000'))) : kind === 'band' ? band3D(1.5, 1.5, 'gold') : newPlate(l);
+  const added = l.kind === 'title2d' ? rim2D(2, material2D(solidFill('#000000'))) : newBand(l);
+  const items = stackOf(l, kind);
   const { replaceLayer, selectNode } = useEditor.getState();
-  replaceLayer(l.id, withStack(l, kind, [...stackOf(l, kind), added]), oneShot(`${l.id}:add-${kind}`), ADD_LABEL[kind]);
+  replaceLayer(l.id, withStack(l, [...items, added], [...indices(items.length), null]), oneShot(`${l.id}:add-${kind}`), ADD_LABEL[kind]);
   selectNode({ kind: 'part', layerId: l.id, part: keyOf(kind, added.id) });
 }
 
-/** Remove a rim / band / plate with its effects; the layer node is selected after. */
+/** Remove a rim / band with its effects; the layer node is selected after. */
 export function removePart(l: TitleLayer, key: PartKey) {
   const pos = stackPos(l, key);
   if (!pos) return;
   const partEffects = { ...l.partEffects };
   delete partEffects[key];
-  const next = { ...withStack(l, pos.kind, stackOf(l, pos.kind).filter((_, i) => i !== pos.index)), partEffects };
+  const keep = (_: unknown, i: number) => i !== pos.index;
+  const items = stackOf(l, pos.kind);
+  const next = { ...withStack(l, items.filter(keep), indices(items.length).filter(keep)), partEffects };
   const { replaceLayer, selectNode } = useEditor.getState();
   replaceLayer(l.id, next, oneShot(`${l.id}:remove-part`), msg('Remove {part}', { part: partLabel(l, key) }));
   selectNode({ kind: 'layer', layerId: l.id });
 }
 
-/** Copy a rim / band / plate (with fresh-id copies of its effects) right behind it, and select the copy. */
+/** Copy a rim / band (with fresh-id copies of its effects; a band also keeps the letters' own materials) right behind it, and select the copy. */
 export function duplicatePart(l: TitleLayer, key: PartKey) {
   const pos = stackPos(l, key);
   if (!pos) return;
@@ -230,8 +246,10 @@ export function duplicatePart(l: TitleLayer, key: PartKey) {
   const copy = { ...structuredClone(items[pos.index]), id: uid() };
   const copyKey = keyOf(pos.kind, copy.id);
   const fx = l.partEffects[key]?.map((e) => ({ ...structuredClone(e), id: uid() }));
+  const at = pos.index + 1;
+  const from = indices(items.length);
   const next = {
-    ...withStack(l, pos.kind, [...items.slice(0, pos.index + 1), copy, ...items.slice(pos.index + 1)]),
+    ...withStack(l, [...items.slice(0, at), copy, ...items.slice(at)], [...from.slice(0, at), pos.index, ...from.slice(at)]),
     partEffects: fx?.length ? { ...l.partEffects, [copyKey]: fx } : l.partEffects,
   };
   const { replaceLayer, selectNode } = useEditor.getState();
@@ -246,15 +264,18 @@ export function canMovePart(l: TitleLayer, key: PartKey, dir: -1 | 1): boolean {
 }
 
 /**
- * Move a rim / band / plate one step toward the front (-1: nearer the face) or the back (+1)
- * within its own stack. Every stack is stored front-most first, so that is the array step.
+ * Move a rim / band one step toward the front (-1: nearer the face) or the back (+1) within its
+ * own stack. Every stack is stored front-most first, so that is the array step.
  */
 export function movePart(l: TitleLayer, key: PartKey, dir: -1 | 1) {
   const pos = stackPos(l, key);
   if (!pos || !canMovePart(l, key, dir)) return;
   const items = stackOf(l, pos.kind).slice();
+  const from = indices(items.length);
   const [item] = items.splice(pos.index, 1);
   items.splice(pos.index + dir, 0, item);
+  const [j] = from.splice(pos.index, 1);
+  from.splice(pos.index + dir, 0, j);
   const label = msg(dir < 0 ? 'Move {part} forward' : 'Move {part} backward', { part: partLabel(l, key) });
-  useEditor.getState().replaceLayer(l.id, withStack(l, pos.kind, items), oneShot(`${l.id}:move-part`), label);
+  useEditor.getState().replaceLayer(l.id, withStack(l, items, from), oneShot(`${l.id}:move-part`), label);
 }

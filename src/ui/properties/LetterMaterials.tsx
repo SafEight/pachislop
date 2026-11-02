@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { withoutLink, type AnyMaterial } from '../../model/links';
 import { bandKey, parsePartKey, type TitleLayer } from '../../model/parts';
-import { charSideNeighbour, sideSource, withCharSide } from '../../model/sides';
+import { charSideNeighbour, withCharSide } from '../../model/bands';
 import type { CharAdjust, Material2D, Material3D, PartKey, TextSource } from '../../model/types';
 import { applyColourway, COLOURWAY_INFO } from '../../presets/colourways';
 import { COLOURWAYS } from '../../presets/types';
@@ -14,23 +14,27 @@ import { useT } from '../i18n';
 import { oneShot } from '../util';
 import { mapAdjusts } from '../viewport/glyphs';
 import { AppearanceRow, AppearanceStack, type RowClick } from './AppearanceRow';
-import { materialCss, materialSummary, partMaterial, refsOf, stackPos } from './parts';
+import { materialCss, materialSummary, partMaterial, refsOf, SIDE_SAME_AS, stackPos } from './parts';
 import { Material3DSection } from './style/Material3DEditor';
 import { MaterialLinkBadge } from './style/MaterialLink';
 import { PartMaterial2D } from './style/Parts2D';
 
 // A letter's own materials in the Letters section, listed like the layer's Appearance: 2D its
-// face; 3D its face, bevel bands and side (a white 元祖 inside a gold word loses the gold bands
-// too). A part the letter doesn't own shows the layer's material, its side the letter's own
-// neighbour (model/sides.ts: a letter owning its outermost band shows that band on its side
-// while the layer's side follows its band); Own gives the picked letters a copy of what they
+// face; 3D its face (and bevel), its side walls while the layer or a picked letter has a side of
+// its own, and the bands behind it (a white 元祖 inside a gold word loses the gold bands too; a
+// letter's band covers that band's front, bevel and side wall behind it). A part the letter
+// doesn't own shows the layer's material, its side what the letter shows there (model/bands.ts:
+// the layer's own side, else the letter's face); Own gives the picked letters a copy of what they
 // show, ✕ hands that one part back. Every edit applies to all picked letters.
 
-/** The parts a letter can own, as the layer's part keys: 2D the face; 3D face, bands (none in inflate mode, which ignores them) and side. */
-function letterParts(layer: TitleLayer): PartKey[] {
+/**
+ * The parts the picked letters can own, as the layer's part keys: 2D the face; 3D the face, the
+ * side (while the layer owns a side or one of `selected` does) and the bands.
+ */
+function letterParts(layer: TitleLayer, src: TextSource, selected: readonly number[]): PartKey[] {
   if (layer.kind === 'title2d') return ['face'];
-  const bands = layer.style3d.mode === 'inflate' ? [] : layer.style3d.bands.map((b) => bandKey(b.id));
-  return ['face', ...bands, 'side'];
+  const side = layer.style3d.side || selected.some((i) => src.chars[i]?.side3d);
+  return ['face', ...(side ? (['side'] as const) : []), ...layer.style3d.bands.map((b) => bandKey(b.id))];
 }
 
 /** Where a letter keeps its own material for `part`, inside its CharAdjust: `face` (2D), `face3d`, `bands3d[k]` (index-aligned with the layer's bands) or `side3d`. */
@@ -45,20 +49,13 @@ function ownPath(layer: TitleLayer, part: PartKey): (string | number)[] {
 /** The letter's own material for `part`, or undefined when it uses the layer's. */
 const ownOf = (layer: TitleLayer, a: CharAdjust | undefined, part: PartKey) => (getIn(a, ownPath(layer, part)) ?? undefined) as AnyMaterial | undefined;
 
-/** What letter `a` shows for `part` while it doesn't own it: the layer's material; for a 3D side, the letter's neighbour. */
+/** What letter `a` shows for `part` while it doesn't own it: the layer's material; for a 3D side, the layer's own side, else the letter's face. */
 const inheritedOf = (layer: TitleLayer, a: CharAdjust | undefined, part: PartKey) =>
   layer.kind === 'title3d' && part === 'side' ? charSideNeighbour(layer.style3d, a) : partMaterial(layer, part);
 
-/**
- * What a letter's side follows while it doesn't own it, when that is the letter's own band or
- * face (“Same as Band 2”, “Same as face”); null when it is the layer's.
- */
-function charSideSource(layer: TitleLayer, a: CharAdjust | undefined): Text | null {
-  if (layer.kind !== 'title3d' || layer.style3d.side) return null;
-  const i = sideSource(layer.style3d);
-  if (i === null) return a?.face3d ? msg('Same as face') : null;
-  return a?.bands3d?.[i] ? msg('Same as {part}', { part: partLabel(layer, bandKey(layer.style3d.bands[i].id)) }) : null;
-}
+/** What a letter's side shows while it doesn't own it, when that is the letter's own face (“Same as face”); null when it is the layer's. */
+const charSideSource = (layer: TitleLayer, a: CharAdjust | undefined): Text | null =>
+  layer.kind === 'title3d' && !layer.style3d.side && a?.face3d ? SIDE_SAME_AS : null;
 
 /**
  * `a` owning a copy of `m` for `part` (a linked material leaves its link behind), or using the
@@ -119,7 +116,7 @@ export function LetterMaterials({ layer, src, selected }: { layer: TitleLayer; s
   const is2d = layer.kind === 'title2d';
   const chars = Array.from(src.text);
   const picked = selected.map((i) => chars[i]).join('');
-  const parts = letterParts(layer);
+  const parts = letterParts(layer, src, selected);
   const shown = parts.filter((p) => rows.sel.includes(p));
   const last = shown[shown.length - 1];
   const own = (i: number, part: PartKey) => ownOf(layer, src.chars[i], part);
@@ -135,11 +132,11 @@ export function LetterMaterials({ layer, src, selected }: { layer: TitleLayer; s
     setRows({ sel: keys, anchor: keys[keys.length - 1] });
   };
   const resetPart = (part: PartKey) => update((a) => withOwn(layer, a, part, null), msg('Reset {part} “{chars}” to the layer’s', { part: partLabel(layer, part), chars: picked }));
-  /** Bands and side take the letter's face (its own, else the layer's); the side follows the bands when that shows the same. */
+  /** Bands and side take the letter's face (its own, else the layer's); the side shows the face again when that is the same. */
   const matchFace = () =>
     update((a) => {
       const face = ownOf(layer, a, 'face') ?? partMaterial(layer, 'face');
-      const banded = parts.filter((p) => p !== 'face' && p !== 'side').reduce((b, p) => withOwn(layer, b, p, face), a);
+      const banded = layer.kind === 'title3d' ? layer.style3d.bands.reduce((b, band) => withOwn(layer, b, bandKey(band.id), face), a) : a;
       return layer.kind === 'title3d' && face ? withCharSide(layer.style3d, banded, structuredClone(withoutLink(face as Material3D))) : banded;
     }, msg('Bands = face “{chars}”', { chars: picked }));
 
@@ -224,6 +221,8 @@ export function LetterMaterials({ layer, src, selected }: { layer: TitleLayer; s
           const summary = summaries.size === 1 ? [...summaries][0] : '—';
           const sel = shown.includes(part);
           const resetTo = part === 'side' ? charSideSource(layer, src.chars[selected[0]]) : null;
+          // the face row splits the side off while no side row is listed
+          const splitSide = !is2d && part === 'face' && !parts.includes('side');
           return (
             <AppearanceRow
               key={part}
@@ -255,6 +254,18 @@ export function LetterMaterials({ layer, src, selected }: { layer: TitleLayer; s
                     <IconBtn title={resetTo ? formatMsg(resetTo, t) : t("Reset to layer's")} onClick={() => resetPart(part)}>
                       ✕
                     </IconBtn>
+                  )}
+                  {splitSide && (
+                    <button
+                      className="small"
+                      title={t('Give “{chars}” side walls of their own (a copy of what they show), so they can differ', { chars: picked })}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        ownParts(['side']);
+                      }}
+                    >
+                      {t('Own side')}
+                    </button>
                   )}
                 </>
               }

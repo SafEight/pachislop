@@ -78,7 +78,7 @@ const SHORTCUTS: { group: string; items: [keys: string, what: string][] }[] = [
       ['3D arrows', 'Move along X / Y / Z; the centre square moves in the screen plane (⇧ steps)'],
       ['3D arcs', 'Rotate about X / Y / Z: drag along the arc (⇧ 15°)'],
       ['3D ring  /  ⌥-drag', 'Rotate freely, like a trackball (⇧ 15°)'],
-      ['⌥-click a title', 'Select the part under the cursor (face, rim, band, side wall, plate)'],
+      ['⌥-click a title', 'Select the part under the cursor (face, rim, band, side wall)'],
       ['← → ↑ ↓', 'Nudge the selection 1 px'],
       ['⇧ + arrows', 'Nudge 10 px'],
     ],

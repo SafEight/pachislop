@@ -3,7 +3,7 @@ import type { ParamDef } from '../engine/contracts';
 import { createGeneratorLayer, generatorFromPreset, getGenerator, presetEffects } from '../generators/registry';
 import { addCompanion } from '../model/companions';
 import { ADJUSTMENT_NAMES, createAdjustmentLayer, createGroupLayer, uid } from '../model/defaults';
-import { bandKey, isTitleLayer, plateKey, rimKey, type TitleLayer } from '../model/parts';
+import { bandKey, isTitleLayer, rimKey, type TitleLayer } from '../model/parts';
 import type { Layer, ParamValue, PartEffects, PartKey } from '../model/types';
 import { applyPresetToProject, presetFromLayer } from '../presets/apply';
 import { tr } from '../ui/i18n';
@@ -17,7 +17,7 @@ import { childrenOf, clipBaseOf, clippedTo, isGroup, normalizeTree, rootIds, sub
 
 // Layer stack actions: add, delete, duplicate, move / arrange, group / ungroup, clip, rename, copy / paste style.
 
-/** Deep copy with fresh ids (layer, effects, masks, rims, bands, backplates; part-effect keys follow their parts). */
+/** Deep copy with fresh ids (layer, effects, masks, rims, bands; part-effect keys follow their parts). */
 export function cloneLayerFresh<L extends Layer>(layer: L): L {
   const copy = structuredClone(layer);
   copy.id = uid();
@@ -34,10 +34,7 @@ export function cloneLayerFresh<L extends Layer>(layer: L): L {
       return { ...x, id };
     });
   if (title.kind === 'title2d') title.style.rims = fresh(title.style.rims, rimKey);
-  else {
-    title.style3d.bands = fresh(title.style3d.bands, bandKey);
-    title.style3d.backplates = fresh(title.style3d.backplates, plateKey);
-  }
+  else title.style3d.bands = fresh(title.style3d.bands, bandKey);
   title.partEffects = Object.fromEntries(
     Object.entries(title.partEffects).map(([k, fx]) => [keys.get(k) ?? k, (fx ?? []).map((e) => ({ ...e, id: uid() }))]),
   ) as PartEffects;

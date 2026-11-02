@@ -194,7 +194,7 @@ function linkTitle(t: Translate, project: Project, mat: AnyMaterial | undefined,
   return t('Linked: {name} ×{n}', { name: linkName(t, project, mat.link, mat), n: linkedSlots(project, mat.link, kind).length });
 }
 
-/** The link of part `part` of `l` (a plate: its front, else its edge), with its name and size, or null. */
+/** The link of part `part` of `l` (a band: its material, else its own side wall), with its name and size, or null. */
 function partLink(t: Translate, project: Project, l: TitleLayer, part: PartKey): string | null {
   const found: { mat: AnyMaterial; kind: LinkKind }[] = [];
   forEachMaterial(l, (s) => {

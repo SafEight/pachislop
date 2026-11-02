@@ -2,12 +2,12 @@ import type { Companion } from '../generators/fromEffect';
 import type { EffectInstance, Layer, Project, Title3DProps, TitleStyle2D } from '../model/types';
 
 /**
- * Position of a style part in a look, independent of element ids: 'face', 'side', or a rim /
- * bevel band / backplate by its INDEX in the style's own list (`style.rims` and
- * `style3d.backplates` innermost first, `style3d.bands` face edge → side), e.g. 'rim:2'. A look
- * applied to a layer maps each key to the part at that position of the resulting style.
+ * Position of a style part in a look, independent of element ids: 'face', 'side', or a rim / band
+ * by its INDEX in the style's own list (`style.rims` and `style3d.bands`, innermost first), e.g.
+ * 'rim:2'. A look applied to a layer maps each key to the part at that position of the resulting
+ * style.
  */
-export type PresetPartKey = 'face' | 'side' | `rim:${number}` | `band:${number}` | `plate:${number}`;
+export type PresetPartKey = 'face' | 'side' | `rim:${number}` | `band:${number}`;
 
 /**
  * A reusable look (Eye Candy "settings" / Photoshop layer style / Element 3D preset).

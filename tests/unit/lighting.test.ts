@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { migrateProject } from '../../src/io/project';
-import { backplate3D, createProject, createTitle3DLayer, defaultComp, material3D } from '../../src/model/defaults';
+import { createProject, createTitle3DLayer, defaultComp, material3D, plateShape } from '../../src/model/defaults';
 import { effectiveLighting, lightingSource, noLighting, resolveEnvironment, withEnvValue, withoutEnvValue } from '../../src/model/lighting';
 import type { Environment3D, Lighting3D, Material3D, Project, Title3DLayer } from '../../src/model/types';
 
@@ -39,18 +39,26 @@ describe('effectiveLighting', () => {
   });
 });
 
-/** A v7 project: per-layer lighting whole or null, part environments whole or null. */
+/**
+ * A v7 project: per-layer lighting whole or null, part environments whole or null. Its 3D style
+ * is in the v4–v10 shape (one ring, one backplate) and inflated, so the v11 conversion keeps every
+ * material where it can be checked: the ring a band switched off, the plate the next band, the
+ * side wall on the letter.
+ */
 function v7(layerLighting: Lighting3D | null, partEnv: Environment3D | null, docBlur = 0): { json: Json; layer: Title3DLayer } {
   const layer = createTitle3DLayer('A');
   const p: Project = { ...createProject(), comp: { ...defaultComp(), environment: env({ blur: docBlur }) }, layers: [layer] };
   const j: Json = structuredClone(p);
   j.version = 7;
-  const s3 = j.layers[0].style3d;
+  const { bevel, bands: _, ...s3 }: Json = j.layers[0].style3d;
+  j.layers[0].style3d = s3;
+  s3.mode = 'inflate';
   s3.lighting = layerLighting;
   s3.face.environment = partEnv;
   s3.side = { ...material3D('silver'), environment: null };
-  s3.bands.forEach((b: Json) => (b.material.environment = null));
-  s3.backplates = [{ ...backplate3D(2, 'gold'), face: { ...material3D('gold'), environment: partEnv }, side: { ...material3D('gold'), environment: null } }];
+  s3.bands = [{ id: 'ring', ...bevel, material: { ...material3D('chrome'), environment: null } }];
+  const plate = { id: 'plate', enabled: true, grow: 2, join: 'miter', fillCounters: true, plate: plateShape(), depth: 10, zGap: 0, bevel };
+  s3.backplates = [{ ...plate, face: { ...material3D('gold'), environment: partEnv }, side: { ...material3D('gold'), environment: null } }];
   j.layers[0].source.chars = { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, bands3d: [{ ...material3D('chrome'), environment: partEnv }], side3d: { ...material3D('chrome'), environment: null } } };
   return { json: j, layer };
 }
@@ -72,7 +80,7 @@ describe('v7 → v8 lighting migration', () => {
     delete (want as Partial<Environment3D>).blur;
     delete (want as Partial<Environment3D>).repeatX;
     expect(style(p).face.environment).toEqual(want);
-    expect(style(p).backplates[0].face.environment).toEqual(want);
+    expect(style(p).bands[1].material.environment).toEqual(want);
     expect(style(p).side?.environment).toEqual({});
     const chars = (p.layers[0] as Title3DLayer).source;
     if (chars.kind !== 'text') throw new Error('expected text');

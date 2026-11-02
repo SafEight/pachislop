@@ -10,12 +10,12 @@ import { partEnabled, partHasEye } from '../layers/parts';
 import { SectionScope } from '../sectionMemory';
 import { useRefValue } from '../util';
 import { EffectStack } from './EffectCard';
-import { addPart, canMovePart, duplicatePart, isInheritedSide, movePart, ownSides, partScope, refsOf, removePart, sideSameAs, stackPos, usePartPage } from './parts';
+import { addPart, canMovePart, duplicatePart, isInheritedSide, movePart, ownSides, partScope, refsOf, removePart, SIDE_SAME_AS, stackPos, usePartPage } from './parts';
 import { Material3DSection } from './style/Material3DEditor';
 import { Face2DEditor, PartMaterial2D, RimEditor, type RimTarget } from './style/Parts2D';
-import { BandEditor, Face3DEditor, PlateEditor, SideEditor, type Stack3DTarget } from './style/Parts3D';
+import { BandEditor, Face3DEditor, SideEditor, type Stack3DTarget } from './style/Parts3D';
 
-/** + Rim (2D) or + Band / + Plate (3D) buttons; the new part is selected. GLB models have no stacks. */
+/** + Rim (2D) or + Band (3D) button; the new part is selected. GLB models have no stacks. */
 export function AddPartButtons({ layer }: { layer: TitleLayer }) {
   const t = useT();
   if (layer.kind === 'title2d')
@@ -26,20 +26,13 @@ export function AddPartButtons({ layer }: { layer: TitleLayer }) {
     );
   if (layer.source.kind === 'model') return null;
   return (
-    <>
-      {layer.style3d.mode !== 'inflate' && (
-        <button className="small" title={t('Add a band at the side-wall end')} onClick={() => addPart(layer, 'band')}>
-          + {t('Band', undefined, { ctx: 'bevel' })}
-        </button>
-      )}
-      <button className="small" title={t('Add a plate outside every other plate (2 % wider, contrasting colour)')} onClick={() => addPart(layer, 'plate')}>
-        + {t('Plate')}
-      </button>
-    </>
+    <button className="small" title={t('Add a band behind the last one: an outline copy of the letters, 2 % wider, in the next colour')} onClick={() => addPart(layer, 'band')}>
+      + {t('Band', undefined, { ctx: 'bevel' })}
+    </button>
   );
 }
 
-/** Show / hide toggle of a part where `setPartEnabled` applies (rims, plates, the 2D face); an empty cell elsewhere, so rows line up. */
+/** Show / hide toggle of a part where `setPartEnabled` applies (rims, bands, the 2D face); an empty cell elsewhere, so rows line up. */
 export function PartEye({ layer, part }: { layer: TitleLayer; part: PartKey }) {
   const t = useT();
   const setPartEnabled = useEditor((s) => s.setPartEnabled);
@@ -64,32 +57,38 @@ export function PartEye({ layer, part }: { layer: TitleLayer; part: PartKey }) {
 }
 
 /**
- * Reorder (↑ toward the face, ↓ outward), duplicate and remove a rim / band / plate; on a 3D side,
- * Own while it follows its neighbour, ✕ (back to following it) while it has its own material;
- * nothing for the face.
+ * Reorder (↑ toward the face, ↓ outward), duplicate and remove a rim / band; on a 3D face whose
+ * side walls show it, Own side (they get a copy of the face to differ, and the Side row shows);
+ * on a 3D side, ✕ (back to the face's) while it has its own material, Own while it shows the
+ * face (listed only for its effects); nothing for the 2D face.
  */
 export function PartActions({ layer, part }: { layer: TitleLayer; part: PartKey }) {
   const t = useT();
-  if (layer.kind === 'title3d' && part === 'side') {
-    const name = formatMsg(partLabel(layer, part), t);
-    const sameAs = formatMsg(sideSameAs(layer), t);
+  if (layer.kind === 'title3d' && (part === 'face' || part === 'side')) {
+    if (layer.source.kind === 'model') return <span className="part-actions" />;
+    const side = formatMsg(partLabel(layer, 'side'), t);
+    const sameAs = formatMsg(SIDE_SAME_AS, t);
+    const own = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      ownSides([layer], true);
+      useEditor.getState().selectNode({ kind: 'part', layerId: layer.id, part: 'side' });
+    };
     return (
       <span className="part-actions">
-        {isInheritedSide(layer, part) ? (
-          <button
-            className="small"
-            title={t('Give {part} its own copy of the material it follows ({source}), to edit on its own', { part: name, source: sameAs })}
-            onClick={(e) => {
-              e.stopPropagation();
-              ownSides([layer], true);
-            }}
-          >
-            {t('Own')}
+        {!isInheritedSide(layer, 'side') ? (
+          part === 'side' && (
+            <IconBtn title={t('{part}: {source}', { part: side, source: sameAs })} onClick={() => ownSides([layer], false)}>
+              ✕
+            </IconBtn>
+          )
+        ) : part === 'face' ? (
+          <button className="small" title={t('Give the side walls their own copy of the face material, so they can differ (Side row)')} onClick={own}>
+            {t('Own side')}
           </button>
         ) : (
-          <IconBtn title={sameAs} onClick={() => ownSides([layer], false)}>
-            ✕
-          </IconBtn>
+          <button className="small" title={t('Give {part} its own copy of the material it follows ({source}), to edit on its own', { part: side, source: sameAs })} onClick={own}>
+            {t('Own')}
+          </button>
         )}
       </span>
     );
@@ -117,11 +116,12 @@ export function PartActions({ layer, part }: { layer: TitleLayer; part: PartKey 
 }
 
 /**
- * A rim's or band's width on its Appearance row, the number most often changed, without opening
- * the part: one layer's, or (`refs` of several layers) all at once, where typing sets them all
- * and scrubbing widens each by the same amount. Clicks stay off the row (no reselecting).
+ * A rim's width or a band's grow (`grow`) on its Appearance row, the number most often changed,
+ * without opening the part: one layer's, or (`refs` of several layers) all at once, where typing
+ * sets them all and scrubbing widens each by the same amount. Clicks stay off the row (no
+ * reselecting).
  */
-export function PartWidth({ refs, max, label }: { refs: readonly PropRef[]; max: number; label: string }) {
+export function PartWidth({ refs, max, grow, label }: { refs: readonly PropRef[]; max: number; grow: boolean; label: string }) {
   const t = useT();
   const setAt = useEditor((s) => s.setAt);
   const setEachAt = useEditor((s) => s.setEachAt);
@@ -129,15 +129,18 @@ export function PartWidth({ refs, max, label }: { refs: readonly PropRef[]; max:
   const { value, mixed } = useRefValue(refp);
   const num = (v: unknown) => (typeof v === 'number' ? v : 0);
   const several = refs.length > 1;
+  const title = grow
+    ? several
+      ? t('Grow of {part} on every layer: typing sets them all, scrubbing grows each by the same amount', { part: label })
+      : t('Grow of {part} beyond the solid in front of it: drag to scrub, click to type', { part: label })
+    : several
+      ? t('Width of {part} on every layer: typing sets them all, scrubbing widens each by the same amount', { part: label })
+      : t('Width of {part}: drag to scrub, click to type', { part: label });
   return (
-    <span
-      className="part-width"
-      title={several ? t('Width of {part} on every layer: typing sets them all, scrubbing widens each by the same amount', { part: label }) : t('Width of {part}: drag to scrub, click to type', { part: label })}
-      onClick={(e) => e.stopPropagation()}
-    >
+    <span className="part-width" title={title} onClick={(e) => e.stopPropagation()}>
       <NumberField
         id={refKey(refp)}
-        label={t('{part} width', { part: label })}
+        label={grow ? t('{part} grow', { part: label }) : t('{part} width', { part: label })}
         value={num(value)}
         mixed={mixed}
         onChange={(v, c) => setAt(refp, v, c)}
@@ -158,21 +161,20 @@ export interface PartTarget {
   part: PartKey;
 }
 
-/** Where the material a part shows first lives: the 2D face / a rim's, the 3D face / own side / a band's, a plate's front; null for a missing part or a side that follows its neighbour. */
+/** Where the material a part shows first lives: the 2D face / a rim's, the 3D face / own side / a band's; null for a missing part or a side that shows the face. */
 function materialPath(layer: TitleLayer, part: PartKey): (string | number)[] | null {
   const kind = parsePartKey(part).kind;
   const index = stackPos(layer, part)?.index ?? -1;
   if (layer.kind === 'title2d') return kind === 'face' ? ['style', 'face'] : index >= 0 ? ['style', 'rims', index, 'material'] : null;
   if (kind === 'face') return ['style3d', 'face'];
   if (kind === 'side') return layer.style3d.side ? ['style3d', 'side'] : null;
-  if (index < 0) return null;
-  return kind === 'band' ? ['style3d', 'bands', index, 'material'] : ['style3d', 'backplates', index, 'face'];
+  return index < 0 ? null : ['style3d', 'bands', index, 'material'];
 }
 
 /**
  * The editor of one or several parts: their material first, then their geometry (see Parts2D /
- * Parts3D). Parts of one kind (Plates 2 and 4, or rim 2 of three titles) show everything they
- * share; parts of different kinds share only their material (a plate's front). 2D and 3D
+ * Parts3D). Parts of one kind (Bands 2 and 4, or rim 2 of three titles) show everything they
+ * share; parts of different kinds share only their material (a band's front). 2D and 3D
  * materials never mix: such a target list shows nothing. `id` prefixes the sections' remembered
  * open state.
  */
@@ -195,7 +197,7 @@ export function PartEditor({ targets, id }: { targets: readonly PartTarget[]; id
     if (kind === 'side') return <SideEditor layers={layers} id={id} />;
     const stack = in3D.filter((x) => x.index >= 0).map((x): Stack3DTarget => ({ layer: x.layer, index: x.index }));
     if (!stack.length) return null;
-    return kind === 'band' ? <BandEditor bands={stack} id={id} /> : <PlateEditor plates={stack} id={id} />;
+    return <BandEditor bands={stack} id={id} />;
   }
   const refs = flat.flatMap(({ layer, part }) => {
     const path = materialPath(layer, part);
@@ -205,7 +207,7 @@ export function PartEditor({ targets, id }: { targets: readonly PartTarget[]; id
   const first = getIn(refs[0].layer, refs[0].ref.path);
   const refp = refsOf(refs.map((r) => r.ref));
   const prefix = id ?? 'part';
-  const note = <div className="hint-line">{t('Parts of different kinds share only their material (a plate’s front).')}</div>;
+  const note = <div className="hint-line">{t('Parts of different kinds share only their material (a band’s front).')}</div>;
   return in2D.length ? (
     <>
       {note}
@@ -234,7 +236,7 @@ function PartEffects({ layer, part }: { layer: TitleLayer; part: PartKey }) {
 /**
  * The selected part(s) of `layer` edited inside its Appearance list, under their row
  * (Illustrator's Appearance panel): one part shows its editor and its own effects; several show
- * one editor of their shared fields under a "3 parts: Plate 2, Plate 4, Band 1" header.
+ * one editor of their shared fields under a "3 parts: Band 2, Band 4, Side" header.
  */
 export function PartsInline({ layer, parts }: { layer: TitleLayer; parts: readonly PartKey[] }) {
   const t = useT();

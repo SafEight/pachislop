@@ -7,7 +7,7 @@ import { ownGroupOf } from '../model/companions';
 import { sameValue } from '../model/equal';
 import { unifyLayerLinks, withoutLink } from '../model/links';
 import { isTitleLayer } from '../model/parts';
-import { sideNeighbour } from '../model/sides';
+import { mapMaterials3D } from '../model/bands';
 import type {
   EffectInstance,
   Fill,
@@ -32,13 +32,14 @@ import type { ApplyColourway, Colourway } from './types';
 // click like any other look. Unlike a style preset, a colourway keeps the layer's STRUCTURE — rim
 // count, widths, joins, offsets, bevels, textures, gloss, 3D depths/profiles, effects — and only
 // changes colours. Each element is classified by role:
-//   face        → colourway face paint (3D: also leading bevel bands in the face's own material,
-//                 unless the colourway has a bevel rim metal: 赤 → gold, 青 / 緑 → silver)
+//   face        → colourway face paint (3D: the letter's face and bevel, and bands in the face's own
+//                 material, unless the colourway has a bevel rim metal: 赤 → gold, 青 / 緑 → silver)
 //   base        → 2D rim with an x/y offset (the dropped "seated" base): colourway base colour
 //   dark        → any other ring whose current luminance is low (the dark keyline): colourway dark
 //   accent      → remaining rings, inner → outer; the OUTERMOST takes the colourway's last accent
 //                 (e.g. gold: black keyline + gold line + red outer)
-// 2D rings = rims; 3D rings = bevel bands then backplates.
+//   side        → 3D side walls of their own (the letter's, a band's): colourway side paint
+// 2D rings = rims; 3D rings = bands.
 //
 // Colour rules (zenn "Matrix" part 2, CGWORLD "Direction Seeds", megabenri 縁取り):
 // - blue / green take SILVER accent rims, red takes a GOLD rim;
@@ -73,9 +74,9 @@ interface ColourwayDef {
   name: string;
   face: Paint;
   /**
-   * 3D only: the face's own bevel bands (leading bands in the face material) take the colourway's rim
-   * metal where the production rules give one (赤 → gold, 青 / 緑 → silver), so the bevel reads as
-   * a rim against the face. Absent = the bands follow the face.
+   * 3D only: bands in the face's own material take the colourway's rim metal where the production
+   * rules give one (赤 → gold, 青 / 緑 → silver), so they read as a rim against the face. Absent =
+   * they follow the face.
    */
   bevel3d?: Paint;
   /** Face inner-glow tint (2D). */
@@ -408,7 +409,7 @@ function lumaGradient(gr: Gradient): number {
 
 const luma3D = (m: Material3D) => (m.gradient ? lumaGradient(m.gradient) : lumaHex(m.color));
 
-/** 'face' = an extension of the face (a 3D bevel band in the face's own material). */
+/** 'face' = an extension of the face (a 3D band in the face's own material). */
 type Role = 'face' | 'dark' | 'accent';
 
 /** Paint for each ring (inner → outer) given its role; accents align so the outermost gets the colourway's last accent. */
@@ -521,40 +522,28 @@ function paint3D(m: Material3D, p: Paint | (() => Material3D), face = false): Ma
 }
 
 /**
- * The colourway on a 3D style. An inherited side (model/sides.ts) is painted only when the
- * colourway's side paint differs from what its neighbour gets: it then holds that paint itself
- * (unlinked), else it keeps following its neighbour. A plate's edge takes its front's paint, so
- * an inherited edge stays inherited.
+ * The colourway on a 3D style, by role (mapMaterials3D): the letter's face and bevel take the face
+ * paint, the bands ring paints (inner → outer), every side wall of its own the side paint; a
+ * band's inherited side wall keeps following its band. The letter's inherited side is painted
+ * only when the side paint differs from its face's: it then holds that paint itself (unlinked),
+ * else it keeps following the face.
  */
 function recolor3D(s: Title3DProps, def: ColourwayDef): Title3DProps {
   const sameAsFace = (m: Material3D) =>
     m.preset === s.face.preset && m.color === s.face.color && JSON.stringify(m.gradient) === JSON.stringify(s.face.gradient);
-  // Leading bands in the face material are the face's own bevel: they follow the face, or take
-  // the colourway's bevel rim metal (赤 → gold).
-  const lead = s.bands.findIndex((b) => !sameAsFace(b.material));
-  const faceBands = lead < 0 ? s.bands.length : lead;
   const ringRole = (m: Material3D): Role => (luma3D(m) < DARK_LUMA ? 'dark' : 'accent');
-  const roles: Role[] = [
-    ...s.bands.map((b, i) => (i < faceBands ? 'face' : ringRole(b.material))),
-    ...s.backplates.map((bp) => ringRole(bp.face)),
-  ];
+  const roles = s.bands.map((b): Role => (sameAsFace(b.material) ? 'face' : ringRole(b.material)));
   const paints = ringPaints(roles, def);
-  const nb = s.bands.length;
-  const bandPaint = (i: number) => (roles[i] === 'face' && def.bevel3d ? def.bevel3d : paints[i]);
-  const painted: Title3DProps = {
-    ...s,
-    face: paint3D(s.face, def.face, true),
-    bands: s.bands.map((b, i) => ({ ...b, material: paint3D(b.material, bandPaint(i), roles[i] === 'face' && !def.bevel3d) })),
-    backplates: s.backplates.map((bp, i) => {
-      const p = paints[nb + i];
-      return { ...bp, face: paint3D(bp.face, p), ...(bp.side ? { side: paint3D(bp.side, p) } : {}) };
-    }),
-    shadow: { ...s.shadow, color: def.shadow },
-    glint: { ...s.glint, tint: def.glint },
-  };
-  if (s.side) return { ...painted, side: paint3D(s.side, def.side3d) };
-  const side = paint3D(sideNeighbour(s), def.side3d);
-  return sameValue(side, sideNeighbour(painted)) ? painted : { ...painted, side: withoutLink(side) };
+  const painted = mapMaterials3D(s, (m, role) => {
+    if (role.part === 'face') return paint3D(m, def.face, true);
+    if (role.part === 'side' || role.side) return paint3D(m, def.side3d);
+    const face = roles[role.index] === 'face';
+    return paint3D(m, face && def.bevel3d ? def.bevel3d : paints[role.index], face && !def.bevel3d);
+  });
+  const styled: Title3DProps = { ...painted, shadow: { ...s.shadow, color: def.shadow }, glint: { ...s.glint, tint: def.glint } };
+  if (s.side) return styled;
+  const side = paint3D(s.face, def.side3d);
+  return sameValue(side, styled.face) ? styled : { ...styled, side: withoutLink(side) };
 }
 
 // ---------- 保留 orbs ----------
@@ -584,14 +573,13 @@ export function tintOrb(m: Material3D, colourway: Colourway): Material3D {
 
 const isOrb = (s: Title3DLayer['source']) => s.kind === 'shape' && s.shape === 'orb';
 
-/** Orbs recolour their body (face, and the bands / side that only apply off-sphere) and keep the bezel. */
+/** Orbs recolour their body (face, and the side that only applies off-sphere) and keep their bands (the bezel). */
 function recolorOrb(s: Title3DProps, colourway: Colourway): Title3DProps {
   const def = COLOURWAY_DEFS[colourway];
   return {
     ...s,
     face: tintOrb(s.face, colourway),
     ...(s.side ? { side: tintOrb(s.side, colourway) } : {}),
-    bands: s.bands.map((b) => ({ ...b, material: tintOrb(b.material, colourway) })),
     shadow: { ...s.shadow, color: def.shadow },
     glint: { ...s.glint, tint: def.glint },
   };

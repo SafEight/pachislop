@@ -216,56 +216,7 @@ button.part-eye:hover:not(:disabled) {
   width: 50px;
 }
 
-/* ---------- 3D shape: bevel band list (Parts3D.tsx) ---------- */
-.band-list {
-  padding: 2px 0 4px;
-}
-.band-list.off {
-  opacity: 0.55;
-}
-.band-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px 72px 34px;
-  align-items: center;
-  gap: 4px;
-  min-height: 24px;
-}
-.band-row.head {
-  color: var(--muted);
-  font-size: 11px;
-  min-height: 16px;
-}
-.band-row .band-name {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--text);
-  cursor: pointer;
-  justify-self: start;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-}
-.band-row .band-name:hover {
-  text-decoration: underline;
-}
-.band-row .numfield .num {
-  width: 46px;
-}
-.band-profile .menu-btn {
-  padding: 1px 3px;
-  display: flex;
-  align-items: center;
-}
-.band-profile-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* ---------- a rim's / band's width on its Appearance row (PartWidth: layer page and MultiView) ---------- */
+/* ---------- a rim's width / band's grow on its Appearance row (PartWidth: layer page and MultiView) ---------- */
 .part-width {
   flex: none;
 }

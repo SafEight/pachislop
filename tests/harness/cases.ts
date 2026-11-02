@@ -4,6 +4,7 @@ import type { GeneratorDef, GeneratorPreset } from '../../src/engine/contracts';
 import { createGeneratorLayer, listGenerators } from '../../src/generators/registry';
 import { clusterIslands, DEFAULT_MERGE, labelIslands, readPixels } from '../../src/io/imageSplit';
 import {
+  band3D,
   createAdjustmentLayer,
   createGroupLayer,
   createTitle2DLayer,
@@ -35,7 +36,7 @@ export interface GoldenCase {
 
 const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, '_');
 
-const project = (name: string, layers: Layer[]): Project => ({ version: 10, name, comp: defaultComp(), layers: normalizeTree(layers) });
+const project = (name: string, layers: Layer[]): Project => ({ version: 11, name, comp: defaultComp(), layers: normalizeTree(layers) });
 
 /** The standard titles: 2D looks and effects on 確定, 3D looks on BIG. */
 const title2D = (text = '確定', y = 0) => {
@@ -205,8 +206,8 @@ function scenes(): GoldenCase[] {
       id: 'scene/part-effects-3d',
       build: () => {
         const l = title3D();
-        const band = l.style3d.bands[0];
-        if (!band) throw new Error('default 3D title has no bands');
+        const band = band3D(3, 'redMetal');
+        l.style3d.bands = [band];
         l.partEffects = { [`band:${band.id}`]: [effect('outerGlow')], side: [effect('dropShadow')] };
         return project('part effects 3D', [l]);
       },
