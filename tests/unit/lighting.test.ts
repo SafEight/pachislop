@@ -48,7 +48,7 @@ function v7(layerLighting: Lighting3D | null, partEnv: Environment3D | null, doc
   const s3 = j.layers[0].style3d;
   s3.lighting = layerLighting;
   s3.face.environment = partEnv;
-  s3.side.environment = null;
+  s3.side = { ...material3D('silver'), environment: null };
   s3.bands.forEach((b: Json) => (b.material.environment = null));
   s3.backplates = [{ ...backplate3D(2, 'gold'), face: { ...material3D('gold'), environment: partEnv }, side: { ...material3D('gold'), environment: null } }];
   j.layers[0].source.chars = { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, bands3d: [{ ...material3D('chrome'), environment: partEnv }], side3d: { ...material3D('chrome'), environment: null } } };
@@ -73,7 +73,7 @@ describe('v7 → v8 lighting migration', () => {
     delete (want as Partial<Environment3D>).repeatX;
     expect(style(p).face.environment).toEqual(want);
     expect(style(p).backplates[0].face.environment).toEqual(want);
-    expect(style(p).side.environment).toEqual({});
+    expect(style(p).side?.environment).toEqual({});
     const chars = (p.layers[0] as Title3DLayer).source;
     if (chars.kind !== 'text') throw new Error('expected text');
     expect(chars.chars[0].bands3d?.[0]?.environment).toEqual(want);

@@ -17,7 +17,7 @@ import { GeneratorView } from './GeneratorView';
 import { GroupView } from './GroupView';
 import { LettersSection } from './LettersSection';
 import { AddPartButtons, PartActions, PartEye, PartsInline, PartWidth } from './PartView';
-import { partSummary, partSwatch, partWidth, usePartPage } from './parts';
+import { isInheritedSide, partSummary, partSwatch, partWidth, usePartPage } from './parts';
 import { FillEditor } from './style/FillEditor';
 import { PartLinkBadge } from './style/MaterialLink';
 import { Style2DSettings } from './style/Parts2D';
@@ -64,6 +64,7 @@ function AppearanceList({ layer, expanded }: { layer: TitleLayer; expanded: read
             sel={sel}
             open={part === last}
             off={!partEnabled(layer, part)}
+            inherited={isInheritedSide(layer, part)}
             title={t('{part}: {summary} — click to edit here, ⇧ / ⌘-click to edit several', { part: name, summary })}
             onClick={(e) => clickPart(layer, part, alone, e)}
             eye={<PartEye layer={layer} part={part} />}

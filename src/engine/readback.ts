@@ -13,7 +13,7 @@ export interface ImageData16 {
 const READBACK_FLOATS = 1 << 22;
 
 /** Which kept 8-bit readback target a readback goes through. */
-export type ReadbackUse = 'export' | 'thumb' | 'backdrop' | 'part';
+export type ReadbackUse = 'export' | 'thumb' | 'backdrop' | 'part' | 'overview';
 
 /** A composite (premultiplied linear) to the canvas, or read back as straight-alpha sRGB at 8 bits (dithered) or 16 bits. */
 export class Readback {

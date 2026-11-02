@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getAsset, getFont, type AssetEntry, type FontEntry } from '../../assets/registry';
 import { bandKey, plateKey } from '../../model/parts';
 import { effectiveLighting, resolveEnvironment } from '../../model/lighting';
+import { charSide, plateSide, sideMaterial } from '../../model/sides';
 import type { Comp, Environment3D, Layer, Light3D, Material3D, PartKey, Title3DLayer } from '../../model/types';
 import type { LayerRenderContext, LayerRenderer } from '../contracts';
 import type { PassKit } from '../passkit';
@@ -9,7 +10,7 @@ import { AOPass } from './ao';
 import { effectiveSegments } from './bevel';
 import { orbGridFor } from './extrude';
 import { envMapEuler } from './environment';
-import { GlintPass } from './glint';
+import { GlintPass, type GlintLight } from './glint';
 import { inflateScale } from './inflate';
 import { decodeImage, getBitmap } from '../layer2d/images';
 import { imageFit } from '../../text/trace';
@@ -66,7 +67,8 @@ import { createTonemapMaterial, TONEMAP_IDS } from './tonemap';
 // Material slots: a block [face · bands 1..n · side (+ main back cap)] for the layer, then per
 // enabled backplate: face (+ its bevel), side (+ its back cap), then one block per character
 // with a 3D material override (CharAdjust face3d / bands3d / side3d, ascending char index; a
-// missing override falls back to the layer's material). The orb uses slot 0 only.
+// missing override falls back to the layer's material). Sides resolve through model/sides.ts (an
+// absent one follows its neighbour). The orb uses slot 0 only.
 //
 // Reflections: style3d.envLock looks the environment up with the layer-space normal, so a
 // tilted title reflects what it reflects head-on (materials.ts).
@@ -77,6 +79,10 @@ import { createTonemapMaterial, TONEMAP_IDS } from './tonemap';
 // optional AO (ao.ts, multiplied in) → optional glint (glint.ts, on the HDR highlights, on
 // the comp-locked grid) → tone map (adds the glint) → Mitchell downsample (resample.ts) when
 // supersampled → layer target.
+// A preview window (ctx.frame) draws through the camera's view offset (engine/surface.ts) at
+// the whole render's supersample factor; the AO jitter, the glint grid and output lattice and
+// the gems' rough-refraction blur are laid out on the whole render, so the window holds the
+// whole render's pixels, but for what reaches in from past its edges (glint, AO, refraction).
 //
 // Part renders (ctx.parts, for per-part effects): the listed parts' slots draw colour, every
 // other slot only depth (drawScene), so each part shows exactly its pixels of the full render
@@ -244,13 +250,13 @@ function overrideChars(layer: Title3DLayer): number[] {
 /** Material3D for every slot, in slot order (see header). */
 function slotMaterials(layer: Title3DLayer): Material3D[] {
   const p = layer.style3d;
-  const out = [p.face, ...p.bands.map((b) => b.material), p.side];
-  for (const bp of p.backplates) if (bp.enabled) out.push(bp.face, bp.side);
+  const out = [p.face, ...p.bands.map((b) => b.material), sideMaterial(p)];
+  for (const bp of p.backplates) if (bp.enabled) out.push(bp.face, plateSide(bp));
   if (layer.source.kind === 'text') {
     const chars = layer.source.chars;
     for (const k of overrideChars(layer)) {
       const a = chars[k];
-      out.push(a.face3d ?? p.face, ...p.bands.map((b, i) => a.bands3d?.[i] ?? b.material), a.side3d ?? p.side);
+      out.push(a.face3d ?? p.face, ...p.bands.map((b, i) => a.bands3d?.[i] ?? b.material), charSide(p, a));
     }
   }
   return out;
@@ -501,12 +507,12 @@ class Layer3DRendererImpl implements LayerRenderer {
     // most), as in the full render, so the whole title is drawn first for the glint, then the
     // parts; both take the same AO
     const wholeFirst = masked && glintOn;
-    let glintTex: THREE.Texture | null = null;
+    let glint: GlintLight | null = null;
     if (wholeFirst) {
       this.drawScene(renderer, ctx.camera, null);
       const whole = this.resolveHdr(kit, W, H, k);
       if (aoOn) this.runAO(layer, ctx, whole);
-      glintTex = this.runGlint(layer, ctx, k, whole);
+      glint = this.runGlint(layer, ctx, k, whole);
     }
     this.drawScene(renderer, ctx.camera, mask);
     renderer.shadowMap.enabled = prevShadow;
@@ -519,7 +525,7 @@ class Layer3DRendererImpl implements LayerRenderer {
     if (aoOn && wholeFirst) this.ao!.applyAgain(hdr);
     else if (aoOn) this.runAO(layer, ctx, hdr);
     renderer.autoClear = prevAutoClear;
-    if (glintOn && !wholeFirst) glintTex = this.runGlint(layer, ctx, k, hdr);
+    if (glintOn && !wholeFirst) glint = this.runGlint(layer, ctx, k, hdr);
 
     // tone map (+ glint) at the render resolution → target (premultiplied linear); a
     // supersampled render is tone mapped first and filtered down after, so bright HDR edges
@@ -527,8 +533,9 @@ class Layer3DRendererImpl implements LayerRenderer {
     this.tonemap ??= createTonemapMaterial(kit);
     const tu = this.tonemap.uniforms;
     tu.tSrc.value = hdr.texture;
-    tu.tGlint.value = glintTex;
-    tu.uGlint.value = glintTex !== null;
+    tu.tGlint.value = glint?.texture ?? null;
+    tu.uGlint.value = glint !== null;
+    if (glint) tu.uGlintUv.value.copy(glint.uv);
     tu.uMode.value = TONEMAP_IDS[lighting.toneMapping] ?? 0;
     tu.uExposure.value = Math.max(0, lighting.exposure);
     if (k === 1) {
@@ -609,18 +616,18 @@ class Layer3DRendererImpl implements LayerRenderer {
   private runAO(layer: Title3DLayer, ctx: LayerRenderContext, hdr: THREE.WebGLRenderTarget) {
     const ao = layer.style3d.ao;
     this.ao ??= new AOPass(ctx.kit);
-    this.ao.render(ctx.renderer, this.scene, ctx.camera, hdr, ctx.width, ctx.height, [this.catcher], {
+    this.ao.render(ctx.renderer, this.scene, ctx.camera, hdr, ctx.width, ctx.height, ctx.frame, [this.catcher], {
       radius: (ao.radius / 100) * layer.source.size * Math.abs(layer.transform.scale),
       intensity: ao.intensity,
     });
   }
 
   /** Glint on the HDR highlights of `hdr`; sizes are % of source.size → render px. */
-  private runGlint(layer: Title3DLayer, ctx: LayerRenderContext, k: number, hdr: THREE.WebGLRenderTarget): THREE.Texture {
+  private runGlint(layer: Title3DLayer, ctx: LayerRenderContext, k: number, hdr: THREE.WebGLRenderTarget): GlintLight {
     const g = layer.style3d.glint;
     this.glint ??= new GlintPass(ctx.kit);
     const unit = (layer.source.size / 100) * Math.abs(layer.transform.scale) * ctx.pxScale;
-    return this.glint.render(hdr.texture, ctx.width, ctx.height, {
+    return this.glint.render(hdr.texture, ctx.width, ctx.height, ctx.frame, {
       threshold: g.threshold,
       intensity: g.intensity,
       radiusPx: Math.max(0, g.radius) * unit,
@@ -642,11 +649,15 @@ class Layer3DRendererImpl implements LayerRenderer {
     return this.post;
   }
 
-  /** comp.supersample, lowered to fit the GPU's texture size and the memory budget. */
+  /**
+   * comp.supersample, lowered to fit the GPU's texture size and the memory budget of the whole
+   * render (ctx.frame), so a preview window renders at the factor the whole render has.
+   */
   private supersampleFactor(requested: number, ctx: LayerRenderContext): number {
     const maxSide = ctx.renderer.capabilities.maxTextureSize;
+    const { width, height } = ctx.frame;
     let k = Math.max(1, Math.round(requested || 1));
-    while (k > 1 && (ctx.width * ctx.height * k * k > SUPERSAMPLE_BUDGET || Math.max(ctx.width, ctx.height) * k > maxSide)) k--;
+    while (k > 1 && (width * height * k * k > SUPERSAMPLE_BUDGET || Math.max(width, height) * k > maxSide)) k--;
     return k;
   }
 
@@ -750,6 +761,7 @@ class Layer3DRendererImpl implements LayerRenderer {
       layerRot: this.layerRot,
       size: layer.source.size,
       viewport: this.viewport.set(width, height),
+      frameSpan: ctx.frame.width / ctx.width,
     });
     if (this.meshes.length) {
       const defs = slotMaterials(layer);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { PassContext } from '../engine/contracts';
+import { centreX, centreY } from '../engine/frame';
 import type { PassKit } from '../engine/passkit';
 import type { Bounds } from '../text/layout';
 
@@ -276,23 +277,25 @@ export function bounds(ctx: PassContext, src: THREE.Texture): THREE.WebGLRenderT
  */
 export function inkBounds(ctx: PassContext, src: THREE.Texture): Bounds | null {
   const { width: w, height: h, pxScale: scale } = ctx;
+  const cx = centreX(ctx.frame);
+  const cy = centreY(ctx.frame);
   const px = new Float32Array(4);
   ctx.renderer.readRenderTargetPixels(bounds(ctx, src), 0, 0, 1, 1, px);
   const u0 = -px[0];
   const v0 = -px[1];
   if (px[2] < u0 || px[3] < v0) return null;
-  // texel-centre uv → the texels' outer edges, render px → comp px about the centre
+  // texel-centre uv → the texels' outer edges, target px → comp px about the comp centre
   return {
-    x0: (u0 * w - 0.5 - w / 2) / scale,
-    y0: (v0 * h - 0.5 - h / 2) / scale,
-    x1: (px[2] * w + 0.5 - w / 2) / scale,
-    y1: (px[3] * h + 0.5 - h / 2) / scale,
+    x0: (u0 * w - 0.5 - cx) / scale,
+    y0: (v0 * h - 0.5 - cy) / scale,
+    x1: (px[2] * w + 0.5 - cx) / scale,
+    y1: (px[3] * h + 0.5 - cy) / scale,
   };
 }
 
 /**
  * GLSL for reading a bounds() result: declares `uniform sampler2D tBounds;` and
- * `vec4 layerBox()` = (minU, minV, maxU, maxV) in uv; the whole frame if the layer is empty.
+ * `vec4 layerBox()` = (minU, minV, maxU, maxV) in target uv; the whole target if the layer is empty.
  */
 export const BOUNDS_GLSL = /* glsl */ `
 uniform sampler2D tBounds;

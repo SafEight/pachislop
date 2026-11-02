@@ -36,6 +36,18 @@ export function effectFillsComp(fx: EffectInstance): boolean {
 }
 
 /**
+ * How far (comp px) back into its input an effect instance looks, with its defaults filled in
+ * (see EffectDef.gather): 0 when disabled or of an unknown type (it does nothing), null when it
+ * may depend on the whole layer.
+ */
+export function effectGather(fx: EffectInstance): number | null {
+  const def = byType.get(fx.type);
+  if (!fx.enabled || !def) return 0;
+  const g = def.gather?.(resolved(def, fx));
+  return g === undefined || g === null ? null : Math.max(0, g);
+}
+
+/**
  * The Use Global Light spec of `fx` when its direction param `angleKey` currently follows
  * comp.globalLight, else null. On-canvas direction handles for such a param show
  * `angleFromGlobal(spec, comp.globalLight.angle)` and write `globalFromAngle(spec, dragged)` to

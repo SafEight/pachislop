@@ -1,23 +1,24 @@
 import * as THREE from 'three';
 import { generatorParams, getGenerator } from '../generators/registry';
 import type { Layer, Transform } from '../model/types';
-import type { GeneratorContext, LayerRenderContext, LayerRenderer, LayerSource } from './contracts';
+import type { GeneratorContext, LayerRenderContext, LayerRenderer, LayerSource, RenderFrame } from './contracts';
+import { centreX, centreY } from './frame';
 
 const DEG = Math.PI / 180;
 
 /**
  * Layer space of a generator layer (comp px, origin at the layer position, +y up, mirrored by
  * flipX / flipY, then turned by rotZ — positive turns clockwise on screen — and scaled by `scale`)
- * → render px of a `width`×`height` target at `pxScale` whose centre is the comp centre; written
- * into `out`. rotX / rotY / z do not apply: generators are flat screen-plane content.
+ * → render px of a target of the frame `frame` at `pxScale` (the comp centre at centreX / centreY);
+ * written into `out`. rotX / rotY / z do not apply: generators are flat screen-plane content.
  */
-export function generatorLayerToRender(t: Transform, width: number, height: number, pxScale: number, out: THREE.Matrix3): THREE.Matrix3 {
+export function generatorLayerToRender(t: Transform, frame: RenderFrame, pxScale: number, out: THREE.Matrix3): THREE.Matrix3 {
   const r = -t.rotZ * DEG;
   const c = Math.cos(r) * t.scale * pxScale;
   const s = Math.sin(r) * t.scale * pxScale;
   const fx = t.flipX ? -1 : 1;
   const fy = t.flipY ? -1 : 1;
-  return out.set(c * fx, -s * fy, t.x * pxScale + width / 2, s * fx, c * fy, t.y * pxScale + height / 2, 0, 0, 1);
+  return out.set(c * fx, -s * fy, t.x * pxScale + centreX(frame), s * fx, c * fy, t.y * pxScale + centreY(frame), 0, 0, 1);
 }
 
 /** No other layers to read (a render without a frame source): every lookup is null. */
@@ -43,10 +44,11 @@ class GeneratorRenderer implements LayerRenderer {
       width: ctx.width,
       height: ctx.height,
       pxScale: ctx.pxScale,
+      frame: ctx.frame,
       comp: ctx.project.comp,
       layerId: layer.id,
       draft: ctx.draft,
-      layerToRender: generatorLayerToRender(layer.transform, ctx.width, ctx.height, ctx.pxScale, this.layerToRender),
+      layerToRender: generatorLayerToRender(layer.transform, ctx.frame, ctx.pxScale, this.layerToRender),
       layerAlpha: (id) => src.alpha(id),
       layerAlphaKey: (id) => src.alphaKey(id),
       layerBounds: (id) => src.bounds(id),

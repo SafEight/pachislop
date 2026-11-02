@@ -96,6 +96,8 @@ const outerGlow: EffectDef = {
   ],
   directions: [{ angle: 'angle', label: 'Gradient direction', convention: 'cwFromRight', when: { key: 'fill', value: 'gradient' } }],
   reach: (p) => num(p, 'size'),
+  // blurs of radius `size` (taps to ~1.33 ×) or the edge distance up to `size`; the gradient fill spans the layer box
+  gather: (p) => (p.fill === 'gradient' ? null : 1.5 * num(p, 'size')),
   apply(ctx, input, output, p) {
     const fill = pick(p, 'fill', OUTER_FILLS);
     const precise = p.technique === 'precise';
@@ -184,6 +186,7 @@ const innerGlow: EffectDef = {
       ['center', 'Center'],
     ]),
   ],
+  gather: (p) => 1.5 * num(p, 'size'),
   apply(ctx, input, output, p) {
     const precise = p.technique === 'precise';
     const distance = p.fill === 'distance';
@@ -244,6 +247,8 @@ const deepGlow: EffectDef = {
     pNum('onFace', 'Glow Over Face', 0, 0, 1),
   ],
   reach: (p) => num(p, 'radius'),
+  // the widest PSF octave: σ = radius / 3, × 1.2 at full chromatic scatter, taps to 3σ
+  gather: (p) => 1.25 * num(p, 'radius'),
   apply(ctx, input, output, p) {
     const gain = 2 ** num(p, 'exposure');
     const threshold = num(p, 'threshold');

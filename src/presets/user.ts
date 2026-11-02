@@ -3,6 +3,7 @@ import { contentEffectsOfLook } from '../io/migrate/contentEffects';
 import { dedupeEffects } from '../io/migrate/effectDedupe';
 import { migrateMaterialEffects } from '../io/migrate/materialEffects';
 import { uid } from '../model/defaults';
+import { inheritSides } from '../model/sides';
 import type { EffectInstance, Lighting3D } from '../model/types';
 import { fullLighting } from './apply';
 import { msg, MsgError } from '../store/msg';
@@ -11,16 +12,24 @@ import type { PresetPartKey, StylePreset } from './types';
 // User style presets ("My Styles"), persisted in localStorage (a preset is a few KB of JSON).
 // Import/export uses a small JSON file format so looks can be shared between machines.
 
-const STORAGE_KEY = 'pachislot-visuals.userPresets.v8';
-/** Read in this order when the v8 key is absent; their presets are migrated (lighting as before v8) and written under STORAGE_KEY. */
-const OLDER_STORAGE_KEYS = ['pachislot-visuals.userPresets.v7', 'pachislot-visuals.userPresets.v6', 'pachislot-visuals.userPresets.v5', 'pachislot-visuals.userPresets.v4'];
+const STORAGE_KEY = 'pachislot-visuals.userPresets.v9';
+/** Read in this order when the v9 key is absent, with the preset version they hold; their presets are migrated (see migratePreset) and written under STORAGE_KEY. */
+const OLDER_STORAGE_KEYS = [
+  { key: 'pachislot-visuals.userPresets.v8', version: 8 },
+  { key: 'pachislot-visuals.userPresets.v7', version: 7 },
+  { key: 'pachislot-visuals.userPresets.v6', version: 6 },
+  { key: 'pachislot-visuals.userPresets.v5', version: 5 },
+  { key: 'pachislot-visuals.userPresets.v4', version: 4 },
+] as const;
 const FILE_FORMAT = 'pachislot-visuals/style-presets';
 export const PRESET_FILE_EXT = '.pslot-styles.json';
 
+type PresetVersion = 4 | 5 | 6 | 7 | 8 | 9;
+
 interface PresetFile {
   format: typeof FILE_FORMAT;
-  /** 8 = lighting as overrides; 7 = looks with companion generators; 4–7 files are read through the project migration. */
-  version: 4 | 5 | 6 | 7 | 8;
+  /** 9 = sides inherit (model/sides.ts); 8 = lighting as overrides; 7 = looks with companion generators; 4–7 files are read through the project migration. */
+  version: PresetVersion;
   presets: StylePreset[];
 }
 
@@ -37,17 +46,19 @@ function migratePartEffects(raw: unknown): StylePreset['partEffects'] {
 }
 
 /**
- * A stored or imported preset with every current field present: its style and effects go through
- * the project file's own migration (which only fills missing fields, so current data passes
- * unchanged), its old content effects become companions (contentEffectsOfLook); v4 / v5 looks get
- * no part effects. `legacy` (saved before v8): its 3D lighting becomes overrides as a project's
- * does (a look's lighting is complete, so it sets every value). 3D looks saved before per-layer
- * lighting kept theirs in `comp` (applied to the comp): it becomes their style3d.lighting,
- * completed with the default comp's.
+ * A stored or imported preset of preset `version` with every current field present: its style
+ * and effects go through the project file's own migration (which only fills missing fields, so
+ * current data passes unchanged), its old content effects become companions
+ * (contentEffectsOfLook); v4 / v5 looks get no part effects. Saved before v8: its 3D lighting
+ * becomes overrides as a project's does (a look's lighting is complete, so it sets every value).
+ * 3D looks saved before per-layer lighting kept theirs in `comp` (applied to the comp): it
+ * becomes their style3d.lighting, completed with the default comp's. Saved before v9: sides
+ * equal to their neighbour inherit, as in a project (the v10 notes in io/project.ts).
  */
-function migratePreset(stored: StylePreset & { comp?: Partial<Lighting3D> }, legacy: boolean): StylePreset {
+function migratePreset(stored: StylePreset & { comp?: Partial<Lighting3D> }, version: PresetVersion): StylePreset {
   const { comp, ...p } = stored;
-  const style3d = p.style3d && (legacy ? migrateStyle3D({ ...p.style3d, lighting: p.style3d.lighting ?? fullLighting(comp ?? {}) }, { docBlur: 0 }) : migrateStyle3D(p.style3d));
+  const filledStyle = p.style3d && (version < 8 ? migrateStyle3D({ ...p.style3d, lighting: p.style3d.lighting ?? fullLighting(comp ?? {}) }, { docBlur: 0 }) : migrateStyle3D(p.style3d));
+  const style3d = filledStyle && version < 9 ? inheritSides(filledStyle) : filledStyle;
   return contentEffectsOfLook({
     ...p,
     effects: migrateMaterialEffects(dedupeEffects(migrateEffects(p.effects))),
@@ -57,19 +68,19 @@ function migratePreset(stored: StylePreset & { comp?: Partial<Lighting3D> }, leg
   });
 }
 
-function readList(key: string, legacy: boolean): StylePreset[] | null {
+function readList(key: string, version: PresetVersion): StylePreset[] | null {
   const raw = localStorage.getItem(key);
   if (raw === null) return null;
   const data: unknown = JSON.parse(raw);
-  return Array.isArray(data) ? data.filter(isPreset).map((p) => migratePreset(p, legacy)) : [];
+  return Array.isArray(data) ? data.filter(isPreset).map((p) => migratePreset(p, version)) : [];
 }
 
 function load(): StylePreset[] {
   try {
-    const current = readList(STORAGE_KEY, false);
+    const current = readList(STORAGE_KEY, 9);
     if (current) return current;
-    for (const key of OLDER_STORAGE_KEYS) {
-      const older = readList(key, true);
+    for (const { key, version } of OLDER_STORAGE_KEYS) {
+      const older = readList(key, version);
       if (!older) continue;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(older));
       return older;
@@ -170,11 +181,11 @@ const isStyle2D = (v: unknown) =>
 const isStyle3D = (v: unknown) =>
   isObj(v) &&
   isMaterial3D(v.face) &&
-  isMaterial3D(v.side) &&
+  (v.side === undefined || isMaterial3D(v.side)) &&
   Array.isArray(v.bands) &&
   v.bands.every((b) => isBevelShape3D(b) && isMaterial3D((b as Obj).material)) &&
   Array.isArray(v.backplates) &&
-  v.backplates.every((p) => isObj(p) && isBevelShape3D(p.bevel) && isMaterial3D(p.face) && isMaterial3D(p.side)) &&
+  v.backplates.every((p) => isObj(p) && isBevelShape3D(p.bevel) && isMaterial3D(p.face) && (p.side === undefined || isMaterial3D(p.side))) &&
   isObj(v.skew) &&
   has(v.skew, 'number', ['x', 'y']) &&
   isObj(v.ao) &&
@@ -229,7 +240,7 @@ export function deleteUserPreset(id: string) {
 }
 
 export function exportUserPresets(): Blob {
-  const file: PresetFile = { format: FILE_FORMAT, version: 8, presets: [...presets] };
+  const file: PresetFile = { format: FILE_FORMAT, version: 9, presets: [...presets] };
   return new Blob([JSON.stringify(file, null, 1)], { type: 'application/json' });
 }
 
@@ -248,9 +259,10 @@ export function importUserPresets(text: string): number {
   if (typeof data !== 'object' || data === null || file.format !== FILE_FORMAT || !Array.isArray(file.presets)) {
     throw new MsgError(msg('Not a style preset file'));
   }
-  if (file.version !== 4 && file.version !== 5 && file.version !== 6 && file.version !== 7 && file.version !== 8)
-    throw new MsgError(msg('Unsupported preset file version {version} (expected 4 to 8)', { version: String(file.version) }));
-  const valid = file.presets.filter(isPreset).map((p) => ({ ...migratePreset(p, file.version !== 8), id: `user-${uid()}`, builtin: false }));
+  const version = file.version;
+  if (version !== 4 && version !== 5 && version !== 6 && version !== 7 && version !== 8 && version !== 9)
+    throw new MsgError(msg('Unsupported preset file version {version} (expected 4 to 9)', { version: String(version) }));
+  const valid = file.presets.filter(isPreset).map((p) => ({ ...migratePreset(p, version), id: `user-${uid()}`, builtin: false }));
   if (valid.length === 0) throw new MsgError(msg('The file contains no usable presets'));
   commit([...presets, ...valid]);
   return valid.length;

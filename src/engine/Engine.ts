@@ -23,6 +23,14 @@ export interface RenderOptions {
   includeGuides: boolean;
 }
 
+/** A rectangle of the whole render: render px from its top-left corner (DOM convention), whole px. */
+export interface PreviewWindow {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /**
  * The renderer of a canvas: preview and export composites of a project, and the editor's
  * inspection renders. Coordinates the pieces in this folder: surfaces (render size, camera,
@@ -39,6 +47,14 @@ export class Engine {
   private readonly readback: Readback;
   private readonly probes: Probes;
   private readonly cache: InteractiveCache;
+  /**
+   * Pool of windowed preview renders (render's `window`), kept apart from `kit` so the
+   * interactive cache's pixels survive them; freed once a settled preview renders without one.
+   */
+  private windowKit: PassKit | null = null;
+  /** renderOverview's pool and renderers (another scale than the window's: kept apart so neither rebuilds the other's caches); freed with windowKit. */
+  private overviewKit: PassKit | null = null;
+  private readonly overviewRenderers: RendererMap = new Map();
   private interactive = false;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -79,13 +95,71 @@ export class Engine {
     this.interactive = on;
   }
 
-  /** Render the composite to the canvas. */
-  render(project: Project, opts: RenderOptions) {
+  /** setInteractive's current state. */
+  get isInteractive(): boolean {
+    return this.interactive;
+  }
+
+  /**
+   * Render the composite to the canvas: the whole comp at `opts.scale`, or with `window` just
+   * that part of the whole render (the canvas sized to it), with the very pixels the whole
+   * render has there as long as everything those pixels depend on lies inside the window (the
+   * caller's margin: glows, blurs, the layers a generator or effect measures). A windowed
+   * render is never interactive, draws every node at full quality in a pool of its own and
+   * leaves the interactive cache as it was; the whole-comp pool keeps only the cache's pixels
+   * meanwhile (its scratch targets grow back on the next whole-comp render).
+   */
+  render(project: Project, opts: RenderOptions & { window?: PreviewWindow }) {
     const { w, h } = sizeFor(project, opts.scale);
-    this.renderer.setSize(w, h, false);
-    const result = this.composite(project, opts.scale, w, h, opts.includeGuides, true);
+    const win = opts.window;
+    if (!win) {
+      if (!this.interactive) this.dropWindowKit();
+      this.renderer.setSize(w, h, false);
+      const result = this.composite(project, opts.scale, w, h, opts.includeGuides, true);
+      this.readback.toCanvas(result.texture);
+      this.kit.release(result);
+      return;
+    }
+    const x = Math.max(0, Math.min(w - 1, Math.round(win.x)));
+    const y = Math.max(0, Math.min(h - 1, Math.round(win.y)));
+    const ww = Math.max(1, Math.min(w - x, Math.round(win.width)));
+    const wh = Math.max(1, Math.min(h - y, Math.round(win.height)));
+    this.renderer.setSize(ww, wh, false);
+    const kit = (this.windowKit ??= new PassKit(this.renderer));
+    const s = this.surfaces.surface(project, kit, opts.scale, ww, wh, false, this.layerRenderers, this.camera, { width: w, height: h, x, y: h - y - wh });
+    const acc = this.compositor.background(kit, project.comp);
+    const result = this.compositor.drawNodes(drawTree(project, opts.includeGuides), acc, s, null);
+    this.endFrame(project);
     this.readback.toCanvas(result.texture);
-    this.kit.release(result);
+    kit.release(result);
+    this.kit.trim();
+  }
+
+  private dropWindowKit() {
+    for (const kit of [this.windowKit, this.overviewKit]) {
+      if (!kit) continue;
+      this.compositor.masks.release(kit);
+      kit.dispose();
+    }
+    this.windowKit = this.overviewKit = null;
+    disposeRenderers(this.overviewRenderers);
+  }
+
+  /**
+   * The whole composite at `opts.scale`, full quality, as straight-alpha sRGB pixels (top row
+   * first), in a pool and renderers of its own: the preview's pools and interactive cache stay
+   * as they are. The 引き目 inset beside a windowed preview, whose canvas holds only the window.
+   */
+  renderOverview(project: Project, opts: RenderOptions): ImageData {
+    const { w, h } = sizeFor(project, opts.scale);
+    const kit = (this.overviewKit ??= new PassKit(this.renderer));
+    const s = this.surfaces.surface(project, kit, opts.scale, w, h, false, this.overviewRenderers);
+    const result = this.compositor.drawNodes(drawTree(project, opts.includeGuides), this.compositor.background(kit, project.comp), s, null);
+    this.endFrame(project);
+    pruneRenderers(this.overviewRenderers, project);
+    const out = this.readback.readImage(result.texture, w, h, 'overview');
+    kit.release(result);
+    return out;
   }
 
   /** Render at `opts.scale` × comp resolution; returns straight-alpha sRGB pixels, top row first. */
@@ -211,14 +285,20 @@ export class Engine {
     const acc = this.compositor.background(this.kit, project.comp);
     const top = drawTree(project, includeGuides);
     const result = preview ? this.cache.drawCached(top, acc, full, project, scale, this.interactive) : this.compositor.drawNodes(top, acc, full, null);
+    this.endFrame(project);
+    return result;
+  }
+
+  /** What every render does when its composite is done: frame sources closed, unused masks and gone layers' renderers freed. */
+  private endFrame(project: Project) {
     this.surfaces.closeSources();
     this.compositor.masks.sweep();
     pruneRenderers(this.layerRenderers, project);
-    return result;
   }
 
   dispose() {
     this.cache.dispose();
+    this.dropWindowKit();
     disposeRenderers(this.layerRenderers);
     this.probes.dispose();
     this.compositor.masks.dispose();

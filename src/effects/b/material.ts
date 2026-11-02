@@ -110,8 +110,9 @@ const material: EffectDef = {
     const size = Math.max(1, N(p, 'size'));
     const unit = (size * pxScale) / 100;
     st.pass.prepare(slot, mat, unit, { w, h }, 0);
-    // Comp px (origin the render centre, +y up) at render px (0, 0): patterns and textures sit on the comp.
-    const origin = { x: -w / 2 / pxScale, y: -h / 2 / pxScale };
+    // Comp px (origin the comp centre, +y up) at the whole render's px (0, 0): patterns and
+    // textures sit on the comp; a window's pixels are offset on that grid by its RenderFrame x, y.
+    const origin = { x: -ctx.frame.width / 2 / pxScale, y: -ctx.frame.height / 2 / pxScale };
     kit.clear(output);
     st.pass.shade(
       {
@@ -122,6 +123,7 @@ const material: EffectDef = {
         m: pxScale,
         patternOrigin: origin,
         textureOrigin: origin,
+        gridOffset: { x: ctx.frame.x, y: ctx.frame.y },
         box: bounds(ctx, input).texture,
         bandPx: 0,
         span: null,

@@ -97,6 +97,15 @@ export class PassKit {
     if (this.all.has(rt) && !this.free.includes(rt)) this.free.push(rt);
   }
 
+  /** Dispose the pooled targets nobody holds (the pool grows back on demand); held ones stay. */
+  trim() {
+    for (const rt of this.free) {
+      rt.dispose();
+      this.all.delete(rt);
+    }
+    this.free.length = 0;
+  }
+
   /** Draw `material` over the whole of `target` (null = canvas). Clears first unless clear=false. */
   run(material: THREE.Material, target: THREE.WebGLRenderTarget | null, clear = true) {
     this.quad.material = material;

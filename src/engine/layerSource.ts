@@ -7,6 +7,7 @@ import { getGenerator } from '../generators/registry';
 import type { Bounds } from '../text/layout';
 import type { LayerSource, ParamDef } from './contracts';
 import { drawnLayers, drawTree, findNode, inspectView, type DrawNode } from './drawTree';
+import { frameKey } from './frame';
 import type { Surface } from './surface';
 
 /** A project's layers as FrameSource draws them alone. Memoized per project snapshot. */
@@ -243,7 +244,7 @@ export class FrameSource implements LayerSource {
     const deps = new Map<string, Layer | undefined>();
     sourceDeps(this.isolation(), id, deps);
     const { width, height, scale, ctx } = this.base;
-    let key = `${width}x${height}@${scale}${ctx.draft ? 'd' : ''}:${version(this.keyComp)}`;
+    let key = `${width}x${height}${frameKey(ctx.frame, width, height)}@${scale}${ctx.draft ? 'd' : ''}:${version(this.keyComp)}`;
     for (const [depId, l] of deps) key += `|${depId}:${l ? version(l) : '-'}`;
     return key;
   }
@@ -272,7 +273,7 @@ export class FrameSource implements LayerSource {
   }
 }
 
-/** Comp-px box (origin comp centre, +y up) of the alpha of `tex` (render size of `s`): a GPU reduction and a 1×1 readback; null when empty. */
+/** Comp-px box (origin comp centre, +y up) of the alpha of `tex` (render size and frame of `s`): a GPU reduction and a 1×1 readback; null when empty. */
 export function measureAlpha(tex: THREE.Texture, s: Surface): Bounds | null {
-  return inkBounds({ renderer: s.ctx.renderer, kit: s.kit, width: s.width, height: s.height, pxScale: s.scale, layerId: '', comp: s.ctx.project.comp, draft: s.ctx.draft }, tex);
+  return inkBounds({ renderer: s.ctx.renderer, kit: s.kit, width: s.width, height: s.height, pxScale: s.scale, frame: s.ctx.frame, layerId: '', comp: s.ctx.project.comp, draft: s.ctx.draft }, tex);
 }

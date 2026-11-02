@@ -15,6 +15,10 @@
     "median": 29.4,
     "p90": 30.6
   },
+  "sharp preview window: 2D title at 400 % on a 2× display": {
+    "median": 19.5,
+    "p90": 21
+  },
   "interactive drag frame: heavy 3D template": {
     "median": 3.3,
     "p90": 3.4

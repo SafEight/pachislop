@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import { BEVEL_OUTSIDE_SHARE, unitBevel } from '../../../engine/three/bevel';
 import { curveFn } from '../../../engine/layer2d/contours';
+import { plateSide, sideMaterial } from '../../../model/sides';
 import type { BevelShape3D, Material3D, Title3DProps } from '../../../model/types';
 import type { Translate } from '../../../store/msg';
 import { useT } from '../../i18n';
@@ -124,7 +125,7 @@ function crossSection(t: Translate, st: Title3DProps, activeBand: number, active
   // the glyph outline: the bands' outside share lies beyond it (inflate fronts end on it)
   const glyph: Mark = { x: sil - bandsW * BEVEL_OUTSIDE_SHARE[st.bevelPosition], z0: Math.min(0, ...bandSurfaces.flat().map((p) => p[1])), z1: zBack };
 
-  main.push({ key: 'side', pts: [[0, wallTop], [sil, wallTop], [sil, zBack], [0, zBack]], mat: st.side, label: t('Side wall') });
+  main.push({ key: 'side', pts: [[0, wallTop], [sil, wallTop], [sil, zBack], [0, zBack]], mat: sideMaterial(st), label: t('Side wall') });
   main.push({ key: 'face', pts: column(front, wallTop), mat: st.face, label: inflate ? t('Inflated face') : t('Face') });
   bands.forEach((b, i) => {
     main.push({ key: `band${i}`, pts: column(bandSurfaces[i], wallTop), mat: b.material, label: t('Band {n} · {preset}', { n: i + 1, preset: presetLabel(t, b.material.preset) }) });
@@ -145,7 +146,7 @@ function crossSection(t: Translate, st: Title3DProps, activeBand: number, active
     wallTop = bevel[bevel.length - 1][1];
     zBack = wallTop + wall(`plate${i}`, t('Plate {n} wall', { n: i + 1 }), xo, wallTop, pos(p.depth));
     plates.push([
-      { key: `plate${i}side`, pts: [[0, wallTop], [xo, wallTop], [xo, zBack], [0, zBack]], mat: p.side, label: t('Plate {n} side', { n: i + 1 }) },
+      { key: `plate${i}side`, pts: [[0, wallTop], [xo, wallTop], [xo, zBack], [0, zBack]], mat: plateSide(p), label: t('Plate {n} side', { n: i + 1 }) },
       { key: `plate${i}face`, pts: column(front, wallTop, 0), mat: p.face, label: t('Plate {n} · {preset}', { n: i + 1, preset: presetLabel(t, p.face.preset) }) },
     ]);
     outlines.push({ key: `plate${i}`, pts: [...front, [xo, zBack]], active: i === activePlate });

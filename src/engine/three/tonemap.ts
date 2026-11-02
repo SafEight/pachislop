@@ -1,4 +1,4 @@
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import type { Comp } from '../../model/types';
 import type { PassKit } from '../passkit';
 
@@ -8,8 +8,9 @@ import type { PassKit } from '../passkit';
 // 'punch' is ours (below).
 // Input and output are premultiplied linear; tone mapping runs on straight colour so
 // antialiased edges keep their colour instead of darkening. The optional glint (glint.ts,
-// any resolution, sampled bilinearly) is added HDR light: it is summed in before tone
-// mapping and raises alpha by its brightness, so glints stand on transparent pixels too.
+// any resolution, sampled bilinearly through its uv transform) is added HDR light: it is
+// summed in before tone mapping and raises alpha by its brightness, so glints stand on
+// transparent pixels too.
 
 export const TONEMAP_IDS: Record<Comp['toneMapping'], number> = { none: 0, aces: 1, agx: 2, neutral: 3, punch: 4 };
 
@@ -17,6 +18,7 @@ const FRAG = /* glsl */ `
 uniform sampler2D tSrc;
 uniform sampler2D tGlint;
 uniform bool uGlint;
+uniform vec4 uGlintUv; // GlintLight.uv: target uv → tGlint uv (xy scale, zw offset)
 uniform int uMode;
 uniform float uExposure;
 in vec2 vUv;
@@ -120,7 +122,7 @@ vec3 punch(vec3 color) {
 void main() {
   vec4 c = texture(tSrc, vUv);
   if (uGlint) {
-    vec3 g = texture(tGlint, vUv).rgb;
+    vec3 g = texture(tGlint, vUv * uGlintUv.xy + uGlintUv.zw).rgb;
     c.rgb += g;
     c.a += (1.0 - c.a) * clamp(max(g.r, max(g.g, g.b)), 0.0, 1.0);
   }
@@ -137,7 +139,14 @@ void main() {
 
 export function createTonemapMaterial(kit: PassKit): THREE.ShaderMaterial {
   return kit.shader({
-    uniforms: { tSrc: { value: null }, tGlint: { value: null }, uGlint: { value: false }, uMode: { value: 0 }, uExposure: { value: 1 } },
+    uniforms: {
+      tSrc: { value: null },
+      tGlint: { value: null },
+      uGlint: { value: false },
+      uGlintUv: { value: new THREE.Vector4(1, 1, 0, 0) },
+      uMode: { value: 0 },
+      uExposure: { value: 1 },
+    },
     fragmentShader: FRAG,
     defines: {}, // PassKit forwards `defines: undefined`, which three warns about
   });

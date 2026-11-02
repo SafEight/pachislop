@@ -3,7 +3,7 @@ import type { GeneratorDef } from '../../engine/contracts';
 import { NOISE_GLSL, sdf } from '../../effects/lib';
 import { C, col, common, DEG, HEAD, material, N, num } from '../../effects/b/common';
 import { clearTarget, drawFollowed, followed, followParam } from '../common';
-import { SD_GLSL } from './shared';
+import { SD_GLSL, sdUniforms, setSdf } from './shared';
 
 // Soft billowing smoke rising from the edges of the followed layer's own pixels; a companion
 // below the layer. Its transparency is the layer opacity.
@@ -71,7 +71,7 @@ export const smoke: GeneratorDef = {
       const field = sdf(ctx, content, 0.5);
       const m = material(ctx.kit, 'gen-smoke', {
         uniforms: {
-          tSdf: { value: null },
+          ...sdUniforms(),
           uDir: { value: new THREE.Vector2() },
           uH: { value: 100 },
           uW: { value: 30 },
@@ -87,7 +87,7 @@ export const smoke: GeneratorDef = {
       common(m, ctx);
       const u = m.uniforms;
       const a = N(p, 'angle') * DEG;
-      u.tSdf.value = field.texture;
+      setSdf(m, ctx, field.texture);
       u.uDir.value.set(Math.cos(a), Math.sin(a));
       u.uH.value = Math.max(1, N(p, 'height'));
       u.uW.value = Math.max(1, N(p, 'width'));

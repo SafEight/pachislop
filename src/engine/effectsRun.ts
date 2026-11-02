@@ -22,6 +22,7 @@ export function applyEffects(layerId: string, effects: EffectInstance[], input: 
       width: s.width,
       height: s.height,
       pxScale: s.scale,
+      frame: s.ctx.frame,
       layerId,
       comp: s.ctx.project.comp,
       draft: s.ctx.draft,

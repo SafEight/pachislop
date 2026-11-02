@@ -321,10 +321,10 @@ export function layerLocalBounds(layer: Layer, layers?: readonly Layer[]): Bound
 /**
  * `layerLocalBounds` plus the reach of the layer's effects (glows, shadows) and of its widest
  * part's own effects (they act on that part's pixels, before the layer effects): the drawn
- * selection box.
+ * selection box. With `layers`, a generator following one of them has its box too.
  */
-export function layerSelectionBounds(layer: Layer): Bounds | null {
-  const b = layerLocalBounds(layer);
+export function layerSelectionBounds(layer: Layer, layers?: readonly Layer[]): Bounds | null {
+  const b = layerLocalBounds(layer, layers);
   if (!b) return null;
   const sum = (list: readonly EffectInstance[] | undefined) => (list ?? []).reduce((s, fx) => s + effectReach(fx), 0);
   const partReach = isTitleLayer(layer) ? Math.max(0, ...Object.values(layer.partEffects).map(sum)) : 0;

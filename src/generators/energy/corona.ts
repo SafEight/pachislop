@@ -3,7 +3,7 @@ import { blur, NOISE_GLSL, sdf } from '../../effects/lib';
 import { common, G, grad, HEAD, material, N, num, S, sel } from '../../effects/b/common';
 import { GRADIENTS } from '../../model/defaults';
 import { clearTarget, drawFollowed, followed, followParam } from '../common';
-import { SD_GLSL, stops } from './shared';
+import { SD_GLSL, sdUniforms, setSdf, stops } from './shared';
 
 // Eye Candy Corona: energy tendrils, or an aura of tongues, growing from the edges of the
 // followed layer's own pixels, drawn as light. Behind the layer it is a companion below it
@@ -175,7 +175,7 @@ export const corona: GeneratorDef = {
         const len = Math.max(1, N(p, 'tongue')) * (strong ? 1 : 0.6);
         const m = material(ctx.kit, 'gen-aura', {
           uniforms: {
-            tSdf: { value: null },
+            ...sdUniforms(),
             tGrad: { value: null },
             tBlur: { value: null },
             uLen: { value: 100 },
@@ -193,7 +193,7 @@ export const corona: GeneratorDef = {
         common(m, ctx);
         const u = m.uniforms;
         const up = S(p, 'flow') === 'up';
-        u.tSdf.value = field.texture;
+        setSdf(m, ctx, field.texture);
         u.tBlur.value = up ? field.texture : blur(ctx, field.texture, len * ctx.pxScale * 0.3, 'gen-corona').texture;
         u.tGrad.value = ctx.kit.gradientTexture(G(p, 'gradient'));
         u.uLen.value = len;
@@ -210,7 +210,7 @@ export const corona: GeneratorDef = {
       }
       const m = material(ctx.kit, 'gen-corona', {
         uniforms: {
-          tSdf: { value: null },
+          ...sdUniforms(),
           tGrad: { value: null },
           tBlur: { value: null },
           uLen: { value: 100 },
@@ -225,7 +225,7 @@ export const corona: GeneratorDef = {
       });
       common(m, ctx);
       const u = m.uniforms;
-      u.tSdf.value = field.texture;
+      setSdf(m, ctx, field.texture);
       u.tBlur.value = blur(ctx, field.texture, N(p, 'length') * ctx.pxScale * 0.3, 'gen-corona').texture;
       u.tGrad.value = ctx.kit.gradientTexture(G(p, 'gradient'));
       u.uLen.value = Math.max(1, N(p, 'length'));

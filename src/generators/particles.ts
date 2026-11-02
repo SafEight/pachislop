@@ -5,6 +5,7 @@ import type { Gradient } from '../model/types';
 import type { Bounds } from '../text/layout';
 import { C, DEG, floatRT, G, gridDistance, grad, N, num, S, sel, col } from '../effects/b/common';
 import { inkBounds } from '../effects/lib';
+import { centreX, centreY } from '../engine/frame';
 import { clearTarget, compToRender, drawInstancedQuads, followed, followParam, type GpuContext, lightGlow, rng } from './common';
 
 // Particle field (Trapcode Particular for stills): one CPU-built list of seeded particles drawn as
@@ -535,7 +536,7 @@ interface AlphaGrid {
 }
 
 const gridFrag = /* glsl */ `
-uniform sampler2D tSrc; uniform vec2 uSrcSize, uOrigin; uniform float uCell, uPx; uniform int uTaps;
+uniform sampler2D tSrc; uniform vec2 uSrcSize, uCentre, uOrigin; uniform float uCell, uPx; uniform int uTaps;
 in vec2 vUv; out vec4 o;
 void main() {
   vec2 c0 = uOrigin + floor(gl_FragCoord.xy) * uCell;
@@ -545,7 +546,7 @@ void main() {
     if (y >= uTaps) break;
     for (int x = 0; x < 8; x++) {
       if (x >= uTaps) break;
-      vec2 px = (c0 + (vec2(x, y) + 0.5) * pitch) * uPx + 0.5 * uSrcSize;
+      vec2 px = (c0 + (vec2(x, y) + 0.5) * pitch) * uPx + uCentre;
       acc += texture(tSrc, px / uSrcSize);
     }
   }
@@ -573,8 +574,9 @@ function snapBox(b: Bounds): Bounds {
 }
 
 /**
- * Read `src` (render px of `ctx`, comp centred) back to the CPU as box means over `cell`-px comp
- * cells covering `region` (comp px, snapped by the caller). One GPU sync: callers cache the result.
+ * Read `src` (a target of `ctx`: render px, the comp centre at centreX/Y of its frame) back to the
+ * CPU as box means over `cell`-px comp cells covering `region` (comp px, snapped by the caller). One
+ * GPU sync: callers cache the result.
  */
 function readAlphaGrid(ctx: GpuContext, src: THREE.Texture, region: Bounds, cell: number): AlphaGrid {
   const { kit } = ctx;
@@ -586,6 +588,7 @@ function readAlphaGrid(ctx: GpuContext, src: THREE.Texture, region: Bounds, cell
       uniforms: {
         tSrc: { value: null },
         uSrcSize: { value: new THREE.Vector2() },
+        uCentre: { value: new THREE.Vector2() },
         uOrigin: { value: new THREE.Vector2() },
         uCell: { value: 1 },
         uPx: { value: 1 },
@@ -598,6 +601,7 @@ function readAlphaGrid(ctx: GpuContext, src: THREE.Texture, region: Bounds, cell
   const u = m.uniforms;
   u.tSrc.value = src;
   u.uSrcSize.value.set(ctx.width, ctx.height);
+  u.uCentre.value.set(centreX(ctx.frame), centreY(ctx.frame));
   u.uOrigin.value.set(region.x0, region.y0);
   u.uCell.value = cell;
   u.uPx.value = ctx.pxScale;

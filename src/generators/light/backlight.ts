@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { GeneratorDef } from '../../engine/contracts';
+import { centreX, centreY } from '../../engine/frame';
 import { bounds, BOUNDS_GLSL, NOISE_GLSL } from '../../effects/lib';
 import { C, col, common, DEG, HEAD, material, N, num, S, sel } from '../../effects/b/common';
 import { clearTarget, drawFollowed, followed, followParam } from '../common';
@@ -9,11 +10,11 @@ import { clearTarget, drawFollowed, followed, followParam } from '../common';
 // centre), from its centre or a chosen point; a companion below that layer.
 
 const raySrcFrag = /* glsl */ `
-uniform sampler2D tSrc; uniform vec2 uCentre; uniform bool uAuto; uniform float uRays, uNoise, uRot, uSeed;
+uniform sampler2D tSrc; uniform vec2 uLight; uniform bool uAuto; uniform float uRays, uNoise, uRot, uSeed;
 ${BOUNDS_GLSL}
 ${NOISE_GLSL}
 vec2 centre() {
-  if (!uAuto) return uCentre;
+  if (!uAuto) return uLight;
   vec4 bb = layerBox() * uRes.xyxy;
   return 0.5 * (bb.xy + bb.zw);
 }
@@ -29,10 +30,10 @@ void main() {
 }`;
 
 const radialFrag = /* glsl */ `
-uniform sampler2D tIn; uniform vec2 uCentre; uniform bool uAuto; uniform float uLen; uniform bool uFalloff;
+uniform sampler2D tIn; uniform vec2 uLight; uniform bool uAuto; uniform float uLen; uniform bool uFalloff;
 ${BOUNDS_GLSL}
 vec2 centre() {
-  if (!uAuto) return uCentre;
+  if (!uAuto) return uLight;
   vec4 bb = layerBox() * uRes.xyxy;
   return 0.5 * (bb.xy + bb.zw);
 }
@@ -104,12 +105,12 @@ export const backlight: GeneratorDef = {
       const { kit } = ctx;
       const bb = bounds(ctx, content);
       const auto = S(p, 'centreMode') !== 'manual';
-      const centre = new THREE.Vector2(N(p, 'x') * ctx.pxScale + ctx.width / 2, N(p, 'y') * ctx.pxScale + ctx.height / 2);
+      const centre = new THREE.Vector2(N(p, 'x') * ctx.pxScale + centreX(ctx.frame), N(p, 'y') * ctx.pxScale + centreY(ctx.frame));
       const src = material(kit, 'gen-raysrc', {
         uniforms: {
           tSrc: { value: null },
           tBounds: { value: null },
-          uCentre: { value: new THREE.Vector2() },
+          uLight: { value: new THREE.Vector2() },
           uAuto: { value: true },
           uRays: { value: 20 },
           uNoise: { value: 0.8 },
@@ -121,7 +122,7 @@ export const backlight: GeneratorDef = {
       common(src, ctx);
       src.uniforms.tSrc.value = content;
       src.uniforms.tBounds.value = bb.texture;
-      src.uniforms.uCentre.value.copy(centre);
+      src.uniforms.uLight.value.copy(centre);
       src.uniforms.uAuto.value = auto;
       src.uniforms.uRays.value = N(p, 'rays');
       src.uniforms.uNoise.value = N(p, 'noise') / 100;
@@ -134,7 +135,7 @@ export const backlight: GeneratorDef = {
         uniforms: {
           tIn: { value: null },
           tBounds: { value: null },
-          uCentre: { value: new THREE.Vector2() },
+          uLight: { value: new THREE.Vector2() },
           uAuto: { value: true },
           uLen: { value: 100 },
           uFalloff: { value: true },
@@ -144,7 +145,7 @@ export const backlight: GeneratorDef = {
       common(rad, ctx);
       const len = Math.max(1, N(p, 'length') * ctx.pxScale);
       rad.uniforms.tBounds.value = bb.texture;
-      rad.uniforms.uCentre.value.copy(centre);
+      rad.uniforms.uLight.value.copy(centre);
       rad.uniforms.uAuto.value = auto;
       // Coarse pass over the full length, then a fine pass to fill the gaps between taps.
       rad.uniforms.tIn.value = a.texture;

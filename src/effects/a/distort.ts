@@ -1,23 +1,25 @@
-import type { EffectDef } from '../../engine/contracts';
+import type { EffectDef, RenderFrame } from '../../engine/contracts';
+import { centreX, centreY } from '../../engine/frame';
 import { DEG, dirVec, flag, num, pass, pBool, pDeg, pick, pNum, pPx, pSelect } from './util';
 
-/** Comp-px centre params (origin = comp centre, +y up) → render px from bottom-left. */
-const centrePx = (ctx: { width: number; height: number; pxScale: number }, x: number, y: number) => [
-  ctx.width / 2 + x * ctx.pxScale,
-  ctx.height / 2 + y * ctx.pxScale,
+/** Comp-px centre params (origin = comp centre, +y up) → target px from bottom-left. */
+const centrePx = (ctx: { frame: RenderFrame; pxScale: number }, x: number, y: number) => [
+  centreX(ctx.frame) + x * ctx.pxScale,
+  centreY(ctx.frame) + y * ctx.pxScale,
 ];
 
 // ---------- radial blur ----------
 
 // Each pass averages uN taps over a span: zoom = log-scale span (q = c + (p-c)·e^(−span·k)),
 // spin = angle span centred on 0. Long blurs run twice (coarse span, then span/n) so taps
-// stay ≤ ~1 render px apart without hundreds of samples per pixel.
+// stay ≤ ~1 render px apart without hundreds of samples per pixel. The tap jitter is keyed on
+// the whole render's pixel, so a window of it gets the same.
 const radialFrag = /* glsl */ `
 uniform sampler2D tSrc, tOrig;
 uniform vec2 uC; uniform float uSpan; uniform int uN, uType; uniform bool uKeep;
 void main() {
   vec2 p = vUv * uRes;
-  float j = hash1(p + uSpan);
+  float j = hash1(p + uFrame.xy + uSpan);
   vec4 acc = vec4(0.0);
   vec2 d = p - uC;
   for (int i = 0; i < 64; i++) {
@@ -57,9 +59,9 @@ const radialBlur: EffectDef = {
   apply(ctx, input, output, p) {
     const type = pick(p, 'type', ['zoom', 'spin']);
     const c = centrePx(ctx, num(p, 'centerX'), num(p, 'centerY'));
-    const diag = Math.hypot(ctx.width, ctx.height);
+    const diag = Math.hypot(ctx.frame.width, ctx.frame.height);
     const span = type === 0 ? -Math.log(1 - Math.max(0, Math.min(0.95, num(p, 'amount')))) : num(p, 'spin') * DEG;
-    // longest tap travel in render px (zoom: ~ span × distance to the far corner)
+    // longest tap travel in render px (zoom: ~ span × distance to the far corner of the whole frame)
     const travel = Math.abs(span) * diag * (type === 0 ? 0.6 : 0.5);
     const keep = flag(p, 'keepOriginal');
     const u = { tSrc: input, tOrig: input, uC: c, uType: type };
@@ -85,7 +87,7 @@ void main() {
   vec2 p = vUv * uRes;
   vec2 disp;
   if (uType == 0) {
-    float ph = 2.0 * PI * (dot((p - 0.5 * uRes) / uPx, uDir) / uLambda - uPhase);
+    float ph = 2.0 * PI * (dot((p - uCentre) / uPx, uDir) / uLambda - uPhase);
     disp = vec2(-uDir.y, uDir.x) * uAmp * sin(ph);
   } else {
     vec2 d = p - uC;
@@ -94,7 +96,7 @@ void main() {
     disp = (r > 1e-3 ? d / r : vec2(0.0)) * uAmp * sin(ph);
   }
   vec2 q = (p - disp) / uRes;
-  o = (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0) ? vec4(0.0) : texture(tSrc, q);
+  o = (q.x < uFrameUv.x || q.y < uFrameUv.y || q.x > uFrameUv.z || q.y > uFrameUv.w) ? vec4(0.0) : texture(tSrc, q);
 }`;
 
 const wave: EffectDef = {
@@ -143,7 +145,7 @@ uniform sampler2D tSrc;
 uniform vec2 uDir, uC; uniform float uAmount; uniform int uN, uType;
 void main() {
   vec2 p = vUv * uRes;
-  vec2 off = uType == 0 ? (p - uC) / (0.5 * length(uRes)) * uAmount : uDir * uAmount;
+  vec2 off = uType == 0 ? (p - uC) / (0.5 * length(uFrame.zw)) * uAmount : uDir * uAmount;
   vec3 sumC = vec3(0.0), sumA = vec3(0.0), sumW = vec3(0.0);
   for (int i = 0; i < 32; i++) {
     if (i >= uN) break;
@@ -176,7 +178,7 @@ const chromaticAberration: EffectDef = {
   directions: [
     { angle: 'angle', label: 'Split direction', convention: 'cwFromRight', when: { key: 'type', value: 'directional' } },
   ],
-  // radial offset = amount × distance-from-centre / half-diagonal: ≤ 2× for a centre inside the comp
+  // radial offset = amount × distance-from-centre / half the whole frame's diagonal: ≤ 2× for a centre inside the comp
   reach: (p) => num(p, 'amount') * (p.type === 'directional' ? 1 : 2),
   apply(ctx, input, output, p) {
     const amount = num(p, 'amount') * ctx.pxScale;

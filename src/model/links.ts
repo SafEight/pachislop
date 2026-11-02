@@ -35,6 +35,7 @@ export interface MaterialSlot {
 /**
  * Every linkable material of `l`: the style parts' (2D face and rims; 3D face, side, bands and
  * plates' front and edge) then the letters' own (2D face; 3D face, bands and side), in that order.
+ * An inherited side or plate edge (model/sides.ts) has no material of its own, so no slot.
  */
 export function forEachMaterial(l: Layer, fn: (s: MaterialSlot) => void): void {
   if (l.kind === 'title2d') {
@@ -43,11 +44,11 @@ export function forEachMaterial(l: Layer, fn: (s: MaterialSlot) => void): void {
   } else if (l.kind === 'title3d') {
     const s = l.style3d;
     fn({ key: 'face', path: ['style3d', 'face'], kind: '3d', mat: s.face, part: 'face' });
-    fn({ key: 'side', path: ['style3d', 'side'], kind: '3d', mat: s.side, part: 'side' });
+    if (s.side) fn({ key: 'side', path: ['style3d', 'side'], kind: '3d', mat: s.side, part: 'side' });
     s.bands.forEach((b, i) => fn({ key: bandKey(b.id), path: ['style3d', 'bands', i, 'material'], kind: '3d', mat: b.material, part: bandKey(b.id) }));
     s.backplates.forEach((p, i) => {
       fn({ key: `${plateKey(p.id)}:face`, path: ['style3d', 'backplates', i, 'face'], kind: '3d', mat: p.face, part: plateKey(p.id) });
-      fn({ key: `${plateKey(p.id)}:side`, path: ['style3d', 'backplates', i, 'side'], kind: '3d', mat: p.side, part: plateKey(p.id) });
+      if (p.side) fn({ key: `${plateKey(p.id)}:side`, path: ['style3d', 'backplates', i, 'side'], kind: '3d', mat: p.side, part: plateKey(p.id) });
     });
   } else return;
   if (l.source.kind !== 'text') return;

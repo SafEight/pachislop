@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { RenderFrame } from '../contracts';
 import type { PassKit } from '../passkit';
 
 // Screen-space ambient occlusion for 3D layers (Element 3D SSAO), Scalable-AO style
@@ -66,6 +67,7 @@ uniform sampler2D tND;
 uniform float uRadius; // view units
 uniform float uProjScale; // AO-grid px per view unit at depth 1
 uniform float uIntensity;
+uniform vec2 uFrameOrigin; // the AO grid's bottom-left px in the whole render (RenderFrame x, y)
 in vec2 vUv;
 out vec4 o;
 ${VIEW_POS}
@@ -78,8 +80,10 @@ void main() {
   vec3 N = normalize( nd.xyz );
   float rPx = uRadius * uProjScale / nd.a;
   if ( rPx < 1.0 ) return;
-  // interleaved gradient noise: per-pixel spiral rotation, removed by the blur
-  float rnd = 6.2831853 * fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );
+  // interleaved gradient noise: per-pixel spiral rotation, removed by the blur; keyed on the
+  // whole render's px, so a preview window jitters as the whole render does there
+  vec2 px = gl_FragCoord.xy + uFrameOrigin;
+  float rnd = 6.2831853 * fract( 52.9829189 * fract( dot( px, vec2( 0.06711056, 0.00583715 ) ) ) );
   float r2 = uRadius * uRadius;
   float bias = 0.02 * uRadius;
   float sum = 0.0;
@@ -149,6 +153,8 @@ export class AOPass {
   private readonly apply: THREE.ShaderMaterial;
   private readonly ndRT: THREE.WebGLRenderTarget;
   private readonly aoRT: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget];
+  /** Scratch copy of the camera without its view offset (frameProjection). */
+  private readonly whole = new THREE.PerspectiveCamera();
 
   constructor(kit: PassKit) {
     this.kit = kit;
@@ -159,6 +165,7 @@ export class AOPass {
         uRadius: { value: 1 },
         uProjScale: { value: 1 },
         uIntensity: { value: 1 },
+        uFrameOrigin: { value: new THREE.Vector2() },
       },
       fragmentShader: AO_FRAG,
     });
@@ -189,8 +196,20 @@ export class AOPass {
   }
 
   /**
+   * The projection of the whole render `camera` shows a window of (its view offset cleared):
+   * the camera's own when it has none.
+   */
+  private frameProjection(camera: THREE.PerspectiveCamera): THREE.Matrix4 {
+    if (!camera.view?.enabled) return camera.projectionMatrix;
+    this.whole.copy(camera, false);
+    this.whole.clearViewOffset();
+    return this.whole.projectionMatrix;
+  }
+
+  /**
    * Darken `target` (the layer's HDR render of `scene` through `camera`) by AO computed on a
-   * `width`×`height` grid. `hide` objects (e.g. the shadow catcher) stay out of the prepass.
+   * `width`×`height` grid: the render px of `frame` (the camera's view offset, if any, is that
+   * window). `hide` objects (e.g. the shadow catcher) stay out of the prepass.
    */
   render(
     renderer: THREE.WebGLRenderer,
@@ -199,6 +218,7 @@ export class AOPass {
     target: THREE.WebGLRenderTarget,
     width: number,
     height: number,
+    frame: RenderFrame,
     hide: THREE.Object3D[],
     p: AOParams,
   ) {
@@ -223,8 +243,10 @@ export class AOPass {
     u.tND.value = this.ndRT.texture;
     u.uProjInv.value.copy(camera.projectionMatrixInverse);
     u.uRadius.value = Math.max(1e-3, p.radius);
-    // projectionMatrix[1][1] = 2·near / (top − bottom): NDC per view unit at depth 1
-    u.uProjScale.value = (height / 2) * camera.projectionMatrix.elements[5];
+    // projectionMatrix[1][1] = 2·near / (top − bottom): NDC per view unit at depth 1, over the
+    // whole frame's height (a window's view offset narrows top − bottom to the window)
+    u.uProjScale.value = (frame.height / 2) * this.frameProjection(camera).elements[5];
+    u.uFrameOrigin.value.set(frame.x, frame.y);
     u.uIntensity.value = Math.max(0, p.intensity);
     this.kit.run(this.ao, this.aoRT[0]);
 

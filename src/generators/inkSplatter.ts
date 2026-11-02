@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { GeneratorDef, PassContext } from '../engine/contracts';
 import type { PassKit } from '../engine/passkit';
+import { centreX, centreY } from '../engine/frame';
 import { NOISE_GLSL } from '../effects/lib';
 import { C, col, common, DEG, drawObject, gridDistance, hash, HEAD, material, N, num, readGrid, rng, S, sel } from '../effects/b/common';
 import { clearTarget, drawFollowed, followed, followParam } from './common';
@@ -199,8 +200,8 @@ export const inkSplatter: GeneratorDef = {
       const satAmount = N(p, 'satellites') / 100;
       const blots: Blot[] = [];
       // comp px → render px
-      const ox = ctx.width / 2;
-      const oy = ctx.height / 2;
+      const ox = centreX(ctx.frame);
+      const oy = centreY(ctx.frame);
       const push = (ax: number, ay: number, bx: number, by: number, ra: number, rb: number, s: number) =>
         blots.push({ ax: ax * k + ox, ay: ay * k + oy, bx: bx * k + ox, by: by * k + oy, ra: ra * k, rb: rb * k, seed: s });
       const r = rng(seed * 977 + 3);

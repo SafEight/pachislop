@@ -30,6 +30,8 @@ const dropShadow: EffectDef = {
   ],
   directions: [{ angle: 'angle', length: 'distance', label: 'Shadow', convention: 'cwFromRight' }],
   reach: (p) => num(p, 'distance') + num(p, 'size'),
+  // the blur's taps run to ~4σ = 1.33 × its radius
+  gather: (p) => num(p, 'distance') + 1.5 * num(p, 'size'),
   apply(ctx, input, output, p) {
     const b = blur(ctx, input, Math.max(0, num(p, 'size')) * ctx.pxScale, 'a');
     const [dx, dy] = dirVec(num(p, 'angle'));
@@ -59,9 +61,9 @@ uniform vec2 uOff; uniform vec3 uColor; uniform float uChoke, uOpacity;
 void main() {
   vec4 L = texture(tSrc, vUv);
   // The layer's own alpha, shifted and blurred: where it doesn't cover the layer the edge casts
-  // the shadow inward (Photoshop inner shadow). Outside the canvas counts as empty.
+  // the shadow inward (Photoshop inner shadow). Outside the frame (the whole render) counts as empty.
   vec2 q = vUv - uOff / uRes;
-  float inside = all(greaterThanEqual(q, vec2(0.0))) && all(lessThanEqual(q, vec2(1.0))) ? texture(tBlur, q).a : 0.0;
+  float inside = all(greaterThanEqual(q, uFrameUv.xy)) && all(lessThanEqual(q, uFrameUv.zw)) ? texture(tBlur, q).a : 0.0;
   float s = clamp((1.0 - inside) / max(1.0 - uChoke, 0.02), 0.0, 1.0) * uOpacity;
   // source-atop: shadow over the layer, clipped to its alpha
   o = vec4(L.rgb * (1.0 - s) + uColor * s * L.a, L.a);
@@ -81,6 +83,7 @@ const innerShadow: EffectDef = {
     pNum('opacity', 'Opacity', 0.6, 0, 1),
   ],
   directions: [{ angle: 'angle', length: 'distance', label: 'Inner shadow', convention: 'cwFromRight' }],
+  gather: (p) => num(p, 'distance') + 1.5 * num(p, 'size'),
   apply(ctx, input, output, p) {
     const b = blur(ctx, input, Math.max(0, num(p, 'size')) * ctx.pxScale, 'a');
     const [dx, dy] = dirVec(num(p, 'angle'));
@@ -196,8 +199,8 @@ void main() {
   if (d <= 0.0) { o = L; return; }
   float t = clamp(d / uLen, 0.0, 1.0);
   vec2 q = vec2(vUv.x, (base + d / uScale) / uRes.y);
-  vec4 sharp = q.y <= 1.0 ? texture(tSrc, q) : vec4(0.0);
-  vec4 soft = q.y <= 1.0 ? texture(tBlur, q) : vec4(0.0);
+  vec4 sharp = q.y <= uFrameUv.w ? texture(tSrc, q) : vec4(0.0);
+  vec4 soft = q.y <= uFrameUv.w ? texture(tBlur, q) : vec4(0.0);
   vec4 r = mix(sharp, soft, smoothstep(0.0, 0.85, t));
   r *= pow(1.0 - t, uFalloff) * uOpacity * clamp(d + 0.5, 0.0, 1.0);
   o = L + r * (1.0 - L.a);

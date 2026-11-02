@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { withoutLink, type AnyMaterial } from '../../model/links';
 import { bandKey, parsePartKey, type TitleLayer } from '../../model/parts';
+import { charSideNeighbour, sideSource, withCharSide } from '../../model/sides';
 import type { CharAdjust, Material2D, Material3D, PartKey, TextSource } from '../../model/types';
 import { applyColourway, COLOURWAY_INFO } from '../../presets/colourways';
 import { COLOURWAYS } from '../../presets/types';
@@ -20,8 +21,10 @@ import { PartMaterial2D } from './style/Parts2D';
 
 // A letter's own materials in the Letters section, listed like the layer's Appearance: 2D its
 // face; 3D its face, bevel bands and side (a white 元祖 inside a gold word loses the gold bands
-// too). A part the letter doesn't own shows the layer's material; Own gives the picked letters a
-// copy of it, ✕ hands that one part back to the layer. Every edit applies to all picked letters.
+// too). A part the letter doesn't own shows the layer's material, its side the letter's own
+// neighbour (model/sides.ts: a letter owning its outermost band shows that band on its side
+// while the layer's side follows its band); Own gives the picked letters a copy of what they
+// show, ✕ hands that one part back. Every edit applies to all picked letters.
 
 /** The parts a letter can own, as the layer's part keys: 2D the face; 3D face, bands (none in inflate mode, which ignores them) and side. */
 function letterParts(layer: TitleLayer): PartKey[] {
@@ -41,6 +44,21 @@ function ownPath(layer: TitleLayer, part: PartKey): (string | number)[] {
 
 /** The letter's own material for `part`, or undefined when it uses the layer's. */
 const ownOf = (layer: TitleLayer, a: CharAdjust | undefined, part: PartKey) => (getIn(a, ownPath(layer, part)) ?? undefined) as AnyMaterial | undefined;
+
+/** What letter `a` shows for `part` while it doesn't own it: the layer's material; for a 3D side, the letter's neighbour. */
+const inheritedOf = (layer: TitleLayer, a: CharAdjust | undefined, part: PartKey) =>
+  layer.kind === 'title3d' && part === 'side' ? charSideNeighbour(layer.style3d, a) : partMaterial(layer, part);
+
+/**
+ * What a letter's side follows while it doesn't own it, when that is the letter's own band or
+ * face (“Same as Band 2”, “Same as face”); null when it is the layer's.
+ */
+function charSideSource(layer: TitleLayer, a: CharAdjust | undefined): Text | null {
+  if (layer.kind !== 'title3d' || layer.style3d.side) return null;
+  const i = sideSource(layer.style3d);
+  if (i === null) return a?.face3d ? msg('Same as face') : null;
+  return a?.bands3d?.[i] ? msg('Same as {part}', { part: partLabel(layer, bandKey(layer.style3d.bands[i].id)) }) : null;
+}
 
 /**
  * `a` owning a copy of `m` for `part` (a linked material leaves its link behind), or using the
@@ -111,31 +129,37 @@ export function LetterMaterials({ layer, src, selected }: { layer: TitleLayer; s
   /** Rewrite every picked letter, one undo step. */
   const update = (fn: (a: CharAdjust) => CharAdjust, label: Text) =>
     setAt({ layerId: layer.id, path: ['source', 'chars'] }, mapAdjusts(src.chars, selected, fn), oneShot(`${layer.id}:letterMaterials`), label);
-  /** Give the picked letters a copy of the layer's material for each of `keys` they don't own yet, and edit them. */
+  /** Give the picked letters a copy of what they show for each of `keys` they don't own yet, and edit them. */
   const ownParts = (keys: readonly PartKey[]) => {
-    update((a) => keys.reduce((b, p) => (ownOf(layer, b, p) ? b : withOwn(layer, b, p, partMaterial(layer, p))), a), msg('Own {part} “{chars}”', { part: partsText(keys), chars: picked }));
+    update((a) => keys.reduce((b, p) => (ownOf(layer, b, p) ? b : withOwn(layer, b, p, inheritedOf(layer, b, p))), a), msg('Own {part} “{chars}”', { part: partsText(keys), chars: picked }));
     setRows({ sel: keys, anchor: keys[keys.length - 1] });
   };
   const resetPart = (part: PartKey) => update((a) => withOwn(layer, a, part, null), msg('Reset {part} “{chars}” to the layer’s', { part: partLabel(layer, part), chars: picked }));
-  /** Bands and side take the letter's face (its own, else the layer's). */
+  /** Bands and side take the letter's face (its own, else the layer's); the side follows the bands when that shows the same. */
   const matchFace = () =>
     update((a) => {
       const face = ownOf(layer, a, 'face') ?? partMaterial(layer, 'face');
-      return parts.filter((p) => p !== 'face').reduce((b, p) => withOwn(layer, b, p, face), a);
+      const banded = parts.filter((p) => p !== 'face' && p !== 'side').reduce((b, p) => withOwn(layer, b, p, face), a);
+      return layer.kind === 'title3d' && face ? withCharSide(layer.style3d, banded, structuredClone(withoutLink(face as Material3D))) : banded;
     }, msg('Bands = face “{chars}”', { chars: picked }));
 
   const editor = () => {
     const targets = selected.flatMap((i) => shown.map((p) => ({ i, p })));
     const first = own(selected[0], shown[0]);
-    if (!first || targets.some(({ i, p }) => !own(i, p)))
+    if (!first || targets.some(({ i, p }) => !own(i, p))) {
+      const follows = new Set(selected.map((i) => charSideSource(layer, src.chars[i])).map((s) => (s ? formatMsg(s, t) : null)));
+      const source = shown.length === 1 && shown[0] === 'side' && follows.size === 1 ? [...follows][0] : null;
       return (
         <div className="hint-line">
-          {t("Uses the layer's material. Own it to edit it for “{chars}” only.", { chars: picked })}{' '}
+          {source
+            ? t('{source}: the letter’s own. Own it to edit the side for “{chars}” only.', { source, chars: picked })
+            : t("Uses the layer's material. Own it to edit it for “{chars}” only.", { chars: picked })}{' '}
           <button className="small" onClick={() => ownParts(shown)}>
             {t('Own')}
           </button>
         </div>
       );
+    }
     const refp = refsOf(targets.map(({ i, p }): PropRef => ({ layerId: layer.id, path: ['source', 'chars', i, ...ownPath(layer, p)] })));
     return is2d ? (
       <PartMaterial2D id="char-material" refp={refp} mat={first as Material2D} />
@@ -189,11 +213,17 @@ export function LetterMaterials({ layer, src, selected }: { layer: TitleLayer; s
           const name = formatMsg(partLabel(layer, part), t);
           const mats = selected.map((i) => own(i, part));
           const owned = mats.filter(Boolean).length;
-          const layerMat = partMaterial(layer, part);
-          const css = new Set(mats.map((m) => m ?? layerMat).map((m) => (m ? materialCss(m) : 'transparent')));
-          const summaries = new Set(mats.map((m) => (m ? materialSummary(t, m).join(' · ') : null)));
-          const summary = !owned ? t("Layer's") : summaries.size === 1 ? [...summaries][0]! : '—';
+          const css = new Set(selected.map((i, k) => mats[k] ?? inheritedOf(layer, src.chars[i], part)).map((m) => (m ? materialCss(m) : 'transparent')));
+          /** A letter's summary: its own material's, else what it follows. */
+          const summaryOf = (i: number, m: AnyMaterial | undefined) => {
+            if (m) return materialSummary(t, m).join(' · ');
+            const source = part === 'side' ? charSideSource(layer, src.chars[i]) : null;
+            return source ? formatMsg(source, t) : t("Layer's");
+          };
+          const summaries = new Set(selected.map((i, k) => summaryOf(i, mats[k])));
+          const summary = summaries.size === 1 ? [...summaries][0] : '—';
           const sel = shown.includes(part);
+          const resetTo = part === 'side' ? charSideSource(layer, src.chars[selected[0]]) : null;
           return (
             <AppearanceRow
               key={part}
@@ -222,7 +252,7 @@ export function LetterMaterials({ layer, src, selected }: { layer: TitleLayer; s
                     </button>
                   )}
                   {owned > 0 && (
-                    <IconBtn title={t("Reset to layer's")} onClick={() => resetPart(part)}>
+                    <IconBtn title={resetTo ? formatMsg(resetTo, t) : t("Reset to layer's")} onClick={() => resetPart(part)}>
                       ✕
                     </IconBtn>
                   )}

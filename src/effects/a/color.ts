@@ -22,6 +22,7 @@ const adjust: EffectDef = {
       default: { type: 'hueSaturation', hue: 0, saturation: 25, lightness: 0, colorize: false },
     },
   ],
+  gather: () => 0,
   apply(ctx, input, output, p) {
     const adj = p.adjustment as Adjustment;
     if (adjustmentIsIdentity(adj)) ctx.kit.copy(input, output);

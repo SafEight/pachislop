@@ -3,6 +3,24 @@ import type { Adjustment, BlendMode, Comp, EffectInstance, Gradient, Layer, Mate
 import type { Bounds } from '../text/layout';
 import type { PassKit } from './passkit';
 
+/**
+ * The whole render a target belongs to. Normally the target IS the whole render: the comp
+ * (possibly enlarged, see io/export.ts `enlarged`) at pxScale, `width`×`height` render px with
+ * the comp centre at its centre, and `x` = `y` = 0. A preview window (Engine.render `window`)
+ * renders only a part of it: the target is then the `ctx.width`×`ctx.height` px of the whole
+ * render whose bottom-left pixel is (`x`, `y`) (render px, GL convention: +y up), and must hold
+ * the very pixels the whole render has there. So comp px ↔ target px go through `compCentre`
+ * (engine/frame.ts), never `ctx.width / 2`; anything laid out over the whole frame (its edges,
+ * corners, size) uses `width` / `height` here; pass sizes stay `ctx.width` / `ctx.height`.
+ * GLSL: the comp centre in target px is uniform `uCentre` where a shader needs it.
+ */
+export interface RenderFrame {
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+}
+
 /** Context handed to layer renderers for one render. */
 export interface LayerRenderContext {
   renderer: THREE.WebGLRenderer;
@@ -11,6 +29,8 @@ export interface LayerRenderContext {
   width: number; // render target pixel size
   height: number;
   pxScale: number; // render pixels per comp pixel (preview < 1, export ≥ 1)
+  /** The whole render this target is (a window of); see RenderFrame. */
+  frame: RenderFrame;
   /** Comp camera. 1 world unit = 1 comp pixel on the z=0 plane. */
   camera: THREE.PerspectiveCamera;
   /**
@@ -122,6 +142,8 @@ export interface PassContext {
   width: number;
   height: number;
   pxScale: number;
+  /** The whole render the target is (a window of): see RenderFrame. */
+  frame: RenderFrame;
   /**
    * Id of the layer (or group) whose pixels an effect gets as `input`; `${layerId}#${PartKey}`
    * for a part's own effects (PartEffects), which run on that part's pixels alone. For a
@@ -204,6 +226,15 @@ export interface EffectDef {
    */
   fillsComp?(p: EffectParams): boolean;
   /**
+   * How far (comp px, conservative) back into its input (and `content`) each pixel this effect
+   * writes can look with params `p`, when that neighbourhood is all that decides it: no
+   * measurement over the whole layer or frame (layer box, ink box, grids), nothing laid out over
+   * the frame. A preview window (Engine.render `window`) then needs only that margin around what
+   * it shows, not the whole layer (ui/viewport/previewWindow.ts). Null or omitted: it may depend
+   * on the whole layer. Read it through `effectGather()` in effects/registry.
+   */
+  gather?(p: EffectParams): number | null;
+  /**
    * Read `input` and write the full result to `output` (both comp-size, premultiplied linear).
    * `input` and `output` are always different targets. Scratch targets come from
    * ctx.kit.acquire()/release(). Output must be a deterministic function of input and params.
@@ -220,11 +251,13 @@ export type GeneratorCategory = 'Particles' | 'Lines' | 'Rings' | 'Light' | 'Ene
 export interface GeneratorContext {
   renderer: THREE.WebGLRenderer;
   kit: PassKit;
-  /** Render target size in pixels (the comp at `pxScale`, possibly enlarged by export margins). */
+  /** Render target size in pixels (the comp at `pxScale`, possibly enlarged by export margins, or a window of that: `frame`). */
   width: number;
   height: number;
   /** Render pixels per comp pixel. */
   pxScale: number;
+  /** The whole render the target is (a window of): see RenderFrame. */
+  frame: RenderFrame;
   comp: Comp;
   /** Id of the generator layer. */
   layerId: string;

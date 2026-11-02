@@ -4,7 +4,7 @@ import { NOISE_GLSL, sdf } from '../../effects/lib';
 import { B, bool, common, DEG, G, grad, HEAD, material, N, num } from '../../effects/b/common';
 import { GRADIENTS } from '../../model/defaults';
 import { clearTarget, drawFollowed, followed, followParam } from '../common';
-import { SD_GLSL, stops } from './shared';
+import { SD_GLSL, sdUniforms, setSdf, stops } from './shared';
 
 // Eye Candy Fire: flames rising from the edges of the followed layer's own pixels. Behind the
 // layer it is a companion below it; licking over the edges, a companion above it whose flames
@@ -95,7 +95,7 @@ export const fire: GeneratorDef = {
       const field = sdf(ctx, content, 0.5);
       const m = material(ctx.kit, 'gen-fire', {
         uniforms: {
-          tSdf: { value: null },
+          ...sdUniforms(),
           tGrad: { value: null },
           uDir: { value: new THREE.Vector2() },
           uH: { value: 100 },
@@ -113,7 +113,7 @@ export const fire: GeneratorDef = {
       common(m, ctx);
       const u = m.uniforms;
       const a = N(p, 'angle') * DEG;
-      u.tSdf.value = field.texture;
+      setSdf(m, ctx, field.texture);
       u.tGrad.value = ctx.kit.gradientTexture(G(p, 'gradient'));
       u.uDir.value.set(Math.cos(a), Math.sin(a));
       u.uH.value = Math.max(1, N(p, 'height'));

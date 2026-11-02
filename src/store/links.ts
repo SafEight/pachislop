@@ -1,6 +1,6 @@
+import { sameValue } from '../model/equal';
 import { forEachMaterial, setIn, withoutLink, type AnyMaterial } from '../model/links';
 import type { Project } from '../model/types';
-import { sameValue } from './paths';
 
 // The commit hook of linked materials (see src/model/links.ts): after any project change, every
 // linked material that changed is copied to the other materials of its link, in the same commit

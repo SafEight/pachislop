@@ -8,6 +8,7 @@ import { makeEffect } from '../../src/store/effects';
 import { ridesAlong } from '../../src/store/arrange';
 import { ancestorsOf, withDescendants } from '../../src/store/tree';
 import { engineHost } from '../../src/ui/engineHost';
+import { previewWindow, type SharpWindow } from '../../src/ui/viewport/previewWindow';
 
 // Speed-budget cases. A "preview frame" is Engine.render of the whole comp at 100 % preview
 // resolution, not interactive: every node is shaded, run through its effects and composited;
@@ -25,7 +26,7 @@ export interface PerfCase {
 /** The heaviest 3D template: 3D plates with a band glow, nested groups and a Photo Filter. */
 const HEAVY_3D = 't-bigbonus-3d-groups';
 
-const comp = (name: string, layers: Layer[]): Project => ({ version: 9, name, comp: defaultComp(), layers });
+const comp = (name: string, layers: Layer[]): Project => ({ version: 10, name, comp: defaultComp(), layers });
 
 function withEffect(type: string, params: Record<string, number>) {
   const fx = makeEffect(type);
@@ -72,12 +73,31 @@ export function perfCases(engine: Engine): PerfCase[] {
 
   const goldDust = comp('金粉', [generator('particles', 'goldDust')]);
 
+  // The settled preview at 400 % on a 2× display: the visible 700 × 400 CSS px of a 2D gold title
+  // (its upper-left rims) rendered as a window at 8 render px per comp px (picked once its font
+  // has loaded: the title's box decides the window).
+  const flyerTemplate = TEMPLATES.find((t) => t.id === 't-shindai-flyer');
+  if (!flyerTemplate) throw new Error('missing template t-shindai-flyer');
+  const flyer = flyerTemplate.build();
+  let sharp: SharpWindow | null = null;
+
   let step = 0;
   return [
     { name: 'preview frame: heavy 3D template', project: heavy, run: preview(heavy) },
     { name: 'generator: 金粉 (2600 particles)', project: goldDust, run: preview(goldDust) },
     { name: 'Gaussian Blur 200 (effects-only adjustment)', project: blur, run: preview(blur) },
     { name: 'Deep Glow radius 1000', project: deepGlow, run: preview(deepGlow) },
+    {
+      name: 'sharp preview window: 2D title at 400 % on a 2× display',
+      project: flyer,
+      setup: () => {
+        sharp = previewWindow(flyer, { x0: -650, y0: 40, x1: -475, y1: 140 }, 8, 1);
+      },
+      run: () => {
+        if (!sharp) throw new Error('no preview window');
+        engine.render(flyer, { scale: sharp.scale, includeGuides: true, window: sharp.window });
+      },
+    },
     {
       name: 'interactive drag frame: heavy 3D template',
       project: heavy,

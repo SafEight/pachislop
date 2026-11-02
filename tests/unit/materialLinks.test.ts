@@ -10,7 +10,7 @@ import { TEMPLATES } from '../../src/presets/templates';
 import { syncLinks } from '../../src/store/links';
 import { getIn, updateIn } from '../../src/store/paths';
 
-const proj = (layers: Layer[], materialLinks?: Project['materialLinks']): Project => ({ version: 9, name: 'T', comp: defaultComp(), layers, ...(materialLinks ? { materialLinks } : {}) });
+const proj = (layers: Layer[], materialLinks?: Project['materialLinks']): Project => ({ version: 10, name: 'T', comp: defaultComp(), layers, ...(materialLinks ? { materialLinks } : {}) });
 
 const rainbowGlass = () => FACTORY_STYLES.find((s) => s.id === 'f-3d-rainbow-glass-gold')!;
 /** A 3D title wearing the rainbow glass look (its two gold tubes are one link named Gold). */
@@ -19,7 +19,7 @@ function rainbowTitle(): Project {
   return applyPresetToProject(proj([t]), t.id, rainbowGlass(), { applyFont: false });
 }
 
-/** A 3D title with two plates whose fronts and edges are all linked to `gold`. */
+/** A 3D title with two plates whose fronts and own edges are all linked to `gold`. */
 function goldPlates(id = 'gold'): Title3DLayer {
   const l = createTitle3DLayer('7');
   const gold: Material3D = { ...material3D('gold'), link: id };
@@ -27,7 +27,7 @@ function goldPlates(id = 'gold'): Title3DLayer {
   return { ...l, style3d: { ...l.style3d, backplates: [plate(), plate()] } };
 }
 
-const plateMats = (p: Project, i = 0) => (p.layers[i] as Title3DLayer).style3d.backplates.flatMap((b) => [b.face, b.side]);
+const plateMats = (p: Project, i = 0) => (p.layers[i] as Title3DLayer).style3d.backplates.flatMap((b) => (b.side ? [b.face, b.side] : [b.face]));
 
 describe('syncLinks', () => {
   it('mirrors an edit inside one linked material to the others, across layers', () => {
@@ -97,10 +97,11 @@ describe('links in looks and templates', () => {
     }
   });
 
-  it('the rainbow glass look’s four gold materials are one link named Gold', () => {
+  it('the rainbow glass look’s two gold tube materials are one link named Gold; the tube edges follow their fronts', () => {
     const p = rainbowTitle();
     const gold = linkedSlots(p).filter((s) => p.materialLinks?.[s.link]?.name === 'Gold');
-    expect(gold.map((s) => s.key.split(':').at(-1))).toEqual(['face', 'side', 'face', 'side']);
+    expect(gold.map((s) => s.key.split(':').at(-1))).toEqual(['face', 'face']);
+    expect((p.layers[0] as Title3DLayer).style3d.backplates.every((b) => !b.side)).toBe(true);
   });
 
   it('a look gets fresh link ids per layer; its names join the project', () => {

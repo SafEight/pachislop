@@ -4,8 +4,10 @@ import { getGenerator } from '../generators/registry';
 import { GRADIENTS, linearFill, material3D, pattern, solidFill } from '../model/defaults';
 import { gradientHasAlpha, hexToRgb, isGradient, sampleGradient, sampleGradientRgba } from '../model/gradient';
 import { ownGroupOf } from '../model/companions';
-import { unifyLayerLinks } from '../model/links';
+import { sameValue } from '../model/equal';
+import { unifyLayerLinks, withoutLink } from '../model/links';
 import { isTitleLayer } from '../model/parts';
+import { sideNeighbour } from '../model/sides';
 import type {
   EffectInstance,
   Fill,
@@ -518,6 +520,12 @@ function paint3D(m: Material3D, p: Paint | (() => Material3D), face = false): Ma
   };
 }
 
+/**
+ * The colourway on a 3D style. An inherited side (model/sides.ts) is painted only when the
+ * colourway's side paint differs from what its neighbour gets: it then holds that paint itself
+ * (unlinked), else it keeps following its neighbour. A plate's edge takes its front's paint, so
+ * an inherited edge stays inherited.
+ */
 function recolor3D(s: Title3DProps, def: ColourwayDef): Title3DProps {
   const sameAsFace = (m: Material3D) =>
     m.preset === s.face.preset && m.color === s.face.color && JSON.stringify(m.gradient) === JSON.stringify(s.face.gradient);
@@ -533,18 +541,20 @@ function recolor3D(s: Title3DProps, def: ColourwayDef): Title3DProps {
   const paints = ringPaints(roles, def);
   const nb = s.bands.length;
   const bandPaint = (i: number) => (roles[i] === 'face' && def.bevel3d ? def.bevel3d : paints[i]);
-  return {
+  const painted: Title3DProps = {
     ...s,
     face: paint3D(s.face, def.face, true),
-    side: paint3D(s.side, def.side3d),
     bands: s.bands.map((b, i) => ({ ...b, material: paint3D(b.material, bandPaint(i), roles[i] === 'face' && !def.bevel3d) })),
     backplates: s.backplates.map((bp, i) => {
       const p = paints[nb + i];
-      return { ...bp, face: paint3D(bp.face, p), side: paint3D(bp.side, p) };
+      return { ...bp, face: paint3D(bp.face, p), ...(bp.side ? { side: paint3D(bp.side, p) } : {}) };
     }),
     shadow: { ...s.shadow, color: def.shadow },
     glint: { ...s.glint, tint: def.glint },
   };
+  if (s.side) return { ...painted, side: paint3D(s.side, def.side3d) };
+  const side = paint3D(sideNeighbour(s), def.side3d);
+  return sameValue(side, sideNeighbour(painted)) ? painted : { ...painted, side: withoutLink(side) };
 }
 
 // ---------- 保留 orbs ----------
@@ -580,7 +590,7 @@ function recolorOrb(s: Title3DProps, colourway: Colourway): Title3DProps {
   return {
     ...s,
     face: tintOrb(s.face, colourway),
-    side: tintOrb(s.side, colourway),
+    ...(s.side ? { side: tintOrb(s.side, colourway) } : {}),
     bands: s.bands.map((b) => ({ ...b, material: tintOrb(b.material, colourway) })),
     shadow: { ...s.shadow, color: def.shadow },
     glint: { ...s.glint, tint: def.glint },

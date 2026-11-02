@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { EffectParams, GeneratorDef, PassContext } from '../engine/contracts';
 import { B, bool, C, col, common, DEG, drawObject, gridDistance, type Grid, hash, HEAD, material, N, num, readGrid, rng, S, sel } from '../effects/b/common';
+import { centreX, centreY } from '../engine/frame';
 import { ANAMORPHIC_GLSL, drawFollowed, followed, followParam } from './common';
 
 // Glints: star sparkles on a followed layer — on its highlight peaks (a few large glints plus small
@@ -599,7 +600,7 @@ const ON_HL_HERO = { key: 'placement', value: ['highlights', 'hero'] };
 /** One star at the generator's (x, y) (placement Fixed point), render px of `ctx`. */
 function pointStar(ctx: PassContext, p: EffectParams): Star {
   const k = ctx.pxScale;
-  return { x: N(p, 'x') * k + ctx.width / 2, y: N(p, 'y') * k + ctx.height / 2, size: N(p, 'size') * k, rot: N(p, 'rotation') * DEG, intensity: 1, color: C(p, 'color') };
+  return { x: N(p, 'x') * k + centreX(ctx.frame), y: N(p, 'y') * k + centreY(ctx.frame), size: N(p, 'size') * k, rot: N(p, 'rotation') * DEG, intensity: 1, color: C(p, 'color') };
 }
 
 /** Big flare stars on the hottest peaks of `shape` (placement Hottest peaks). */
@@ -612,8 +613,8 @@ function peakStars(ctx: PassContext, shape: THREE.Texture, p: EffectParams): Sta
   const { hl } = findHighlights(ctx, shape, 'glints-peaks', N(p, 'threshold') / 100);
   const top = hl[0]?.score ?? 1;
   return pickHighlights(hl, Math.round(N(p, 'stars')), (h) => size * highlightSize(h.score, top, vr), 0.45).map(({ h, r, fade }) => ({
-    x: h.x * k + ctx.width / 2,
-    y: h.y * k + ctx.height / 2,
+    x: h.x * k + centreX(ctx.frame),
+    y: h.y * k + centreY(ctx.frame),
     size: r * k * (0.6 + 0.4 * fade),
     rot,
     intensity: (0.4 + 0.6 * (r / size)) * fade,
@@ -646,8 +647,8 @@ function renderPeaks(ctx: PassContext, target: THREE.WebGLRenderTarget, shape: T
   const jit = N(p, 'jitter') / 100;
   // A little size (±20%) and rotation (±12°) jitter at full Jitter, a smooth function of the peak position.
   const star = ({ h, r, fade }: Pick, intensity: number): Star => ({
-    x: h.x * k + ctx.width / 2,
-    y: h.y * k + ctx.height / 2,
+    x: h.x * k + centreX(ctx.frame),
+    y: h.y * k + centreY(ctx.frame),
     size: r * k * (0.6 + 0.4 * fade) * (1 + 0.4 * jit * (wobble(h.x, h.y, seed, 0) - 0.5)),
     rot: rot0 + 0.42 * jit * (wobble(h.x, h.y, seed, 1) - 0.5),
     intensity: intensity * fade,
@@ -684,8 +685,8 @@ function renderPeaks(ctx: PassContext, target: THREE.WebGLRenderTarget, shape: T
     ctx,
     target,
     {
-      x: h0.x * k + ctx.width / 2,
-      y: h0.y * k + ctx.height / 2,
+      x: h0.x * k + centreX(ctx.frame),
+      y: h0.y * k + centreY(ctx.frame),
       t,
       len: half * k,
       cross: half * (N(p, 'heroCross') / 100) * k,
@@ -732,8 +733,8 @@ function scatterStars(ctx: PassContext, content: THREE.Texture, p: EffectParams)
     // Keyed by the try, not the placed index: a borderline cell flipping between render
     // scales then changes only that one star instead of re-rolling all that follow.
     stars.push({
-      x: cx * k + ctx.width / 2,
-      y: cy * k + ctx.height / 2,
+      x: cx * k + centreX(ctx.frame),
+      y: cy * k + centreY(ctx.frame),
       size: size * k * (1 - sv + sv * hash(seed, tries, 3)),
       rot: rot0 + (hash(seed, tries, 1) - 0.5) * 0.4,
       intensity: 1 - bv * hash(seed, tries, 2),

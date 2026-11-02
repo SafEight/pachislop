@@ -527,10 +527,6 @@
 .overlay .gz3-arc {
   stroke-width: 3;
 }
-/* An axis seen head-on, drawn on the down-left diagonal. */
-.overlay .gz3-shaft.diag {
-  stroke-dasharray: 5 3;
-}
 .overlay .gz3-head,
 .overlay .gz3-tip {
   fill: var(--ax);

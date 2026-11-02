@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { EffectContext, EffectDef } from '../../engine/contracts';
+import { centreX, centreY } from '../../engine/frame';
 import { DEG, dirVec, flag, num, pass, pBool, pDeg, pick, pNum, pPx, pSelect } from './util';
 
 // Photoshop / After Effects blurs. Every pass reads and writes premultiplied linear colour, so
@@ -31,9 +32,9 @@ function rt(key: string, w: number, h: number): THREE.WebGLRenderTarget {
 
 const MAX_TAP = 32;
 
-// One 1-D Gaussian pass. Without uRepeat, taps outside the frame read transparent but still count
-// in the weight sum, so content touching the frame edge fades out (AE with Repeat Edge Pixels off);
-// with it they clamp to the edge texel.
+// One 1-D Gaussian pass. Without uRepeat, taps outside the frame (the whole render, uFrameUv) read
+// transparent but still count in the weight sum, so content touching the frame edge fades out (AE
+// with Repeat Edge Pixels off); with it they clamp to the edge texel.
 const gaussFrag = /* glsl */ `
 uniform sampler2D tSrc; uniform vec2 uStep; uniform float uSigma; uniform bool uRepeat;
 void main() {
@@ -45,7 +46,7 @@ void main() {
     vec2 uv = vUv + uStep * float(i);
     float w = exp(k * float(i * i));
     ws += w;
-    if (!uRepeat && (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0)) continue;
+    if (!uRepeat && (uv.x < uFrameUv.x || uv.y < uFrameUv.y || uv.x > uFrameUv.z || uv.y > uFrameUv.w)) continue;
     acc += texture(tSrc, uv) * w;
   }
   o = acc / ws;
@@ -106,6 +107,7 @@ const gaussianBlur: EffectDef = {
     pBool('repeatEdges', 'Repeat Edge Pixels', true),
   ],
   reach: (p) => 3 * num(p, 'radius') * (Math.max(num(p, 'scaleX'), num(p, 'scaleY')) / 100),
+  gather: (p) => 4 * num(p, 'radius') * (Math.max(num(p, 'scaleX'), num(p, 'scaleY')) / 100),
   apply(ctx, input, output, p) {
     const s = Math.max(0, num(p, 'radius')) * ctx.pxScale;
     const sx = (s * Math.max(0, num(p, 'scaleX'))) / 100;
@@ -232,13 +234,14 @@ void main() {
 }`;
 
 // Full-resolution upsample plus Photoshop's Noise: ±uNoise (sRGB levels / 255) uniform, or Gaussian
-// with σ = uNoise / 2, per channel or monochromatic, only where there is ink.
+// with σ = uNoise / 2, per channel or monochromatic, only where there is ink. Keyed on the whole
+// render's pixel, so a window of it gets the same grain.
 const lensFinishFrag = /* glsl */ `
 uniform sampler2D tSrc; uniform float uNoise; uniform bool uGauss, uMono;
 void main() {
   vec4 c = texture(tSrc, vUv);
   if (uNoise > 0.0 && c.a > 1e-4) {
-    vec2 p = floor(gl_FragCoord.xy);
+    vec2 p = floor(gl_FragCoord.xy + uFrame.xy);
     vec3 u = vec3(hash1(p), hash1(p + 31.7), hash1(p + 73.1));
     vec3 n = u * 2.0 - 1.0;
     if (uGauss) {
@@ -382,8 +385,8 @@ const tiltShift: EffectDef = {
         tL2: level(1 / 4, 2),
         tL3: level(1 / 2, 3),
         tL4: level(1, 4),
-        // centre params: comp px from the comp centre, +y up → render px from bottom-left
-        uC: [ctx.width / 2 + num(p, 'centerX') * s, ctx.height / 2 + num(p, 'centerY') * s],
+        // centre params: comp px from the comp centre, +y up → target px from bottom-left
+        uC: [centreX(ctx.frame) + num(p, 'centerX') * s, centreY(ctx.frame) + num(p, 'centerY') * s],
         uN: [-dy, dx],
         uHalf: (Math.max(0, num(p, 'width')) * s) / 2,
         uFall: Math.max(0, num(p, 'falloff')) * s,

@@ -3,6 +3,7 @@ import { followTarget, generatorFillsComp, getGenerator } from '../generators/re
 import type { Comp, Layer, Project } from '../model/types';
 import type { ChildDrawer, Compositor } from './compositor';
 import { drawnLayers, holds3D, isLeaf, type DrawNode, type LeafLayer } from './drawTree';
+import { wholeFrame } from './frame';
 import { isolation, nodeDeps } from './layerSource';
 import { PassKit } from './passkit';
 import type { Surface, Surfaces } from './surface';
@@ -329,7 +330,7 @@ export class InteractiveCache {
         height: lh,
         scale,
         renderers: full.renderers,
-        ctx: { ...full.ctx, kit: lowKit, project: lowProject, width: lw, height: lh, pxScale: scale },
+        ctx: { ...full.ctx, kit: lowKit, project: lowProject, width: lw, height: lh, pxScale: scale, frame: wholeFrame(lw, lh) },
       },
       project.comp,
     );

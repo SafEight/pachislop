@@ -1,7 +1,8 @@
 import type * as THREE from 'three';
 import type { Comp, Project } from '../model/types';
-import type { LayerRenderContext, LayerRenderer } from './contracts';
+import type { LayerRenderContext, LayerRenderer, RenderFrame } from './contracts';
 import type { LeafLayer } from './drawTree';
+import { isWhole, wholeFrame } from './frame';
 import { createGeneratorRenderer } from './GeneratorRenderer';
 import { createBackgroundRenderer, createTitle2DRenderer } from './layer2d/Title2DRenderer';
 import { FrameSource, type SourceHost } from './layerSource';
@@ -93,11 +94,12 @@ export class Surfaces {
 
   /**
    * Size `kit` to `w`×`h`, aim `camera` (the engine's by default) and build the layer context for
-   * rendering `project`.
+   * rendering `project`: the whole render, or with `frame` the window of it a `w`×`h` target is
+   * (see RenderFrame; the camera then projects just that window).
    */
-  surface(project: Project, kit: PassKit, scale: number, w: number, h: number, draft: boolean, renderers: RendererMap, camera = this.camera): Surface {
+  surface(project: Project, kit: PassKit, scale: number, w: number, h: number, draft: boolean, renderers: RendererMap, camera = this.camera, frame = wholeFrame(w, h)): Surface {
     kit.setSize(w, h);
-    aimCamera(camera, project);
+    aimCamera(camera, project, frame, w, h);
     const { comp } = project;
     const ctx: LayerRenderContext = {
       renderer: this.renderer,
@@ -106,6 +108,7 @@ export class Surfaces {
       width: w,
       height: h,
       pxScale: scale,
+      frame,
       camera,
       envMap: (e) => this.env.update(e, scale),
       draft,
@@ -127,8 +130,11 @@ export class Surfaces {
   }
 }
 
-/** Aim `camera` at `project`'s comp: 1 world unit = 1 comp px on the z = 0 plane. */
-function aimCamera(camera: THREE.PerspectiveCamera, project: Project) {
+/**
+ * Aim `camera` at `project`'s comp: 1 world unit = 1 comp px on the z = 0 plane. For a `w`×`h`
+ * window of the whole render (`frame`), the projection covers just that window.
+ */
+function aimCamera(camera: THREE.PerspectiveCamera, project: Project, frame: RenderFrame, w: number, h: number) {
   const { comp } = project;
   const cam = comp.camera;
   const fov = Math.min(170, Math.max(1, cam.fov));
@@ -139,6 +145,9 @@ function aimCamera(camera: THREE.PerspectiveCamera, project: Project) {
   camera.far = dist * 20;
   camera.position.set(cam.x, cam.y, dist + cam.zOffset);
   camera.rotation.set(cam.rotX * DEG, cam.rotY * DEG, cam.rotZ * DEG);
+  // three.js view offsets run from the top-left corner, y down
+  if (!isWhole(frame, w, h)) camera.setViewOffset(frame.width, frame.height, frame.x, frame.height - frame.y - h, w, h);
+  else if (camera.view?.enabled) camera.view.enabled = false;
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
 }

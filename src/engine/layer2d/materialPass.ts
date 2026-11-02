@@ -13,11 +13,12 @@ import { BLUR_R_FRAG, COVER_INIT_FRAG, COVER_JFA_FRAG, COVER_RADIUS_FRAG, ELEMEN
 // a material shades the same wherever it is used.
 //
 // A "frame" is the pixel grid every texture of one shading shares (gl_FragCoord in frame px,
-// y-up): the title's layer-local frame, or the effect's render target. Per mask, cached by key in
-// a MaterialSlot: signed distance field (jump flooding over sub-pixel edge points) → bevel height
-// field (profile, Fit cover, soften) → shape-burst depth and satin blur; then ELEMENT_FRAG shades
-// fill → refraction / glass → bevel light → finish → pattern → satin → texture → sheen → inner
-// glow → gloss cap into a premultiplied linear stack.
+// y-up): the title's layer-local frame, or the effect's render target (on a window of the
+// render, ShadeInput.gridOffset keeps the pattern / texture grain on the whole render's grid).
+// Per mask, cached by key in a MaterialSlot: signed distance field (jump flooding over sub-pixel
+// edge points) → bevel height field (profile, Fit cover, soften) → shape-burst depth and satin
+// blur; then ELEMENT_FRAG shades fill → refraction / glass → bevel light → finish → pattern →
+// satin → texture → sheen → inner glow → gloss cap into a premultiplied linear stack.
 
 const PROFILE_IDS: Record<BevelProfile2D, number> = { smooth: 0, button: 1, mesa: 2, chamfer: 3, ridge: 4, cove: 5, stepped: 6, custom: 7 };
 const GLOSS_IDS: Record<GlossContour, number> = { linear: 0, ring: 1, doubleRing: 2, cove: 3, roundedSteps: 4, sawtooth: 5, custom: 6 };
@@ -285,6 +286,7 @@ function makePrograms(kit: PassKit): Programs {
       uGlowPx: { value: 1 },
       uGlowOp: { value: 0 },
       uGlowNoise: { value: 0 },
+      uPxOff: { value: new THREE.Vector2() },
       uCap: { value: false },
       uCapOp: { value: 0 },
       uCapPos: { value: 0.5 },
@@ -412,9 +414,20 @@ export interface ShadeInput {
   /** That size (layer units) and the frame px per layer unit, for the pattern's motif size. */
   size: number;
   m: number;
-  /** Layer-space point (layer units) at frame px (0, 0), anchoring the pattern / the texture. */
+  /**
+   * Layer-space point (layer units) at grid px (0, 0) (see `gridOffset`), anchoring the pattern /
+   * the texture.
+   */
   patternOrigin: { x: number; y: number };
   textureOrigin: { x: number; y: number };
+  /**
+   * Frame px of this frame's pixel (0, 0) on the grid the position-keyed features (pattern,
+   * texture, sheen, inner-glow noise) and the origins above are anchored to. Absent = (0, 0): the
+   * frame is the grid (a title's own frame, an effect on a whole render). An effect on a window
+   * of the render passes the window's offset (RenderFrame x, y) with the whole render's origins,
+   * so those features land exactly where the whole render has them.
+   */
+  gridOffset?: { x: number; y: number };
   /** Element box: frame px (y-up), or an effects/lib bounds() texture (uv box of the mask). */
   box: { x0: number; y0: number; x1: number; y1: number } | THREE.Texture;
   /** Rim band width (frame px): shape-burst fills run across it; 0 for faces and effects. */
@@ -699,6 +712,9 @@ export class MaterialPass {
     u.uFinish.value = mat.finish.enabled;
     u.tRamp.value = rampTexture(mat.finish.gradient);
     u.uFinishAmt.value = mat.finish.amount;
+
+    const go = input.gridOffset;
+    (u.uPxOff.value as THREE.Vector2).set(go ? go.x : 0, go ? go.y : 0);
 
     // Pattern in element space: anchored to the layer origin (moving with a rim's offset).
     setPatternUniforms(u, mat.pattern, input.size, { linear: false, pxPerUnit: m, origin: input.patternOrigin });

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { EffectContext, EffectParams, ParamDef } from '../../engine/contracts';
+import { centreX, centreY } from '../../engine/frame';
 import type { PassKit } from '../../engine/passkit';
 import type { Gradient } from '../../model/types';
 
@@ -17,8 +18,11 @@ export const dirVec = (deg: number): [number, number] => [Math.cos(deg * DEG), -
 
 /** Prepended to every group-A fragment shader. */
 export const COMMON_GLSL = /* glsl */ `
-uniform vec2 uRes;   // render size in px
+uniform vec2 uRes;   // target size in px
 uniform float uPx;   // render px per comp px
+uniform vec2 uCentre; // the comp centre in target px (see RenderFrame)
+uniform vec4 uFrame; // the whole render (RenderFrame): xy = this target's bottom-left in it, zw = its size
+uniform vec4 uFrameUv; // the whole render in target uv: xy = bottom-left, zw = top-right ((0, 0, 1, 1) unless a window)
 in vec2 vUv; out vec4 o;
 const float PI = 3.14159265359;
 vec3 unpremul(vec4 c) { return c.a > 1e-5 ? c.rgb / c.a : vec3(0.0); }
@@ -72,7 +76,7 @@ const mats = new WeakMap<PassKit, Map<string, THREE.ShaderMaterial>>();
 
 /**
  * Run a cached fullscreen pass. `frag` is appended to COMMON_GLSL (which declares vUv, o,
- * uRes, uPx). Uniform names come from `u` keys and must be stable per `name`.
+ * uRes, uPx, uCentre, uFrame, uFrameUv). Uniform names come from `u` keys and must be stable per `name`.
  * vec2/vec3/vec4 uniforms may be plain number arrays; colours may be THREE.Color.
  */
 export function pass(
@@ -87,13 +91,23 @@ export function pass(
   if (!byName) mats.set(kit, (byName = new Map()));
   let mat = byName.get(name);
   if (!mat) {
-    const uniforms: Record<string, THREE.IUniform> = { uRes: { value: [1, 1] }, uPx: { value: 1 } };
+    const uniforms: Record<string, THREE.IUniform> = {
+      uRes: { value: [1, 1] },
+      uPx: { value: 1 },
+      uCentre: { value: [0.5, 0.5] },
+      uFrame: { value: [0, 0, 1, 1] },
+      uFrameUv: { value: [0, 0, 1, 1] },
+    };
     for (const k in u) uniforms[k] = { value: null };
     mat = kit.shader({ uniforms, fragmentShader: COMMON_GLSL + frag });
     byName.set(name, mat);
   }
+  const f = ctx.frame;
   mat.uniforms.uRes.value = [ctx.width, ctx.height];
   mat.uniforms.uPx.value = ctx.pxScale;
+  mat.uniforms.uCentre.value = [centreX(f), centreY(f)];
+  mat.uniforms.uFrame.value = [f.x, f.y, f.width, f.height];
+  mat.uniforms.uFrameUv.value = [-f.x / ctx.width, -f.y / ctx.height, (f.width - f.x) / ctx.width, (f.height - f.y) / ctx.height];
   for (const k in u) mat.uniforms[k].value = u[k];
   kit.run(mat, target);
 }

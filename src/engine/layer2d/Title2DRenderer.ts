@@ -60,8 +60,9 @@ import {
 //      A part render (ctx.parts) shades only the listed elements into a stack of its own, from
 //      the same frame, masks, grows, かすれ keep-mask and knockout as the full render, so an
 //      isolated rim has exactly its full-render shape and pixels.
-//   5. placement: the stack is drawn into the comp-sized target with position, rotation
-//      (positive rotZ = clockwise on screen, about the layer position) and scale.
+//   5. placement: the stack is drawn into the target (the whole render or a window of it, see
+//      RenderFrame) with position, rotation (positive rotZ = clockwise on screen, about the layer
+//      position) and scale.
 // The bevel light stays fixed on screen (Photoshop global light) when the layer rotates.
 
 const MITER_LIMIT = 4;
@@ -160,7 +161,8 @@ function makePrograms(kit: PassKit): Programs {
     place: kit.shader({
       uniforms: {
         tStack: { value: null },
-        uTarget: { value: new THREE.Vector2() },
+        uRender: { value: new THREE.Vector2() },
+        uOffset: { value: new THREE.Vector2() },
         uComp: { value: new THREE.Vector2() },
         uPos: { value: new THREE.Vector2() },
         uRot: { value: new THREE.Vector2(1, 0) },
@@ -380,10 +382,11 @@ class Title2DRenderer implements LayerRenderer {
     const comp = ctx.project.comp;
     // Image sources: the output pixel grid in layer space (unrotated layers; a flip mirrors the
     // grid onto itself), so a picture at its own resolution maps texel for pixel instead of being
-    // resampled half a pixel off.
+    // resampled half a pixel off. The grid is the whole render's (ctx.frame: the comp at
+    // frame.width / comp.width render px per comp px); a window's pixels are whole pixels of it.
     const fx = t.flipX ? -1 : 1;
     const fy = t.flipY ? -1 : 1;
-    const grid = geom.kind === 'image' && t.rotZ % 360 === 0 ? { x: (fx * (-comp.width / 2 - t.x)) / t.scale, y: (fy * (-comp.height / 2 - t.y)) / t.scale, m: (t.scale * ctx.width) / comp.width } : null;
+    const grid = geom.kind === 'image' && t.rotZ % 360 === 0 ? { x: (fx * (-comp.width / 2 - t.x)) / t.scale, y: (fy * (-comp.height / 2 - t.y)) / t.scale, m: (t.scale * ctx.frame.width) / comp.width } : null;
     const frame = this.frameFor(geom, elements, t.scale * Math.max(ctx.pxScale, 1), ctx.renderer, grid);
     const { knockout, erode } = layer.style;
     const unit = (frame.m * size) / 100; // mask px per 1 % of size
@@ -448,10 +451,11 @@ class Title2DRenderer implements LayerRenderer {
       stack.key = stackKey;
     }
 
-    // Place into the comp.
+    // Place into the comp: target px → whole-render px (ctx.frame) → comp px.
     const pu = progs.place.uniforms;
     pu.tStack.value = stack.rt.texture;
-    (pu.uTarget.value as THREE.Vector2).set(ctx.width, ctx.height);
+    (pu.uRender.value as THREE.Vector2).set(ctx.frame.width, ctx.frame.height);
+    (pu.uOffset.value as THREE.Vector2).set(ctx.frame.x, ctx.frame.y);
     (pu.uComp.value as THREE.Vector2).set(comp.width, comp.height);
     (pu.uPos.value as THREE.Vector2).set(t.x, t.y);
     (pu.uRot.value as THREE.Vector2).set(Math.cos(t.rotZ * DEG), Math.sin(t.rotZ * DEG));
@@ -459,7 +463,7 @@ class Title2DRenderer implements LayerRenderer {
     (pu.uFlip.value as THREE.Vector2).set(fx, fy);
     (pu.uFrameMin.value as THREE.Vector2).set(frame.x0, frame.y0);
     (pu.uFrameSize.value as THREE.Vector2).set(frame.x1 - frame.x0, frame.y1 - frame.y0);
-    const ratio = frame.m / (t.scale * (ctx.width / comp.width)); // mask px per target px
+    const ratio = frame.m / (t.scale * (ctx.frame.width / comp.width)); // mask px per target px
     pu.uTaps.value = Math.min(4, Math.max(1, Math.ceil(ratio - 0.01)));
     kit.run(progs.place, target);
   }
@@ -974,12 +978,16 @@ class BackgroundRenderer implements LayerRenderer {
     if (this.kit !== kit || !this.mat) {
       this.mat?.dispose();
       this.kit = kit;
-      this.mat = kit.shader({ uniforms: { ...fillUniforms(), uSize: { value: new THREE.Vector2() } }, fragmentShader: BACKGROUND_FRAG });
+      this.mat = kit.shader({ uniforms: { ...fillUniforms(), uSize: { value: new THREE.Vector2() }, uWin: { value: new THREE.Vector4() } }, fragmentShader: BACKGROUND_FRAG });
     }
     const u = this.mat.uniforms;
-    // p runs in comp px: one target pixel = comp width / target width of them.
-    setFill(u, layer.fill, ctx.project.comp.width / Math.max(1, ctx.width));
-    (u.uSize.value as THREE.Vector2).set(ctx.project.comp.width, ctx.project.comp.height);
+    const { comp } = ctx.project;
+    const f = ctx.frame;
+    // p runs in comp px over the whole render (ctx.frame): one target pixel = comp width / render width of them.
+    setFill(u, layer.fill, comp.width / Math.max(1, f.width));
+    (u.uSize.value as THREE.Vector2).set(comp.width, comp.height);
+    // The target within the whole render, in render uv: scale, offset (1, 1, 0, 0 for a whole frame).
+    (u.uWin.value as THREE.Vector4).set(ctx.width / f.width, ctx.height / f.height, f.x / f.width, f.y / f.height);
     kit.run(this.mat, target);
   }
 

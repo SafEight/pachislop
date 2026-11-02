@@ -34,7 +34,7 @@ void main() {
   vec3 ring = vec3(exp(-pow((r - 2.35) / 0.07, 2.0)), exp(-pow((r - 2.25) / 0.07, 2.0)), exp(-pow((r - 2.15) / 0.07, 2.0)));
   L += ring * 0.18;
   if (uGhosts) {
-    vec2 axis = 0.5 * uRes - uPos;
+    vec2 axis = uCentre - uPos;
     for (int i = 0; i < 6; i++) {
       float fi = float(i);
       float k = 0.35 + fi * 0.33 + (hash12(vec2(fi, uSeed)) - 0.5) * 0.2;

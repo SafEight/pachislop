@@ -765,7 +765,7 @@ const fillsComp = (effects: readonly EffectInstance[] | undefined) => !!effects?
  * The layer fills the comp: a full-frame generator (generatorFillsComp), or an effect of it or of one of
  * its style parts does (an adjustment layer's effects too). Unknown generator types draw nothing.
  */
-function layerFillsComp(l: Layer): boolean {
+export function layerFillsComp(l: Layer): boolean {
   if (l.kind === 'generator' && generatorFillsComp(l.generator)) return true;
   return fillsComp(l.effects) || (isTitleLayer(l) && Object.values(l.partEffects).some(fillsComp));
 }

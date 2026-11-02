@@ -103,10 +103,11 @@ vec4 fillColor(vec2 p, vec2 bmin, vec2 bmax, float burst) {
 export const BACKGROUND_FRAG = /* glsl */ `
 ${COLOR_GLSL}
 ${FILL_GLSL}
-uniform vec2 uSize;
+uniform vec2 uSize;  // comp px
+uniform vec4 uWin;   // the target in the whole render's uv: scale (xy), offset (zw); 1, 1, 0, 0 when whole
 in vec2 vUv; out vec4 o;
 void main() {
-  vec2 p = vUv * uSize;
+  vec2 p = (vUv * uWin.xy + uWin.zw) * uSize;
   // Shape burst of the comp rectangle: distance to the nearest edge over the half short side.
   vec2 e = min(p, uSize - p);
   float burst = min(e.x, e.y) / max(0.5 * min(uSize.x, uSize.y), 1e-3);
@@ -449,6 +450,11 @@ uniform bool uPicture;
 uniform bool uPictureLinear;
 uniform sampler2D tPicture;
 uniform vec3 uLight;        // light direction (towards the light), layer space, y-up
+// Frame px of this frame's pixel (0, 0) on the grid the position-keyed features (pattern,
+// texture, sheen, inner-glow noise) are anchored to: 0 for a title's own frame; for an effect
+// on a window of the render, the window's offset (RenderFrame x, y), so they sit where the
+// whole render has them. pa = p + uPxOff is that grid's position; gBoxC is on it too.
+uniform vec2 uPxOff;
 
 // Material2D.refraction: frame px the fill is read away from p per unit of surface tilt.
 uniform float uRefrPx;
@@ -612,7 +618,7 @@ float liquidH(vec2 q) {
   return 0.7 * pat_gnoise(q + 1.5 * w2) + 0.3 * pat_gnoise(q * 2.3 + w2 + 6.1);
 }
 
-// Element box centre / half size, frame px (set first thing in main).
+// Element box centre (grid px, see uPxOff) / half size (frame px), set first thing in main.
 vec2 gBoxC, gBoxH;
 
 // Texture2D.angle: frame px into the texture's own axes (grain along +x) and slopes back.
@@ -645,8 +651,8 @@ float flakeFacing(vec2 cell) {
   return max(dot(reflect(-L, fn), vec3(0.0, 0.0, 1.0)), 0.0);
 }
 
-// Height-like value 0..1 of the noise-type textures (1–6, 10–12), 0.5 = neutral. px: frame px in
-// the texture's axes; q: feature units.
+// Height-like value 0..1 of the noise-type textures (1–6, 10–12), 0.5 = neutral. px: grid px
+// (pa, see uPxOff) in the texture's axes; q: feature units.
 float textureHeight(vec2 px, vec2 q) {
   if (uTex == 1) return clamp(0.5 + (vnoise(q * 2.0) - 0.5) * 1.3 + (hash12(px + uTexSeed) - 0.5) * 0.35, 0.0, 1.0);
   if (uTex == 2) return sparkle(q * 0.5);
@@ -682,7 +688,7 @@ float textureHeight(vec2 px, vec2 q) {
   return 0.5;
 }
 
-// Surface slope of the texture at frame px (height px per px, scaled by amount): the texture's
+// Surface slope of the texture at grid px p (height px per px, scaled by amount): the texture's
 // height is amount × its feature size, so bumps keep their steepness at any scale.
 vec2 textureSlope(vec2 p) {
   vec2 px = texRotate(p);
@@ -715,7 +721,7 @@ float textureValue(vec2 p) {
   return textureHeight(px, px / max(uTexPx, 0.5) + uTexSeed);
 }
 
-// Sheen2D strength at frame px p: a band across the grain (spun: radial lobes; flakes: the facets
+// Sheen2D strength at grid px p: a band across the grain (spun: radial lobes; flakes: the facets
 // that catch the light), modulated by the metal grain.
 float sheenShape(vec2 p) {
   vec2 px = texRotate(p);
@@ -786,6 +792,7 @@ void main() {
   if (a <= 0.0) { o = vec4(0.0); return; }
   if (uPunch) { o = vec4(a); return; }
   vec2 p = gl_FragCoord.xy;
+  vec2 pa = p + uPxOff;
   float d = uHasSdf ? texelFetch(tSdf, ip, 0).r : 0.0;
 
   // Pattern: the frame is axis-aligned, so the motif steps per pixel are exact constants.
@@ -793,7 +800,7 @@ void main() {
   vec2 pg = vec2(0.0); // relief: pattern height gradient, height px per frame px
   bool relief = false;
   if (uPatKind > 0) {
-    vec2 pm = patternCoord(p);
+    vec2 pm = patternCoord(pa);
     vec2 ex = vec2(uPatXform.x, uPatXform.z), ey = vec2(uPatXform.y, uPatXform.w);
     pat = patternSampleD(pm, ex, ey, uPatKind, uPatSeed);
     if (uPatRelief > 0.0) {
@@ -812,7 +819,7 @@ void main() {
     vec2 sz = vec2(textureSize(tMask, 0));
     if (b.z >= -b.x && b.w >= -b.y) { emin = -b.xy * sz - 0.5; emax = b.zw * sz + 0.5; }
   }
-  gBoxC = 0.5 * (emin + emax);
+  gBoxC = 0.5 * (emin + emax) + uPxOff;
   gBoxH = max(0.5 * (emax - emin), vec2(0.5));
 
   // Surface texture joins the bevel height field: lighting, gloss contour and finish all bend.
@@ -822,7 +829,7 @@ void main() {
   if (lit) {
     vec2 g = pg;
     if (uBevel) g += vec2(hFetch(ip + ivec2(1, 0)) - hFetch(ip - ivec2(1, 0)), hFetch(ip + ivec2(0, 1)) - hFetch(ip - ivec2(0, 1))) * 0.5 * uBevelK;
-    if (surface) g += textureSlope(p);
+    if (surface) g += textureSlope(pa);
     n = normalize(vec3(-g, 1.0));
   }
   // Refraction: the fill is read where the tilted surface bends the view (< 0: mirrors, like chrome).
@@ -946,14 +953,14 @@ void main() {
     c = mix(c, bl, clamp(v * uSatinOp, 0.0, 1.0));
   }
 
-  if (uTex > 0 && uTexAmt > 0.0 && !uTexSurface) c = mix(c, clamp(blendTex(c, textureValue(p)), 0.0, 1.0), uTexAmt);
+  if (uTex > 0 && uTexAmt > 0.0 && !uTexSurface) c = mix(c, clamp(blendTex(c, textureValue(pa)), 0.0, 1.0), uTexAmt);
 
-  if (uSheen) c += uSheenColor * sheenShape(p) * uSheenAmt * (0.4 + 0.6 * c);
+  if (uSheen) c += uSheenColor * sheenShape(pa) * uSheenAmt * (0.4 + 0.6 * c);
 
   if (uGlow && uHasSdf) {
     float t = clamp(max(-d, 0.0) / max(uGlowPx, 0.5), 0.0, 1.0);
     float gi = (1.0 - t) * (1.0 - t);
-    float n = hash12(p + 13.7);
+    float n = hash12(pa + 13.7);
     gi *= mix(1.0, n * 2.0, uGlowNoise);
     c = screen(c, uGlowColor * clamp(gi * uGlowOp, 0.0, 1.0));
   }
@@ -966,8 +973,8 @@ void main() {
     vec2 dn = uCapDir, ac = vec2(-dn.y, dn.x);
     float ed = abs(dn.x) * hs.x + abs(dn.y) * hs.y;
     float ea = abs(ac.x) * hs.x + abs(ac.y) * hs.y;
-    float yf = (dot(p - cc, dn) + ed) / (2.0 * ed);
-    float u = dot(p - cc, ac) / ea;
+    float yf = (dot(pa - cc, dn) + ed) / (2.0 * ed);
+    float u = dot(pa - cc, ac) / ea;
     float edge = uCapPos + uCapCurve * 0.25 * (1.0 - u * u);
     float sw = max(uCapSoft, 0.002) * 0.5;
     float cap = 1.0 - smoothstep(edge - sw, edge + sw, yf);
@@ -985,7 +992,8 @@ void main() {
 
 export const PLACE_FRAG = /* glsl */ `
 uniform sampler2D tStack;
-uniform vec2 uTarget;     // render target px
+uniform vec2 uRender;     // whole render px (RenderFrame width, height)
+uniform vec2 uOffset;     // render px of the target's bottom-left pixel (RenderFrame x, y)
 uniform vec2 uComp;       // comp px
 uniform vec2 uPos;        // layer position (comp px, y-up from centre)
 uniform vec2 uRot;        // cos, sin of rotZ (clockwise-positive on screen)
@@ -995,7 +1003,7 @@ uniform vec2 uFrameMin, uFrameSize; // layer units
 uniform int uTaps;
 out vec4 o;
 vec2 toUv(vec2 frag) {
-  vec2 comp = frag / uTarget * uComp - 0.5 * uComp;
+  vec2 comp = (frag + uOffset) / uRender * uComp - 0.5 * uComp;
   vec2 q = (comp - uPos) / uScale;
   vec2 l = vec2(uRot.x * q.x - uRot.y * q.y, uRot.y * q.x + uRot.x * q.y);
   return (l * uFlip - uFrameMin) / uFrameSize;

@@ -113,8 +113,8 @@ export function LettersSection({ layer, src }: { layer: SourceLayer; src: TextSo
             {layer.kind === 'title3d' && (
               <>
                 <NumRow label="Z" id={`${id}:dz`} value={adj.dz ?? 0} min={-100} max={100} step={0.5} unit="%" defaultValue={0} onChange={(v, c) => setAdj({ dz: v }, c, 'Character Z')} title={t('% of font size, + = toward the viewer')} />
-                <NumRow label={t('Rotation X')} id={`${id}:tx`} value={adj.tiltX ?? 0} min={-89} max={89} step={0.5} unit="deg" clamp defaultValue={0} onChange={(v, c) => setAdj({ tiltX: v }, c, 'Character rotation X')} title={t('+ = top toward the viewer')} />
-                <NumRow label={t('Rotation Y')} id={`${id}:ty`} value={adj.tiltY ?? 0} min={-89} max={89} step={0.5} unit="deg" clamp defaultValue={0} onChange={(v, c) => setAdj({ tiltY: v }, c, 'Character rotation Y')} title={t('+ = right side away from the viewer')} />
+                <NumRow label={t('Rotation X')} id={`${id}:tx`} value={adj.tiltX ?? 0} min={-180} max={180} step={0.5} unit="deg" slider={false} defaultValue={0} onChange={(v, c) => setAdj({ tiltX: v }, c, 'Character rotation X')} title={t('+ = top toward the viewer')} />
+                <NumRow label={t('Rotation Y')} id={`${id}:ty`} value={adj.tiltY ?? 0} min={-180} max={180} step={0.5} unit="deg" slider={false} defaultValue={0} onChange={(v, c) => setAdj({ tiltY: v }, c, 'Character rotation Y')} title={t('+ = right side away from the viewer')} />
               </>
             )}
             <NumRow
@@ -125,6 +125,7 @@ export function LettersSection({ layer, src }: { layer: SourceLayer; src: TextSo
               max={180}
               step={0.5}
               unit="deg"
+              slider={false}
               defaultValue={0}
               onChange={(v, c) => setAdj({ rotate: v }, c, layer.kind === 'title3d' ? 'Character rotation Z' : 'Character rotation')}
               title={t('Clockwise on screen')}

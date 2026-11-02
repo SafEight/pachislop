@@ -117,8 +117,8 @@ void main() {
               texture(tSrc, vUv + vec2(-h.x, h.y)) + texture(tSrc, vUv + vec2(h.x, h.y)));
 }`;
 
-// One axis of a Gaussian with a σ per channel (chromatic scatter); zero outside the frame, so
-// light leaves the picture instead of piling up at its edges.
+// One axis of a Gaussian with a σ per channel (chromatic scatter); zero outside the frame (the
+// whole render, uFrameUv), so light leaves the picture instead of piling up at its edges.
 const blurFrag = /* glsl */ `
 uniform sampler2D tSrc; uniform vec2 uDir; uniform vec3 uSigma; uniform int uTaps;
 void main() {
@@ -130,7 +130,7 @@ void main() {
     vec3 w = exp(-f * f * k);
     ws += w;
     vec2 uv = vUv + uDir * f;
-    if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) acc += texture(tSrc, uv).rgb * w;
+    if (uv.x >= uFrameUv.x && uv.x <= uFrameUv.z && uv.y >= uFrameUv.y && uv.y <= uFrameUv.w) acc += texture(tSrc, uv).rgb * w;
   }
   o = vec4(acc / ws, 0.0);
 }`;

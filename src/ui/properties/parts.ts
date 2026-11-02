@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { backplate3D, band3D, material2D, rim2D, solidFill, uid } from '../../model/defaults';
 import { bandKey, parsePartKey, partEffectsOf, plateKey, rimKey, type TitleLayer } from '../../model/parts';
-import type { AnyMaterial } from '../../model/links';
-import type { Backplate3D, Material3D, PartKey, Title3DLayer } from '../../model/types';
-import { msg, type Translate } from '../../store/msg';
+import { withoutLink, type AnyMaterial } from '../../model/links';
+import { sideMaterial, sideNeighbour, sideSource } from '../../model/sides';
+import type { Backplate3D, Material3D, PartKey, Title3DLayer, Title3DProps } from '../../model/types';
+import { formatMsg, msg, type Text, type Translate } from '../../store/msg';
 import { partLabel } from '../../store/labels';
 import { useEditor, type PropRef, type Refs } from '../../store/store';
 import { oneShot } from '../util';
@@ -56,16 +57,79 @@ export function stackPos(l: TitleLayer, key: PartKey): { kind: StackKind; index:
   return index < 0 ? null : { kind, index };
 }
 
-/** The material a part shows (a plate's face material), or null when the part is gone. */
+/** The material a part shows (a plate's face material, a side's inherited one), or null when the part is gone. */
 export function partMaterial(l: TitleLayer, key: PartKey): AnyMaterial | null {
   const { kind } = parsePartKey(key);
   const pos = stackPos(l, key);
   if (l.kind === 'title2d') return pos ? l.style.rims[pos.index].material : kind === 'face' ? l.style.face : null;
   const s = l.style3d;
   if (kind === 'face') return s.face;
-  if (kind === 'side') return s.side;
+  if (kind === 'side') return sideMaterial(s);
   if (!pos) return null;
   return pos.kind === 'band' ? s.bands[pos.index].material : s.backplates[pos.index].face;
+}
+
+/** Whether `key` is a 3D side that follows its neighbour (model/sides.ts). */
+export const isInheritedSide = (l: TitleLayer, key: PartKey): boolean => l.kind === 'title3d' && key === 'side' && !l.style3d.side;
+
+/** What the title's side follows while it has no material of its own: “Same as Band 2” / “Same as face”. */
+export function sideSameAs(l: Title3DLayer): Text {
+  const i = sideSource(l.style3d);
+  return i === null ? msg('Same as face') : msg('Same as {part}', { part: partLabel(l, bandKey(l.style3d.bands[i].id)) });
+}
+
+/** Every 3D title of the project restyled by `fn` (a title it leaves alone: its own style back), one undo step. */
+function editStyles(fn: (l: Title3DLayer) => Title3DProps, label: Text) {
+  useEditor.getState().edit(
+    (p) => ({
+      ...p,
+      layers: p.layers.map((l) => {
+        if (l.kind !== 'title3d') return l;
+        const style3d = fn(l);
+        return style3d === l.style3d ? l : { ...l, style3d };
+      }),
+    }),
+    oneShot('own-side'),
+    label,
+  );
+}
+
+/**
+ * Give the side of every title of `layers` that follows its neighbour an unlinked copy of what it
+ * shows (`own`), or let every one follow its neighbour again; one undo step.
+ */
+export function ownSides(layers: readonly Title3DLayer[], own: boolean) {
+  const ids = new Set(layers.map((l) => l.id));
+  const part = partLabel(layers[0], 'side');
+  editStyles(
+    ({ id, style3d: s }) => {
+      if (!ids.has(id) || !!s.side === own) return s;
+      if (own) return { ...s, side: structuredClone(withoutLink(sideNeighbour(s))) };
+      const { side: _, ...rest } = s;
+      return rest;
+    },
+    own ? msg('Own {part}', { part }) : msg('{part}: {source}', { part, source: sideSameAs(layers[0]) }),
+  );
+}
+
+/** The same for the edges of plates (`index` in each layer's `style3d.backplates`): a copy of the plate's front, or following it again. */
+export function ownPlateSides(plates: readonly { layer: Title3DLayer; index: number }[], own: boolean) {
+  const at = new Map<string, Set<number>>();
+  for (const { layer, index } of plates) at.set(layer.id, (at.get(layer.id) ?? new Set()).add(index));
+  const edge = (p: Backplate3D): Backplate3D => {
+    if (!!p.side === own) return p;
+    if (own) return { ...p, side: structuredClone(withoutLink(p.face)) };
+    const { side: _, ...rest } = p;
+    return rest;
+  };
+  const part = msg('Edge material');
+  editStyles(
+    ({ id, style3d: s }) => {
+      const picked = at.get(id);
+      return picked ? { ...s, backplates: s.backplates.map((p, i) => (picked.has(i) ? edge(p) : p)) } : s;
+    },
+    own ? msg('Own {part}', { part }) : msg('{part}: {source}', { part, source: msg('Same as front') }),
+  );
 }
 
 /** CSS background of a material's swatch (the whole gradient, not just its main colour). */
@@ -95,10 +159,14 @@ export function materialSummary(t: Translate, m: AnyMaterial): string[] {
   return out;
 }
 
-/** One-line summary for the Appearance list, e.g. "Gold · fx 2" / "Linear · bevel 3% · fx 1"; a rim's or band's width is the field on its row (partWidth). */
+/**
+ * One-line summary for the Appearance list, e.g. "Gold · fx 2" / "Linear · bevel 3% · fx 1"; a side
+ * that follows its neighbour says which ("Same as Band 2"); a rim's or band's width is the field
+ * on its row (partWidth).
+ */
 export function partSummary(t: Translate, l: TitleLayer, key: PartKey): string {
   const mat = partMaterial(l, key);
-  const out = mat ? materialSummary(t, mat) : [];
+  const out = l.kind === 'title3d' && isInheritedSide(l, key) ? [formatMsg(sideSameAs(l), t)] : mat ? materialSummary(t, mat) : [];
   const pos = stackPos(l, key);
   if (l.kind === 'title3d' && pos?.kind === 'plate') out.push(`+${pct(l.style3d.backplates[pos.index].grow)}`);
   const fx = partEffectsOf(l, key).length;

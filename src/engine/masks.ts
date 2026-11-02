@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Layer, LayerMask, ShapeSource } from '../model/types';
 import { blur } from '../effects/lib';
 import { shapeCmds } from '../text/shapes';
+import { centreX, centreY, frameKey } from './frame';
 import { version } from './layerSource';
 import type { PassKit } from './passkit';
 import type { Surface } from './surface';
@@ -70,11 +71,11 @@ function maskToComp(layer: Layer, m: LayerMask): Affine {
   return placeAt(t.x, t.y, t.rotZ, t.scale, t.flipX ? -1 : 1, t.flipY ? -1 : 1);
 }
 
-/** Render uv (0..1, origin bottom-left) → comp px of surface `s`. */
-const uvToComp = (s: Surface): Affine => ({ a: s.width / s.scale, b: 0, c: 0, d: s.height / s.scale, e: -s.width / 2 / s.scale, f: -s.height / 2 / s.scale });
+/** Render uv (0..1, origin bottom-left) → comp px of surface `s` (a window of the whole render too). */
+const uvToComp = (s: Surface): Affine => ({ a: s.width / s.scale, b: 0, c: 0, d: s.height / s.scale, e: -centreX(s.ctx.frame) / s.scale, f: -centreY(s.ctx.frame) / s.scale });
 
 /** Comp px → Canvas2D px of a render-sized canvas of `s` (top row first). */
-const compToCanvas = (s: Surface): Affine => ({ a: s.scale, b: 0, c: 0, d: -s.scale, e: s.width / 2, f: s.height / 2 });
+const compToCanvas = (s: Surface): Affine => ({ a: s.scale, b: 0, c: 0, d: -s.scale, e: centreX(s.ctx.frame), f: s.height - centreY(s.ctx.frame) });
 
 const paths = new WeakMap<ShapeSource, Path2D>();
 
@@ -224,7 +225,7 @@ export class Masks {
       const t = layer.transform;
       const place = `${t.x},${t.y},${t.rotZ},${t.scale},${t.flipX ? 1 : 0}${t.flipY ? 1 : 0}`;
       const list: LayerMask[] = [];
-      let key = `${s.width}x${s.height}@${s.scale}`;
+      let key = `${s.width}x${s.height}${frameKey(s.ctx.frame, s.width, s.height)}@${s.scale}`;
       for (const m of layer.masks) {
         if (!m.enabled) continue;
         let part = `|${version(m)}`;
@@ -315,6 +316,13 @@ export class Masks {
     this.touched.clear();
   }
 
+  /** Free the combined masks of pool `kit` (it is being disposed). */
+  release(kit: PassKit) {
+    for (const e of this.entries.get(kit)?.values() ?? []) e.rt.dispose();
+    this.entries.delete(kit);
+    this.touched.delete(kit);
+  }
+
   dispose() {
     for (const pool of this.entries.values()) for (const e of pool.values()) e.rt.dispose();
     this.entries.clear();
@@ -346,7 +354,7 @@ export class Masks {
         u.uDensity.value = 1;
         kit.run(this.combineMat, val);
         if (src.own) kit.release(src.own);
-        const ctx = { renderer: s.ctx.renderer, kit, width: s.width, height: s.height, pxScale: s.scale, layerId: layer.id, comp: s.ctx.project.comp, draft: s.ctx.draft };
+        const ctx = { renderer: s.ctx.renderer, kit, width: s.width, height: s.height, pxScale: s.scale, frame: s.ctx.frame, layerId: layer.id, comp: s.ctx.project.comp, draft: s.ctx.draft };
         const blurred = blur(ctx, val.texture, radius, 'mask');
         kit.release(val);
         src = { tex: blurred.texture, channel: CHANNEL.value, own: null };

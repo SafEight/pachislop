@@ -13,15 +13,24 @@ export const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > h
 /** Render px per layer-space px (the layer transform is a similarity: one scale for both axes). */
 export const pxPerLayer = (m: THREE.Matrix3) => Math.hypot(m.elements[0], m.elements[1]) || 1;
 
-/** The render target's corners in layer space (comp px, +y up), in order around the frame. */
+/**
+ * The WHOLE frame's corners (ctx.frame, not a preview window's target) in layer space (comp px,
+ * +y up), in order around the frame: lines laid out over the frame land the same in a window.
+ */
 export function framePolygon(ctx: GeneratorContext): [number, number][] {
   const inv = ctx.layerToRender.clone().invert();
   const v = new THREE.Vector2();
+  const f = ctx.frame;
+  // The frame's edges in target px (0 − x: +0 for a whole frame, as the target's own corners).
+  const x0 = 0 - f.x;
+  const y0 = 0 - f.y;
+  const x1 = f.width - f.x;
+  const y1 = f.height - f.y;
   return [
-    [0, 0],
-    [ctx.width, 0],
-    [ctx.width, ctx.height],
-    [0, ctx.height],
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
   ].map(([x, y]) => {
     v.set(x, y).applyMatrix3(inv);
     return [v.x, v.y] as [number, number];

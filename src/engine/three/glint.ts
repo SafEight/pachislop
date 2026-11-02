@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import type { RenderFrame } from '../contracts';
+import { centreX, centreY } from '../frame';
 import type { PassKit } from '../passkit';
 
 // Glint for 3D layers (Element 3D "Glow from Luminance", Blender Glare Bloom + Streaks):
@@ -16,7 +18,8 @@ import type { PassKit } from '../passkit';
 //                  corners throw rays; broad faces, their straight edges and long bevel lines
 //                  (bright along one axis) don't, so the rays read as star glints instead of
 //                  curtains.
-//                ─ sum × tint × intensity → level-B glint texture
+//                ─ sum × tint × intensity → glint texture on the whole render's level-B
+//                  lattice (a preview window gets the texels of that lattice covering it)
 //
 // Scale invariance: the threshold is non-linear and the point detector depends on how well
 // a feature is resolved, so both would grow with the export scale if they ran on render
@@ -55,6 +58,26 @@ export interface GlintParams {
   angle: number;
   /** Linear tint. */
   tint: THREE.Color;
+}
+
+/** Glint light (GlintPass.render): sample `texture` at uv = target uv × `uv.xy` + `uv.zw`. */
+export interface GlintLight {
+  texture: THREE.Texture;
+  uv: THREE.Vector4;
+}
+
+/**
+ * One axis of the glint output: the whole render's level-B lattice, `n` texels of `F / n`
+ * render px across the frame (`F` px; a whole render's level-B target), and the run of them
+ * `j0` .. `j0 + count` covering a target `w` px long whose first px is the frame's px `fx`;
+ * `lo` .. `hi` = the run's extent in target px. A whole frame (`fx` = 0, `w` = `F`) gets
+ * exactly its level-B target: j0 = 0, count = n, lo = 0, hi = F.
+ */
+function outLattice(F: number, fx: number, w: number, grid: number) {
+  const n = Math.max(1, Math.ceil(F / grid));
+  const j0 = Math.floor((fx * n) / F);
+  const count = Math.max(1, Math.ceil(((fx + w) * n) / F) - j0);
+  return { n, j0, count, lo: (j0 * F) / n - fx, hi: ((j0 + count) * F) / n - fx };
 }
 
 /** Brightest straight luminance a texel may contribute (keeps tiny HDR sparkles from exploding). */
@@ -188,6 +211,8 @@ export class GlintPass {
   /** Scratch targets keyed `${level}:${slot}`. */
   private readonly rts = new Map<string, THREE.WebGLRenderTarget>();
   private readonly gain = new THREE.Vector3();
+  /** GlintLight.uv of the last render. */
+  private readonly uv = new THREE.Vector4(1, 1, 0, 0);
 
   private readonly kit: PassKit;
 
@@ -215,9 +240,11 @@ export class GlintPass {
   }
 
   private target(level: number, slot: number, width: number, height: number): THREE.WebGLRenderTarget {
-    const w = Math.max(1, Math.ceil(width / 2 ** level));
-    const h = Math.max(1, Math.ceil(height / 2 ** level));
-    const key = `${level}:${slot}`;
+    return this.sized(`${level}:${slot}`, Math.max(1, Math.ceil(width / 2 ** level)), Math.max(1, Math.ceil(height / 2 ** level)));
+  }
+
+  /** Scratch target `key` (`${level}:${slot}`) of `w`×`h` texels. */
+  private sized(key: string, w: number, h: number): THREE.WebGLRenderTarget {
     let rt = this.rts.get(key);
     if (!rt) {
       rt = new THREE.WebGLRenderTarget(w, h, {
@@ -261,14 +288,16 @@ export class GlintPass {
   }
 
   /**
-   * Glint light of the HDR render `src` (premultiplied linear, `width`×`height` render px at
-   * `p.supersample` texels per render px), on the comp-locked glint grid (see the header).
-   * The grid and its mips cover a domain laid out from the canvas centre (the comp centre) in
-   * whole texels of the deepest mip, so every level's texels sit at the same comp px on any
-   * canvas (export margins, an enlarged interactive frame) and halve exactly from level to
-   * level. Returned at the canvas's own uv. Valid until the next call.
+   * Glint light of the HDR render `src` (premultiplied linear: the `width`×`height` render px
+   * of `frame` at `p.supersample` texels per render px), on the comp-locked glint grid (see
+   * the header). The grid and its mips cover a domain laid out from the comp centre in whole
+   * texels of the deepest mip, so every level's texels sit at the same comp px on any canvas
+   * (export margins, an enlarged interactive frame, a preview window) and halve exactly from
+   * level to level. The light comes out on the whole render's level-B lattice (the texels of
+   * it covering the target), so a window samples it where the whole render does. Valid until
+   * the next call.
    */
-  render(src: THREE.Texture, width: number, height: number, p: GlintParams): THREE.Texture {
+  render(src: THREE.Texture, width: number, height: number, frame: RenderFrame, p: GlintParams): GlintLight {
     const { kit } = this;
     // glint grid: level B texels are about one comp px (render px below 1× preview)
     const base = Math.max(0, Math.round(Math.log2(Math.max(1, p.pxScale))));
@@ -291,14 +320,22 @@ export class GlintPass {
       level: levelFor(sigma, MIP_SIGMA / 2),
     }));
     const deepest = Math.max(base, ...bloom.map((b) => b.level), streaking ? sl : base);
-    // the domain: whole deepest-level texels each way from the canvas centre, render px
+    // output texels (whole render's level-B lattice)
+    const lx = outLattice(frame.width, frame.x, width, grid);
+    const ly = outLattice(frame.height, frame.y, height, grid);
+    // the domain: whole deepest-level texels each way from the comp centre (cx, cy) past the
+    // output texels, render px; origin (ox, oy), size W×H
     const cell = 2 ** deepest;
-    const W = 2 * Math.ceil(width / 2 / cell) * cell;
-    const H = 2 * Math.ceil(height / 2 / cell) * cell;
-    const ox = width / 2 - W / 2;
-    const oy = height / 2 - H / 2;
+    const cx = centreX(frame);
+    const cy = centreY(frame);
+    const left = Math.ceil((cx - lx.lo) / cell);
+    const below = Math.ceil((cy - ly.lo) / cell);
+    const W = (left + Math.ceil((lx.hi - cx) / cell)) * cell;
+    const H = (below + Math.ceil((ly.hi - cy) / cell)) * cell;
+    const ox = cx - left * cell;
+    const oy = cy - below * cell;
 
-    const out = this.target(base, 0, width, height);
+    const out = this.sized(`${base}:0`, lx.count, ly.count);
     const brightRT = this.target(base, 1, W, H);
     const ss = Math.max(1, Math.round(p.supersample));
     this.bright.uniforms.tSrc.value = src;
@@ -318,9 +355,9 @@ export class GlintPass {
 
     kit.clear(out);
     const k = Math.max(0, p.intensity);
-    // output uv (the canvas's) → domain uv
-    this.add.uniforms.uScale.value.set(width / W, height / H);
-    this.add.uniforms.uOffset.value.set(-ox / W, -oy / H);
+    // output uv → target px → domain uv
+    this.add.uniforms.uScale.value.set((lx.count * frame.width) / lx.n / W, (ly.count * frame.height) / ly.n / H);
+    this.add.uniforms.uOffset.value.set((lx.lo - ox) / W, (ly.lo - oy) / H);
     const addInto = (tex: THREE.Texture, gain: number) => {
       this.gain.set(p.tint.r, p.tint.g, p.tint.b).multiplyScalar(k * gain);
       this.add.uniforms.tSrc.value = tex;
@@ -366,7 +403,14 @@ export class GlintPass {
         addInto(srcTex, (STREAK_PEAK * kernelSum) / Math.max(1, sigma));
       }
     }
-    return out.texture;
+    // target uv → output uv
+    this.uv.set(
+      (width * lx.n) / (frame.width * lx.count),
+      (height * ly.n) / (frame.height * ly.count),
+      ((frame.x * lx.n) / frame.width - lx.j0) / lx.count,
+      ((frame.y * ly.n) / frame.height - ly.j0) / ly.count,
+    );
+    return { texture: out.texture, uv: this.uv };
   }
 
   dispose() {

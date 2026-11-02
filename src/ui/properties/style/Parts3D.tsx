@@ -1,6 +1,7 @@
 import { useRef } from 'react';
-import type { Backplate3D, BevelProfile3D, Glint3D, PlateShape, Title3DLayer, Title3DProps } from '../../../model/types';
+import type { Backplate3D, BevelProfile3D, Glint3D, Material3D, PlateShape, Title3DLayer, Title3DProps } from '../../../model/types';
 import { bandKey } from '../../../model/parts';
+import { sideMaterial } from '../../../model/sides';
 import { partLabel } from '../../../store/labels';
 import { formatMsg } from '../../../store/msg';
 import { refKey } from '../../../store/paths';
@@ -13,9 +14,9 @@ import { BevelPreview } from './BevelPreview';
 import { CurveEditor } from './CurveEditor';
 import { PlateIcon, Profile3DIcon } from './icons';
 import { Material3DSection } from './Material3DEditor';
-import { refsOf } from '../parts';
-import { sub, tOpts } from './shared';
-import { IconChoice } from './widgets';
+import { ownPlateSides, ownSides, refsOf, sideSameAs } from '../parts';
+import { material3DCss, sub, tOpts } from './shared';
+import { IconChoice, SwatchTitle } from './widgets';
 
 // Element 3D replacement split by part: the face, the side walls, each bevel band and each
 // backplate get their own editor (Properties › part node). What belongs to no part sits on the
@@ -323,13 +324,54 @@ export function Face3DEditor({ layers, id = 'part' }: { layers: readonly Title3D
   );
 }
 
-/** The straight side walls of the extrusion: their material, then their depth (shown in the cross-section of a single title). */
+/**
+ * A side material that follows its neighbour (model/sides.ts), in place of its editor: the
+ * section names what it follows over its swatch, and Own gives it a copy to edit on its own.
+ */
+function InheritedMaterial({ id, title, sameAs, mat, onOwn }: { id: string; title: string; sameAs: string; mat: Material3D; onOwn: () => void }) {
+  const t = useT();
+  return (
+    <Section
+      id={id}
+      defaultOpen
+      title={
+        <SwatchTitle css={material3DCss(mat)}>
+          {title} <span className="muted">· {sameAs}</span>
+        </SwatchTitle>
+      }
+    >
+      <Row label={title} title={t('{source}: editing that material changes this one too. Own gives this one a copy to edit on its own.', { source: sameAs })}>
+        <span className="muted">{sameAs}</span>
+        <button className="small" onClick={onOwn}>
+          {t('Own')}
+        </button>
+      </Row>
+    </Section>
+  );
+}
+
+/**
+ * The straight side walls of the extrusion: their material (what they follow while they have
+ * none of their own, with Own), then their depth (shown in the cross-section of a single title).
+ */
 export function SideEditor({ layers, id = 'part' }: { layers: readonly Title3DLayer[]; id?: string }) {
   const t = useT();
   const st = layers[0].style3d;
+  const inherited = layers.filter((l) => !l.style3d.side);
+  const sameAs = new Set(inherited.map((l) => formatMsg(sideSameAs(l), t)));
   return (
     <>
-      <Material3DSection id={`${id}-material`} title={t('Material')} refp={styleRefs(layers, 'side')} mat={st.side} defaultOpen />
+      {inherited.length ? (
+        <InheritedMaterial
+          id={`${id}-material`}
+          title={t('Material')}
+          sameAs={sameAs.size === 1 && inherited.length === layers.length ? [...sameAs][0] : t('Same as its neighbour on {n} of {total} layers', { n: inherited.length, total: layers.length })}
+          mat={sideMaterial(inherited[0].style3d)}
+          onOwn={() => ownSides(inherited, true)}
+        />
+      ) : (
+        <Material3DSection id={`${id}-material`} title={t('Material')} refp={styleRefs(layers, 'side')} mat={sideMaterial(st)} defaultOpen />
+      )}
       <Section id={`${id}-geometry`} title={t('Geometry')}>
         {layers.length === 1 && <BevelPreview st={st} activeSide />}
         {layers.some((l) => l.style3d.mode === 'inflate') && <div className="hint-line">{t('Inflate mode: the side wall is the inflated rim, its depth still applies.')}</div>}
@@ -382,10 +424,27 @@ export function PlateEditor({ plates, id = 'part' }: { plates: readonly Stack3DT
   const profile = useRefValue(sub(refp, 'bevel', 'profile'));
   const kind = shape.mixed ? null : (shape.value as PlateShape['kind']);
   const hidden = plates.length === 1 ? plateHidden(plate) : null;
+  const inheritedEdges = plates.filter((p) => !p.layer.style3d.backplates[p.index].side);
   return (
     <>
       <Material3DSection id={`${id}-material`} title={t('Front material')} refp={sub(refp, 'face')} mat={plate.face} defaultOpen note={hidden ? t(hidden) : undefined} />
-      <Material3DSection id={`${id}-material-edge`} title={t('Edge material')} refp={sub(refp, 'side')} mat={plate.side} defaultOpen />
+      {inheritedEdges.length ? (
+        <InheritedMaterial
+          id={`${id}-material-edge`}
+          title={t('Edge material')}
+          sameAs={inheritedEdges.length === plates.length ? t('Same as front') : t('Same as front on {n} of {total} plates', { n: inheritedEdges.length, total: plates.length })}
+          mat={plate.face}
+          onOwn={() => ownPlateSides(inheritedEdges, true)}
+        />
+      ) : (
+        <Material3DSection id={`${id}-material-edge`} title={t('Edge material')} refp={sub(refp, 'side')} mat={plate.side ?? plate.face} defaultOpen>
+          <Row label={t('Edge material')} title={t('The edge follows the front material again')}>
+            <button className="small" onClick={() => ownPlateSides(plates, false)}>
+              ✕ {t('Same as front')}
+            </button>
+          </Row>
+        </Material3DSection>
+      )}
       <Section id={`${id}-geometry`} title={t('Geometry')}>
         {plates.length === 1 && <BevelPreview st={st} activePlate={index} />}
         <RefNum label={t('Grow')} refp={sub(refp, 'grow')} min={0} max={15} step={0.05} unit="%" title={t('Outline growth beyond the previous plate')} />

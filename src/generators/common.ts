@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import type { EffectParams, GeneratorContext, ParamDef, PassContext } from '../engine/contracts';
 import type { EffectInstance, ParamValue } from '../model/types';
 import type { PassKit } from '../engine/passkit';
+import { centreX, centreY } from '../engine/frame';
 import { blur } from '../effects/lib';
 
 // Shared GPU helpers for generators. Output follows the pass contract (passkit.ts): premultiplied
 // linear RGBA, render pixels with the origin at the target's bottom-left.
 
 /** What the drawing helpers need of a GeneratorContext or an EffectContext. */
-export type GpuContext = Pick<GeneratorContext, 'renderer' | 'kit' | 'width' | 'height' | 'pxScale'>;
+export type GpuContext = Pick<GeneratorContext, 'renderer' | 'kit' | 'width' | 'height' | 'pxScale' | 'frame'>;
 
 /**
  * Seeded PRNG (mulberry32): a function returning numbers in [0, 1). Any seed works (fractional and
@@ -69,11 +70,12 @@ export function setLayerUniforms(u: LayerUniforms, ctx: GpuContext, toRender: TH
 }
 
 /**
- * Comp space (comp px, origin at the canvas centre, +y up) → render px of `ctx`, written into
- * `out`: the `toRender` of effects, which have no layer transform.
+ * Comp space (comp px, origin at the canvas centre, +y up) → render px of `ctx`'s target (the comp
+ * centre at centreX/Y of its frame), written into `out`: the `toRender` of effects, which have no
+ * layer transform.
  */
 export function compToRender(ctx: GpuContext, out = new THREE.Matrix3()): THREE.Matrix3 {
-  return out.set(ctx.pxScale, 0, ctx.width / 2, 0, ctx.pxScale, ctx.height / 2, 0, 0, 1);
+  return out.set(ctx.pxScale, 0, centreX(ctx.frame), 0, ctx.pxScale, centreY(ctx.frame), 0, 0, 1);
 }
 
 /** Clear `target` to transparent. */
@@ -109,6 +111,8 @@ const offsetMat = new THREE.Matrix3();
  * Draw a follow generator whose `draw` renders in comp space (where the followed layer is, as the
  * effect it replaced did) and place it by its own transform: at the identity transform `draw`
  * writes straight into `target`, else into a scratch target resampled through `followOffset`.
+ * The scratch is the target's own size: on a preview window, what the offset moves in from past
+ * the window's edges is missing.
  */
 export function drawFollowed(ctx: GeneratorContext, target: THREE.WebGLRenderTarget, draw: (out: THREE.WebGLRenderTarget) => void) {
   const off = followOffset(ctx, offsetMat);

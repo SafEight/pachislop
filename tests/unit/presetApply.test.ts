@@ -9,7 +9,7 @@ import type { StylePreset } from '../../src/presets/types';
 const rims = (ids: string[]) => ids.map((id) => rim2D(2, material2D(solidFill('#000000')), { id }));
 const glow = (tag: string): EffectInstance => ({ id: tag, type: 'outerGlow', enabled: true, params: { tag } }) as EffectInstance;
 const tagsOf = (list: EffectInstance[] | undefined) => (list ?? []).map((e) => e.params.tag);
-const proj = (layers: Layer[], comp: Comp = defaultComp()): Project => ({ version: 9, name: 'T', comp, layers });
+const proj = (layers: Layer[], comp: Comp = defaultComp()): Project => ({ version: 10, name: 'T', comp, layers });
 
 function title2d(rimIds: string[]): Title2DLayer {
   const l = createTitle2DLayer('A');

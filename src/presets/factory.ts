@@ -210,21 +210,6 @@ interface Look3D {
   fontId?: string;
 }
 
-/**
- * A 3D look's obvious repeats as material links, so they are one material to edit: each plate
- * whose front and edge are the same material ('plate<i>'). Links the look sets itself stay (the
- * rainbow glass look's gold tubes are one "gold"). Colourways paint a plate's front and edge
- * alike, so they stay equal there too.
- */
-function linkPlates(s: Title3DProps): Title3DProps {
-  const backplates = s.backplates.map((p, i) => {
-    if (p.face.link || p.side.link || JSON.stringify(p.face) !== JSON.stringify(p.side)) return p;
-    const link = `plate${i}`;
-    return { ...p, face: { ...p.face, link }, side: { ...p.side, link } };
-  });
-  return { ...s, backplates };
-}
-
 const p3 = (l: Look3D): StylePreset => {
   const { mode, inflate, envLock } = createTitle3DLayer().style3d;
   return {
@@ -232,7 +217,7 @@ const p3 = (l: Look3D): StylePreset => {
     name: l.name,
     group: l.group,
     kind: 'title3d',
-    style3d: linkPlates({ mode, inflate, envLock, skew: { x: 0, y: 0 }, ao: ao3D(), bevelPosition: 'outside', faceImage: 1, edgeImage: 0, ...l.style3d, lighting: fullLighting(l.lighting) }),
+    style3d: { mode, inflate, envLock, skew: { x: 0, y: 0 }, ao: ao3D(), bevelPosition: 'outside', faceImage: 1, edgeImage: 0, ...l.style3d, lighting: fullLighting(l.lighting) },
     effects: l.effects ?? [],
     partEffects: {},
     refSize: REF,
@@ -1278,7 +1263,7 @@ function band(width: number, depth: number, material: Material3D, profile: Bevel
 
 function plate(grow: number, preset: P3, o: Partial<Backplate3D> = {}, mo: Partial<Material3D> = {}): Backplate3D {
   const b = backplate3D(grow, preset);
-  return { ...b, bevel: { ...b.bevel, width: 0.6, depth: 0.6 }, face: { ...b.face, ...mo }, side: { ...b.side, ...mo }, ...o };
+  return { ...b, bevel: { ...b.bevel, width: 0.6, depth: 0.6 }, face: { ...b.face, ...mo }, ...o };
 }
 
 /** Black lacquer under-plate whose gloss stays dark at grazing angles (no silver rim line). */
@@ -1746,7 +1731,6 @@ const liquidChrome3D: StylePreset = (() => {
       curveSegments: 12,
       face: chrome,
       bands: [],
-      side: chrome,
       backplates: [],
       shadow: shadow3D(),
       glint: glint3D(),
@@ -1827,7 +1811,6 @@ const rainbowGlassGold3D: StylePreset = (() => {
     depth: 1,
     bevel: { width: grow, depth: profile === 'tube' ? grow / 2 : grow, profile, segments: 16, curve: 0 },
     face: material,
-    side: material,
   });
   const look = p3({
     id: 'f-3d-rainbow-glass-gold',
@@ -1840,9 +1823,8 @@ const rainbowGlassGold3D: StylePreset = (() => {
       curveSegments: 12,
       face: candy,
       bands: [],
-      side: candy,
-      // the two gold tubes (front and edge: 4 materials) are one "Gold"; the cream edge one "Cream"
-      backplates: [tube(1.6, { ...cream, link: 'cream' }), tube(3.2, { ...gold, link: 'gold' }), tube(0.45, darkMetal('#2a1200')), tube(1.4, { ...gold, link: 'gold' }), tube(1.33, m3('blackGloss', { reflectivity: 0.35 }), 'round')],
+      // the two gold tubes are one "Gold"
+      backplates: [tube(1.6, cream), tube(3.2, { ...gold, link: 'gold' }), tube(0.45, darkMetal('#2a1200')), tube(1.4, { ...gold, link: 'gold' }), tube(1.33, m3('blackGloss', { reflectivity: 0.35 }), 'round')],
       shadow: shadow3D(),
       glint: glint3D(),
     },
@@ -1868,7 +1850,7 @@ const rainbowGlassGold3D: StylePreset = (() => {
       exposure: 1,
     },
   });
-  return { ...look, links: { gold: { name: 'Gold' }, cream: { name: 'Cream' } } };
+  return { ...look, links: { gold: { name: 'Gold' } } };
 })();
 
 // ======================================================================================
@@ -1913,7 +1895,6 @@ export function orbLook(finish: OrbFinish, colourway: Colourway): StylePreset {
       curveSegments: 10,
       face,
       bands: [band(1, 1.2, structuredClone(face), 'round')],
-      side: structuredClone(face),
       backplates: [bezel],
       shadow: shadow3D(),
       glint: glint3D(),

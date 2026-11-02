@@ -297,6 +297,17 @@ gemBehind = gemK;
 return vec4( max( gemS.rgb - ( 1.0 - gemK ), vec3( 0.0 ) ), gemK );
 `;
 
+/**
+ * Rough gems blur what is behind them by sampling the transmission buffer's mip at
+ * log2(buffer width) × roughness: the buffer is the render target, so a preview window
+ * (narrower than the whole render, contracts.ts RenderFrame) scales its width up to the whole
+ * frame's (`uFrameSpan` = frame width / target width, 1 for a whole render).
+ */
+const TRANSMISSION_SIZE_FROM = 'uniform vec2 transmissionSamplerSize;';
+const TRANSMISSION_SIZE_TO = 'uniform vec2 transmissionSamplerSize;\n\tuniform float uFrameSpan;';
+const TRANSMISSION_LOD_FROM = 'float lod = log2( transmissionSamplerSize.x ) *';
+const TRANSMISSION_LOD_TO = 'float lod = log2( transmissionSamplerSize.x * uFrameSpan ) *';
+
 // after <normal_pars_fragment> (needs vNormal)
 const SURFACE_DECL = /* glsl */ `
 #include <normal_pars_fragment>
@@ -592,6 +603,7 @@ interface PartUniforms {
   uSurface: THREE.IUniform<THREE.Vector4>;
   uViewport: THREE.IUniform<THREE.Vector2>;
   uProjK: THREE.IUniform<THREE.Vector4>;
+  uFrameSpan: THREE.IUniform<number>;
   uFaceTex: THREE.IUniform<THREE.Texture | null>;
   uFaceBox: THREE.IUniform<THREE.Vector4>;
   uFaceMix: THREE.IUniform<THREE.Vector2>;
@@ -621,6 +633,7 @@ export function createPartMaterial(): PartMaterial {
     uSurface: { value: new THREE.Vector4(0, 1, 0, 0) },
     uViewport: { value: new THREE.Vector2(1, 1) },
     uProjK: { value: new THREE.Vector4(1, 1, 0, 0) },
+    uFrameSpan: { value: 1 },
     uFaceTex: { value: null },
     uFaceBox: { value: new THREE.Vector4(-1, -1, 1, 1) },
     uFaceMix: { value: new THREE.Vector2(0, 0.5) },
@@ -639,7 +652,13 @@ export function createPartMaterial(): PartMaterial {
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_DECL}`)
       .replace('#include <cube_uv_reflection_fragment>', cubeUvChunk(true))
-      .replace('#include <transmission_pars_fragment>', THREE.ShaderChunk.transmission_pars_fragment.replace(TRANSMISSION_SAMPLE_FROM, TRANSMISSION_SAMPLE_TO))
+      .replace(
+        '#include <transmission_pars_fragment>',
+        THREE.ShaderChunk.transmission_pars_fragment
+          .replace(TRANSMISSION_SAMPLE_FROM, TRANSMISSION_SAMPLE_TO)
+          .replace(TRANSMISSION_SIZE_FROM, TRANSMISSION_SIZE_TO)
+          .replace(TRANSMISSION_LOD_FROM, TRANSMISSION_LOD_TO),
+      )
       .replace('#include <normal_pars_fragment>', SURFACE_DECL)
       .replace('#include <map_fragment>', FRAG_MAP)
       .replace('#include <emissivemap_fragment>', FRAG_EMISSIVE)
@@ -657,7 +676,7 @@ export function createPartMaterial(): PartMaterial {
   };
   // three keys programs by their defines too (USE_FACEIMAGE, FACEIMAGE_EDGE, ...); compressHdrOutput
   // snapshots this key, so it names the patch source version only
-  m.customProgramCacheKey = () => 'pachi-part-v11';
+  m.customProgramCacheKey = () => 'pachi-part-v12';
   m.iridescenceIOR = 1.6;
   m.iridescenceThicknessRange = [180, 520];
   return compressHdrOutput(m);
@@ -688,6 +707,8 @@ export interface PartSpace {
   size: number;
   /** Render target size, px. */
   viewport: THREE.Vector2;
+  /** Whole render width / render target width: 1 unless the target is a preview window (contracts.ts RenderFrame). */
+  frameSpan: number;
 }
 
 /** A picture projected straight on (Title3DProps.faceImage / edgeImage, header 2b). */
@@ -889,6 +910,7 @@ export function applyMaterial3D(m: PartMaterial, mat: Material3D, env: EnvState,
   u.uLayerInv.value.copy(space.layerInverse);
   u.uLayerRot.value.copy(space.layerRot);
   u.uViewport.value.copy(space.viewport);
+  u.uFrameSpan.value = space.frameSpan;
   u.uEnvBlur.value = clamp01(env.blur);
   setRepeat(u.uEnvRepeat, env);
 

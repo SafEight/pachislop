@@ -10,7 +10,7 @@ import { partEnabled, partHasEye } from '../layers/parts';
 import { SectionScope } from '../sectionMemory';
 import { useRefValue } from '../util';
 import { EffectStack } from './EffectCard';
-import { addPart, canMovePart, duplicatePart, movePart, partScope, refsOf, removePart, stackPos, usePartPage } from './parts';
+import { addPart, canMovePart, duplicatePart, isInheritedSide, movePart, ownSides, partScope, refsOf, removePart, sideSameAs, stackPos, usePartPage } from './parts';
 import { Material3DSection } from './style/Material3DEditor';
 import { Face2DEditor, PartMaterial2D, RimEditor, type RimTarget } from './style/Parts2D';
 import { BandEditor, Face3DEditor, PlateEditor, SideEditor, type Stack3DTarget } from './style/Parts3D';
@@ -63,9 +63,37 @@ export function PartEye({ layer, part }: { layer: TitleLayer; part: PartKey }) {
   );
 }
 
-/** Reorder (↑ toward the face, ↓ outward), duplicate and remove a rim / band / plate; nothing for face and side. */
+/**
+ * Reorder (↑ toward the face, ↓ outward), duplicate and remove a rim / band / plate; on a 3D side,
+ * Own while it follows its neighbour, ✕ (back to following it) while it has its own material;
+ * nothing for the face.
+ */
 export function PartActions({ layer, part }: { layer: TitleLayer; part: PartKey }) {
   const t = useT();
+  if (layer.kind === 'title3d' && part === 'side') {
+    const name = formatMsg(partLabel(layer, part), t);
+    const sameAs = formatMsg(sideSameAs(layer), t);
+    return (
+      <span className="part-actions">
+        {isInheritedSide(layer, part) ? (
+          <button
+            className="small"
+            title={t('Give {part} its own copy of the material it follows ({source}), to edit on its own', { part: name, source: sameAs })}
+            onClick={(e) => {
+              e.stopPropagation();
+              ownSides([layer], true);
+            }}
+          >
+            {t('Own')}
+          </button>
+        ) : (
+          <IconBtn title={sameAs} onClick={() => ownSides([layer], false)}>
+            ✕
+          </IconBtn>
+        )}
+      </span>
+    );
+  }
   return (
     <span className="part-actions">
       {stackPos(layer, part) && (
@@ -130,12 +158,13 @@ export interface PartTarget {
   part: PartKey;
 }
 
-/** Where the material a part shows first lives: the 2D face / a rim's, the 3D face / side / a band's, a plate's front; null for a missing part. */
+/** Where the material a part shows first lives: the 2D face / a rim's, the 3D face / own side / a band's, a plate's front; null for a missing part or a side that follows its neighbour. */
 function materialPath(layer: TitleLayer, part: PartKey): (string | number)[] | null {
   const kind = parsePartKey(part).kind;
   const index = stackPos(layer, part)?.index ?? -1;
   if (layer.kind === 'title2d') return kind === 'face' ? ['style', 'face'] : index >= 0 ? ['style', 'rims', index, 'material'] : null;
-  if (kind === 'face' || kind === 'side') return ['style3d', kind];
+  if (kind === 'face') return ['style3d', 'face'];
+  if (kind === 'side') return layer.style3d.side ? ['style3d', 'side'] : null;
   if (index < 0) return null;
   return kind === 'band' ? ['style3d', 'bands', index, 'material'] : ['style3d', 'backplates', index, 'face'];
 }
@@ -168,23 +197,24 @@ export function PartEditor({ targets, id }: { targets: readonly PartTarget[]; id
     if (!stack.length) return null;
     return kind === 'band' ? <BandEditor bands={stack} id={id} /> : <PlateEditor plates={stack} id={id} />;
   }
-  const refs = flat.flatMap(({ layer, part }): PropRef[] => {
+  const refs = flat.flatMap(({ layer, part }) => {
     const path = materialPath(layer, part);
-    return path ? [{ layerId: layer.id, path }] : [];
+    return path ? [{ layer, ref: { layerId: layer.id, path } satisfies PropRef }] : [];
   });
   if (!refs.length) return null;
-  const first = getIn(flat[0].layer, refs[0].path);
+  const first = getIn(refs[0].layer, refs[0].ref.path);
+  const refp = refsOf(refs.map((r) => r.ref));
   const prefix = id ?? 'part';
   const note = <div className="hint-line">{t('Parts of different kinds share only their material (a plate’s front).')}</div>;
   return in2D.length ? (
     <>
       {note}
-      <PartMaterial2D id={`${prefix}-material`} refp={refsOf(refs)} mat={first as Material2D} />
+      <PartMaterial2D id={`${prefix}-material`} refp={refp} mat={first as Material2D} />
     </>
   ) : (
     <>
       {note}
-      <Material3DSection id={`${prefix}-material`} title={t('Material')} refp={refsOf(refs)} mat={first as Material3D} defaultOpen />
+      <Material3DSection id={`${prefix}-material`} title={t('Material')} refp={refp} mat={first as Material3D} defaultOpen />
     </>
   );
 }

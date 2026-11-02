@@ -158,7 +158,9 @@ export interface CharAdjust {
   face3d?: Material3D;
   /**
    * 3D only: this glyph's bevel band materials (index-aligned with `style3d.bands`; a missing
-   * entry = the layer's band) and side material, so a white 元祖 loses the gold bands too.
+   * entry = the layer's band) and side material, so a white 元祖 loses the gold bands too. An
+   * absent `side3d` follows the glyph's neighbour (model/sides.ts: the layer's own side, else the
+   * glyph's outermost band, else its face).
    */
   bands3d?: (Material3D | null)[];
   side3d?: Material3D;
@@ -803,7 +805,8 @@ export interface Backplate3D {
   zGap: number;
   bevel: BevelShape3D;
   face: Material3D;
-  side: Material3D;
+  /** Edge material; absent = the same as `face` (model/sides.ts). */
+  side?: Material3D;
 }
 
 /** Shadow catcher (Element 3D "Matte Shadow"): an invisible plane that only receives the title's shadow. */
@@ -892,7 +895,8 @@ export interface Title3DProps {
    * Backplates grow from the outermost band edge, so they never overlap the bands.
    */
   bevelPosition: 'outside' | 'center' | 'inside';
-  side: Material3D;
+  /** Side-wall material; absent = the same as the outermost band, or the face without bands (model/sides.ts). */
+  side?: Material3D;
   backplates: Backplate3D[];
   shadow: Shadow3D;
   glint: Glint3D;
@@ -1242,7 +1246,7 @@ export interface Comp {
 }
 
 export interface Project {
-  version: 9;
+  version: 10;
   name: string;
   comp: Comp;
   /** Index 0 is the BOTTOM layer; last is drawn on top. */

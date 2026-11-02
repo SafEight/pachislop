@@ -81,7 +81,7 @@ void main() {
   vec4 L = texture(tSrc, vUv);
   if (L.a < 1e-5) { o = L; return; }
   // Grain cells in comp px: the same grain at every export scale.
-  vec2 q = (gl_FragCoord.xy - 0.5 * uRes) / uPx / uSize;
+  vec2 q = (gl_FragCoord.xy - uCentre) / uPx / uSize;
   vec3 n = uColor ? vec3(grain(q, uSeed), grain(q, uSeed + 17.0), grain(q, uSeed + 31.0)) : vec3(grain(q, uSeed));
   vec3 lin = unpremul(L);
   float hdr = max(max(lin.r, max(lin.g, lin.b)), 1.0);
@@ -103,6 +103,7 @@ const grain: EffectDef = {
     pBool('color', 'Colour grain', false),
     pNum('seed', 'Seed', 1, 0, 999, 1),
   ],
+  gather: () => 0,
   apply(ctx, input, output, p) {
     pass(
       ctx,
@@ -154,6 +155,8 @@ const keyline: EffectDef = {
     pFollow(),
   ],
   reach: (p) => num(p, 'width'),
+  // the edge distance out to the width (+1 px antialiasing)
+  gather: (p) => num(p, 'width') + 1,
   apply(ctx, input, output, p) {
     const field = sdf(ctx, followed(ctx, input, p), num(p, 'threshold'));
     pass(

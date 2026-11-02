@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { EffectParams, ParamDef, PassContext } from '../../engine/contracts';
+import { centreX, centreY } from '../../engine/frame';
 import type { PassKit } from '../../engine/passkit';
 import type { Gradient } from '../../model/types';
 
@@ -76,12 +77,14 @@ export function material(
 const COMMON_UNIFORMS = () => ({
   uRes: { value: new THREE.Vector2(1, 1) },
   uPx: { value: 1 },
+  uCentre: { value: new THREE.Vector2(0.5, 0.5) },
 });
 
-/** Set the common uniforms (render size, px scale) on a material made by `material()`. */
+/** Set the common uniforms (target size, px scale, comp centre on the target) on a material made by `material()`. */
 export function common(m: THREE.ShaderMaterial, ctx: PassContext) {
   m.uniforms.uRes.value.set(ctx.width, ctx.height);
   m.uniforms.uPx.value = ctx.pxScale;
+  m.uniforms.uCentre.value.set(centreX(ctx.frame), centreY(ctx.frame));
   return m;
 }
 
@@ -105,11 +108,14 @@ export function floatRT(key: string, w: number, h: number) {
 
 // ---------- GLSL chunks ----------
 
-/** Common uniforms + helpers. `compPos()` = comp px, origin centre, +y up. */
+/**
+ * Common uniforms + helpers. `uRes` = target size, `uCentre` = the comp centre in target px
+ * (see RenderFrame), `compPos()` = comp px, origin centre, +y up.
+ */
 export const HEAD = /* glsl */ `
-uniform vec2 uRes; uniform float uPx;
+uniform vec2 uRes; uniform float uPx; uniform vec2 uCentre;
 in vec2 vUv; out vec4 o;
-vec2 compPos() { return (gl_FragCoord.xy - 0.5 * uRes) / uPx; }
+vec2 compPos() { return (gl_FragCoord.xy - uCentre) / uPx; }
 vec3 unpre(vec4 c) { return c.a > 1e-5 ? c.rgb / c.a : vec3(0.0); }
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 // Additive light encoded into premultiplied alpha so it survives export on transparent bg.
@@ -153,7 +159,7 @@ void main() {
   o = vec4(sumA / n, max(sumL / n, 0.0), 0.0, 1.0);
 }`;
 
-/** Cells a readGrid lattice extends each way from the canvas centre come in multiples of this (see readGrid). */
+/** Cells a readGrid lattice extends each way from the comp centre come in multiples of this (see readGrid). */
 const GRID_ALIGN = 16;
 
 export interface Grid {
@@ -163,10 +169,10 @@ export interface Grid {
   cell: number;
   /** Cell size in comp px. */
   cellComp: number;
-  /** Lower-left corner of cell (0, 0), comp px about the canvas (comp) centre, y-up: a multiple of GRID_ALIGN cells. */
+  /** Lower-left corner of cell (0, 0), comp px about the comp centre, y-up: a multiple of GRID_ALIGN cells. */
   x0: number;
   y0: number;
-  /** The same corner in render px from the canvas's lower-left corner (≤ 0). */
+  /** The same corner in target px from the target's lower-left corner (≤ 0; far below on a window of the render). */
   px0: number;
   py0: number;
   /** Mean alpha per cell (row 0 = bottom). */
@@ -182,10 +188,12 @@ const lastGrids = new Map<string, Grid>();
  * Box-average `src` into a grid of `cellCompPx` comp-px cells and read it back to the CPU.
  * Cells are fixed in comp space and hold means, so the grid is (up to resampling) the same at
  * every render scale: placements derived from it don't move between preview and 2× export.
- * The lattice is laid out from the canvas centre (the comp centre) in whole blocks of
- * GRID_ALIGN cells, so a larger canvas (an export's margins, an enlarged interactive frame)
- * only adds cells around the same ones. Used for placing sprites/bolts; stalls the GPU once,
- * keep grids small.
+ * The lattice is laid out from the comp centre over the whole frame (RenderFrame, not just a
+ * window of it) in whole blocks of GRID_ALIGN cells, so a larger canvas (an export's margins,
+ * an enlarged interactive frame) only adds cells around the same ones, and a window reads the
+ * very grid of its whole render: cells past the target read as empty, which is what the whole
+ * render measures there as long as `src`'s ink lies inside the window. Used for placing
+ * sprites/bolts; stalls the GPU once, keep grids small.
  *
  * `site` names the call site (one per effect use). Draft frames (ctx.draft, during drags and
  * scrubs) skip the readback, the GPU sync that dominates an interactive frame, and reuse the
@@ -194,12 +202,13 @@ const lastGrids = new Map<string, Grid>();
 export function readGrid(ctx: PassContext, src: THREE.Texture, cellCompPx: number, site: string): Grid {
   const { kit } = ctx;
   const cell = cellCompPx * ctx.pxScale;
-  const nx = Math.max(1, Math.ceil(ctx.width / 2 / cell / GRID_ALIGN - 1e-6)) * GRID_ALIGN;
-  const ny = Math.max(1, Math.ceil(ctx.height / 2 / cell / GRID_ALIGN - 1e-6)) * GRID_ALIGN;
+  const f = ctx.frame;
+  const nx = Math.max(1, Math.ceil(f.width / 2 / cell / GRID_ALIGN - 1e-6)) * GRID_ALIGN;
+  const ny = Math.max(1, Math.ceil(f.height / 2 / cell / GRID_ALIGN - 1e-6)) * GRID_ALIGN;
   const w = 2 * nx;
   const h = 2 * ny;
-  const px0 = ctx.width / 2 - nx * cell;
-  const py0 = ctx.height / 2 - ny * cell;
+  const px0 = centreX(f) - nx * cell;
+  const py0 = centreY(f) - ny * cell;
   const key = `${ctx.layerId}|${site}|${cellCompPx}`;
   const last = lastGrids.get(key);
   // Same comp-space grid (draft 3D frames render at a lower pxScale): only the render-px cell differs.

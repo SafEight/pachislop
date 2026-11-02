@@ -1,3 +1,4 @@
+import { sameValue } from '../model/equal';
 import type { Project } from '../model/types';
 import type { PropRef, Refs } from './store';
 
@@ -48,19 +49,6 @@ export const refList = (r: Refs): readonly PropRef[] => (isList(r) ? r : [r]);
 
 /** Whether `r` names more than one target. */
 export const isMultiRef = (r: Refs): boolean => isList(r) && r.length > 1;
-
-/** Structural equality of plain data (numbers, strings, arrays, objects). */
-export function sameValue(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
-  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  if (ka.length !== kb.length) return false;
-  const ra = a as Record<string, unknown>;
-  const rb = b as Record<string, unknown>;
-  return ka.every((k) => k in rb && sameValue(ra[k], rb[k]));
-}
 
 /**
  * The value at `ref`. Over several targets: their value when they all hold an equal one (the

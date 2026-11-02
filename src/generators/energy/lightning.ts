@@ -18,10 +18,17 @@ interface Edge {
 /** Cell size of the lightning edge grid, comp px. */
 const EDGE_CELL = 6;
 
-/** Edge cells of the followed layer's alpha grid with outward normals (render px). */
+/**
+ * Edge cells of the followed layer's alpha grid with outward normals, in render px of the WHOLE
+ * frame (origin at its bottom-left, not the target's): the arcs are laid out there, so a preview
+ * window walks the very same edge cells as the whole render; drawBolts maps them to the target.
+ */
 function findEdges(ctx: PassContext, content: THREE.Texture): Edge[] {
   const g = readGrid(ctx, content, EDGE_CELL, 'lightning');
-  const { w, h, alpha, cell, px0, py0 } = g;
+  const { w, h, alpha, cell } = g;
+  // Cell (0, 0)'s corner in whole-frame px: readGrid's px0 / py0 on a whole frame.
+  const px0 = ctx.frame.width / 2 - (-g.x0 / g.cellComp) * cell;
+  const py0 = ctx.frame.height / 2 - (-g.y0 / g.cellComp) * cell;
   const at = (x: number, y: number) => alpha[Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))];
   const edges: Edge[] = [];
   for (let y = 0; y < h; y++)
@@ -104,8 +111,8 @@ function bolt(
 }
 
 const lineVert = /* glsl */ `
-in float aAcross; in float aInt; out float vA; out float vI; uniform vec2 uRes;
-void main() { vA = aAcross; vI = aInt; gl_Position = vec4(position.xy / uRes * 2.0 - 1.0, 0.0, 1.0); }`;
+in float aAcross; in float aInt; out float vA; out float vI; uniform vec2 uRes, uOff;
+void main() { vA = aAcross; vI = aInt; gl_Position = vec4((position.xy - uOff) / uRes * 2.0 - 1.0, 0.0, 1.0); }`;
 const lineFrag = /* glsl */ `
 in float vA; in float vI; out vec4 o;
 void main() { float c = vI * exp(-vA * vA * 2.2); o = vec4(c); }`;
@@ -131,7 +138,7 @@ function boltMesh(kit: object, nSegs: number) {
             glslVersion: THREE.GLSL3,
             vertexShader: lineVert,
             fragmentShader: lineFrag,
-            uniforms: { uRes: { value: new THREE.Vector2() } },
+            uniforms: { uRes: { value: new THREE.Vector2() }, uOff: { value: new THREE.Vector2() } },
             depthTest: false,
             depthWrite: false,
             transparent: true,
@@ -148,6 +155,7 @@ function boltMesh(kit: object, nSegs: number) {
   return st;
 }
 
+/** Draw `segs` (whole-frame px, see findEdges) into `target` (cleared first). */
 function drawBolts(ctx: PassContext, segs: Seg[], coreW: number, target: THREE.WebGLRenderTarget) {
   const st = boltMesh(ctx.kit, segs.length);
   const pos = st.geo.getAttribute('position') as THREE.BufferAttribute;
@@ -178,7 +186,10 @@ function drawBolts(ctx: PassContext, segs: Seg[], coreW: number, target: THREE.W
   across.needsUpdate = true;
   inten.needsUpdate = true;
   st.geo.setDrawRange(0, segs.length * 6);
-  (st.mesh.material as THREE.ShaderMaterial).uniforms.uRes.value.set(ctx.width, ctx.height);
+  const u = (st.mesh.material as THREE.ShaderMaterial).uniforms;
+  u.uRes.value.set(ctx.width, ctx.height);
+  // Whole-frame px → target px: the target's bottom-left sits at (frame.x, frame.y).
+  u.uOff.value.set(ctx.frame.x, ctx.frame.y);
   drawObject(ctx, st.mesh, target);
 }
 

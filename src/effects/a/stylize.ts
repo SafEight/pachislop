@@ -1,4 +1,5 @@
 import type { EffectDef } from '../../engine/contracts';
+import { centreX, centreY } from '../../engine/frame';
 import { GRADIENTS } from '../../model/defaults';
 import { lit } from '../globalLight';
 import { blur, bounds, BOUNDS_GLSL, BOX_POS_GLSL } from '../lib';
@@ -278,7 +279,7 @@ void main() {
     float fi = float(i);
     vec2 uv = (c + (p - uDir * uOff * fi - c) / pow(uScale, fi)) / uRes;
     vec4 v = uBlur ? level(uv, 3.0 * fi / float(uN)) : texture(tSrc, uv);
-    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) v = vec4(0.0);
+    if (any(lessThan(uv, uFrameUv.xy)) || any(greaterThan(uv, uFrameUv.zw))) v = vec4(0.0);
     float t = uN > 1 ? (fi - 1.0) / float(uN - 1) : 0.0;
     vec3 cs = mix(unpremul(v), mix(uC0, uC1, t), uTintAmt);
     float a = v.a * pow(1.0 - uDecay, fi - 1.0);
@@ -386,12 +387,13 @@ ${BOX_POS_GLSL}
 uniform sampler2D tSrc, tSoft;
 uniform float uSize, uAngle, uDotScale, uAmount; uniform vec3 uColor; uniform vec2 uRampDir;
 uniform int uSource, uMode;
+uniform vec2 uCentreUv;                             // the comp centre in target uv
 // Anti-aliased disc of radius rad (cells) at distance d (cells), px render px per cell; tiny discs fade by their area.
 float disc(float rad, float d, float px) { return clamp((rad - d) * px + 0.5, 0.0, 1.0) * min(1.0, 2.0 * rad * px); }
 void main() {
   vec4 L = texture(tSrc, vUv);
   if (L.a < 1e-5) { o = vec4(0.0); return; }
-  vec2 pc = (vUv - 0.5) * uRes / uPx;              // comp px from the comp centre
+  vec2 pc = (vUv - uCentreUv) * uRes / uPx;        // comp px from the comp centre
   float cs = cos(uAngle), sn = sin(uAngle);
   mat2 rot = mat2(cs, sn, -sn, cs);
   vec2 r = rot * pc / uSize;
@@ -411,7 +413,7 @@ void main() {
   if (uSource == 0) {
     v = clamp(boxPos(uRampDir), 0.0, 1.0);
   } else if (uSource == 1) {
-    vec2 cc = (transpose(rot) * ((cell + 0.5) * uSize) * uPx) / uRes + 0.5;
+    vec2 cc = (transpose(rot) * ((cell + 0.5) * uSize) * uPx) / uRes + uCentreUv;
     vec4 s = texture(tSrc, cc);
     if (s.a < 0.05) s = L;
     v = 1.0 - luma(toSRGB(unpremul(s)));
@@ -467,6 +469,7 @@ const halftone: EffectDef = {
         uColor: col(p, 'color'),
         uRampDir: dirVec(num(p, 'rampAngle')),
         uSource: source,
+        uCentreUv: [centreX(ctx.frame) / ctx.width, centreY(ctx.frame) / ctx.height],
         uMode: pick(p, 'mode', BLEND_VALUES),
       },
       output,

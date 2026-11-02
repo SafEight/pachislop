@@ -42,7 +42,7 @@ export interface AppearanceRowProps {
   open: boolean;
   /** Hidden part: name and swatch dimmed. */
   off?: boolean;
-  /** Uses another's material (a letter's part that is the layer's): swatch muted. */
+  /** Uses another's material (a letter's part that is the layer's, a 3D side that follows its neighbour): swatch muted. */
   inherited?: boolean;
   title: string;
   onClick: (e: RowClick) => void;

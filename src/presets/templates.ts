@@ -23,6 +23,7 @@ import {
 } from '../model/defaults';
 import { freshLinks, withoutLink, type MaterialLinks } from '../model/links';
 import { bandKey, rimKey, type TitleLayer } from '../model/parts';
+import { sideMaterial, withCharSide } from '../model/sides';
 import type {
   Adjustment,
   AdjustmentLayer,
@@ -184,8 +185,10 @@ function text<L extends TitleLayer>(layer: L, o: TitleOpts): L {
     const t = applyColourway(base, colourway);
     const adj = chars[+i] ?? NO_ADJUST;
     if (t.kind === 'title2d') chars[+i] = { ...adj, face: withoutLink(t.style.face) };
-    else if (t.kind === 'title3d')
-      chars[+i] = { ...adj, face3d: withoutLink(t.style3d.face), bands3d: t.style3d.bands.map((b) => withoutLink(b.material)), side3d: withoutLink(t.style3d.side) };
+    else if (t.kind === 'title3d' && base.kind === 'title3d') {
+      const own = { ...adj, face3d: withoutLink(t.style3d.face), bands3d: t.style3d.bands.map((b) => withoutLink(b.material)) };
+      chars[+i] = withCharSide(base.style3d, own, withoutLink(sideMaterial(t.style3d)));
+    }
   }
   const lines: Record<number, LineAdjust> = {};
   for (const [i, adj] of Object.entries(o.lines ?? {})) lines[+i] = { ...NO_LINE_ADJUST, ...adj };
@@ -294,7 +297,7 @@ function project(name: string, layers: Layer[], o: { width?: number; height?: nu
   const pending = lit.flatMap((l: WithLook<Layer>) => (l[LOOK] ? [{ id: l.id, look: l[LOOK] }] : []));
   const materialLinks: MaterialLinks = Object.assign({}, ...lit.map((l: WithLook<Layer>) => l[LINKS] ?? {}));
   let out: Project = {
-    version: 9,
+    version: 10,
     name,
     comp,
     layers: lit.map((l: WithLook<Layer>) => {
@@ -639,7 +642,7 @@ export const TEMPLATES: Template[] = [
       const darkMetal = { ...material3D('custom'), color: '#1a0800', metalness: 1, roughness: 0.4, reflectivity: 0.6 };
       const face = { ...s.face, pattern: { ...s.face.pattern, color: '#6a300a', opacity: 0.85, scale: 15, relief: 0.2 } };
       const warmBand = { ...material3D('gold'), reflectivity: 0.8 };
-      const darkPlate = { ...backplate3D(4.4, 'custom'), depth: 7, face: darkMetal, side: darkMetal };
+      const darkPlate = { ...backplate3D(4.4, 'custom'), depth: 7, face: darkMetal };
       darkPlate.bevel = { ...darkPlate.bevel, width: 0.8, depth: 0.8 };
       const goldPlate = { ...backplate3D(1.8, 'gold'), depth: 5 };
       goldPlate.bevel = { ...goldPlate.bevel, width: 1.2, depth: 1.2 };

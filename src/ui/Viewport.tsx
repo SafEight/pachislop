@@ -58,6 +58,7 @@ import { GradientHandles, SourceHandles } from './viewport/ParamHandles';
 import { startGradientLay, startMaskGradientLay } from './viewport/paramEdit';
 import { clampTo, numParam, whenOk, wrapAngle } from './viewport/params';
 import { autoSelectTarget, hitLeaf, pickable, type DrawsAt } from './viewport/pick';
+import { previewWindow, type SharpWindow } from './viewport/previewWindow';
 import { StatusBar } from './viewport/StatusBar';
 import { TextEditOverlay } from './viewport/TextEditOverlay';
 
@@ -74,6 +75,21 @@ function useDevicePixelRatio(): number {
 }
 
 const DEG = Math.PI / 180;
+/** The view as the preview's draw callback reads it (Viewport sets it on every render). */
+interface PreviewView {
+  /** Display px per comp px; device px per display px. */
+  d: number;
+  dpr: number;
+  /** Render px per comp px of the whole-comp preview (while something moves), and of the settled one (previewWindow). */
+  base: number;
+  sharp: number;
+  /** The part of the comp inside the viewport, comp px (origin comp centre, +y up). */
+  visible: Bounds;
+  /** A pan or zoom changed the view within SETTLE_MS: the settled render waits. */
+  moving: boolean;
+}
+/** Quiet time after a pan or zoom before the preview renders the new view at the display's pixels. */
+const SETTLE_MS = 150;
 /** Screen px around a press within which a full-frame generator counts as drawn there (alpha pick). */
 const PICK_ALPHA_PX = 4;
 /** Straight alpha a full-frame generator must reach near the press to be picked. */
@@ -155,8 +171,12 @@ export function Viewport() {
   }, []);
   const [, bump] = useReducer((x: number) => x + 1, 0);
   const dpr = useDevicePixelRatio();
-  /** Render px per comp px of the preview (set below, read by the draw callback). */
-  const renderScale = useRef(1);
+  /** The view as the draw callback needs it (set below on every render). */
+  const previewView = useRef<PreviewView>({ d: 1, dpr: 1, base: 1, sharp: 1, visible: { x0: 0, y0: 0, x1: 0, y1: 0 }, moving: true });
+  /** The canvas element, and the window of the comp it holds (null: the whole comp). */
+  const canvasEl = useRef<HTMLCanvasElement | null>(null);
+  const placed = useRef<SharpWindow['place'] | null>(null);
+  const settleTimer = useRef(0);
   useSyncExternalStore(registry.subscribe, registry.getVersion); // fonts loaded → boxes change
   useEffect(() => onAspectsChanged(bump), []);
 
@@ -164,9 +184,10 @@ export function Viewport() {
   const shown = previewProject(project, override);
   const layer = shown.layers.find((l) => l.id === selectedId);
 
-  // Engine + render scheduling: draw when the (previewed) project, render scale or assets change.
+  // Engine + render scheduling: draw when the (previewed) project, the view or assets change.
   // The engine lives as long as the canvas element: made when it mounts, disposed when it goes.
   const canvasRef = useCallback((canvas: HTMLCanvasElement | null) => {
+    canvasEl.current = canvas;
     if (!canvas) return;
     let engine: Engine;
     try {
@@ -180,15 +201,29 @@ export function Viewport() {
     const draw = () => {
       raf = 0;
       const s = useEditor.getState();
+      const v = previewView.current;
       try {
         const shownNow = previewProject(s.project, s.previewOverride);
-        engine.render(shownNow, { scale: renderScale.current, includeGuides: true });
-        // 引き目 inset: copy the frame now, while the WebGL drawing buffer is still valid.
+        const { comp } = shownNow;
+        // Settled (no drag, scrub, pan or zoom going on): the visible part at the display's device
+        // pixels; else the whole comp at the preview scale, with the interactive cache.
+        const onScreen = v.visible.x1 > v.visible.x0 && v.visible.y1 > v.visible.y0;
+        const sharp = !engine.isInteractive && !v.moving && onScreen ? previewWindow(shownNow, v.visible, v.sharp, v.base) : null;
+        if (sharp) engine.render(shownNow, { scale: sharp.scale, includeGuides: true, window: sharp.window });
+        else engine.render(shownNow, { scale: v.base, includeGuides: true });
+        placed.current = sharp?.place ?? null;
+        placeCanvas(canvas, placed.current, comp, v.d, v.dpr);
+        // 引き目 inset: copy the frame now, while the WebGL drawing buffer is still valid; a
+        // window holds only part of the comp, so the inset then gets the whole comp of its own.
         const inset = insetRef.current;
-        if (s.view.distance && inset) drawInset(inset, canvas, s.view.previewBg === 'checker' ? '#18181e' : s.view.previewBg === 'white' ? '#ffffff' : s.view.previewBg === 'black' ? '#000000' : s.view.previewBgColor);
-        // View mask: the layer's combined mask, greyscale, at the frame's resolution.
+        if (s.view.distance && inset) {
+          const bg = s.view.previewBg === 'checker' ? '#18181e' : s.view.previewBg === 'white' ? '#ffffff' : s.view.previewBg === 'black' ? '#000000' : s.view.previewBgColor;
+          const w = Math.max(1, Math.round(inset.clientWidth * v.dpr));
+          drawInset(inset, sharp ? imageCanvas(engine.renderOverview(shownNow, { scale: w / comp.width, includeGuides: true })) : canvas, bg);
+        }
+        // View mask: the layer's combined mask, greyscale, at the whole-comp preview's resolution.
         const maskView = maskViewRef.current;
-        if (s.view.viewMask && maskView) drawMaskView(maskView, engine.renderMaskPreview(shownNow, s.view.viewMask, 'combined', Math.max(canvas.width, canvas.height)));
+        if (s.view.viewMask && maskView) drawMaskView(maskView, engine.renderMaskPreview(shownNow, s.view.viewMask, 'combined', Math.round(Math.max(comp.width, comp.height) * v.base)));
       } catch (e) {
         console.error(e);
       }
@@ -239,14 +274,35 @@ export function Viewport() {
   // stage origin on the device pixel grid, so a 1:1 frame is not resampled by the browser
   const left = Math.round(((avail.w - dw) / 2 + view.panX) * dpr) / dpr;
   const top = Math.round(((avail.h - dh) / 2 + view.panY) * dpr) / dpr;
-  // The frame is rendered at the display's device pixels, up to the preview resolution: a
-  // larger frame shrunk by the browser (bilinear, no mipmaps) drops pixels and aliases edges,
-  // and costs more. Beyond comp × previewRes the browser magnifies.
-  const scale = Math.min(view.previewRes, d * dpr);
+  // Settled, the preview renders the visible part of the comp at the display's device pixels
+  // (× the preview resolution; previewWindow), so edges stay as crisp as a 1:1 render at every
+  // zoom. While a drag, scrub, pan or zoom goes on it renders the whole comp at `base`: device
+  // pixels up to comp × previewRes (a larger whole frame costs too much to redraw per move;
+  // beyond it the browser magnifies), with the interactive cache.
+  const base = Math.min(view.previewRes, d * dpr);
+  const sharp = d * dpr * view.previewRes;
+  // the part of the stage inside the viewport area, comp px (origin comp centre, +y up)
+  const vx0 = Math.max(0, -left) / d - comp.width / 2;
+  const vx1 = Math.min(dw, avail.w - left) / d - comp.width / 2;
+  const vy0 = comp.height / 2 - Math.min(dh, avail.h - top) / d;
+  const vy1 = comp.height / 2 - Math.max(0, -top) / d;
   useLayoutEffect(() => {
-    renderScale.current = scale;
-  }, [scale]);
-  useEffect(() => engineHost.invalidate(), [scale]);
+    const v = previewView.current;
+    Object.assign(v, { d, dpr, base, sharp, visible: { x0: vx0, y0: vy0, x1: vx1, y1: vy1 }, moving: true });
+    // the frame on the canvas follows the stage at once; the new view renders once it settles
+    if (canvasEl.current) placeCanvas(canvasEl.current, placed.current, comp, d, dpr);
+    clearTimeout(settleTimer.current);
+    settleTimer.current = window.setTimeout(() => {
+      v.moving = false;
+      engineHost.invalidate();
+    }, SETTLE_MS);
+    // meanwhile a window that no longer covers the visible part gives way to the whole comp
+    const p = placed.current;
+    const cw = comp.width / 2;
+    const ch = comp.height / 2;
+    if (p && (p.x > vx0 + cw || p.x + p.width < vx1 + cw || p.y > ch - vy1 || p.y + p.height < ch - vy0)) engineHost.invalidate();
+  }, [comp, d, dpr, base, sharp, vx0, vx1, vy0, vy1]);
+  useEffect(() => () => clearTimeout(settleTimer.current), []);
 
   // comp (centre origin, y-up) ↔ stage px ↔ client px
   const S = (p: Pt) => ({ x: (p.x + comp.width / 2) * d, y: (comp.height / 2 - p.y) * d });
@@ -350,7 +406,7 @@ export function Viewport() {
    */
   const startLayerDrag = (e: React.PointerEvent, target: Layer, onClick?: () => void) => {
     const st = useEditor.getState();
-    if (target.kind === 'title3d' && e.altKey && !target.locked && st.selectedLayerIds.length <= 1) return startFreeRotate(e, layerTarget(target), onClick);
+    if (target.kind === 'title3d' && e.altKey && !target.locked && st.selectedLayerIds.length <= 1) return startFreeRotate(e, layerTarget(target), comp, onClick);
     const key = oneShot(`drag:${target.id}`);
     const sx = e.clientX;
     const sy = e.clientY;
@@ -569,7 +625,7 @@ export function Viewport() {
     };
     const grab = (l: TextLayer, chars: number[], gz: GlyphGizmoGeom, onClick?: () => void) => {
       const free = e.altKey ? glyphTarget(l, chars, gz) : null;
-      if (free) startFreeRotate(e, free, onClick);
+      if (free) startFreeRotate(e, free, comp, onClick);
       else startGlyphMove(e, l, chars, gz, stage, onClick);
     };
     if (textSel) {
@@ -949,7 +1005,7 @@ export function Viewport() {
       >
         {error && <div className="viewport-error">{formatMsg(error, t)}</div>}
         <div className={`stage ${view.previewBg === 'checker' ? 'checker' : ''} ${editing ? 'text-editing' : ''}`} style={{ left, top, width: dw, height: dh, ...stageBg }}>
-          <canvas ref={canvasRef} className={view.valueCheck ? 'value-check' : ''} style={{ width: dw, height: dh }} />
+          <canvas ref={canvasRef} className={view.valueCheck ? 'value-check' : ''} />
           {view.gamut && <GamutOverlay />}
           {maskViewLayer && <canvas ref={maskViewMount} className="mask-view" style={{ width: dw, height: dh }} />}
         </div>
@@ -1115,8 +1171,8 @@ function viewBounds(comp: Project['comp'], l: Layer, layers: readonly Layer[]): 
 
 const intersects = (a: Bounds, b: Bounds) => a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
 
-/** Draw the rendered frame into the 引き目 inset at its CSS size × devicePixelRatio. */
-function drawInset(inset: HTMLCanvasElement, frame: HTMLCanvasElement, bg: string) {
+/** Draw the rendered frame (the whole comp) into the 引き目 inset at its CSS size × devicePixelRatio. */
+function drawInset(inset: HTMLCanvasElement, frame: HTMLCanvasElement | OffscreenCanvas, bg: string) {
   const dpr = window.devicePixelRatio || 1;
   const w = Math.max(1, Math.round(inset.clientWidth * dpr));
   const h = Math.max(1, Math.round(inset.clientHeight * dpr));
@@ -1129,6 +1185,28 @@ function drawInset(inset: HTMLCanvasElement, frame: HTMLCanvasElement, bg: strin
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(frame, 0, 0, frame.width, frame.height, 0, 0, w, h);
+}
+
+/** `img` on a canvas of its own, for drawInset. */
+function imageCanvas(img: ImageData): OffscreenCanvas {
+  const c = new OffscreenCanvas(img.width, img.height);
+  c.getContext('2d')?.putImageData(img, 0, 0);
+  return c;
+}
+
+/**
+ * Lay the preview canvas over the part of the stage its frame shows: `place` (comp px from the
+ * comp's top-left corner, previewWindow) or, null, the whole comp; `d` display px per comp px.
+ * A window's corner snaps to the device pixel grid, so a window at the display's scale maps 1:1
+ * to its pixels (the stage origin is on that grid too).
+ */
+function placeCanvas(canvas: HTMLCanvasElement, place: SharpWindow['place'] | null, comp: Project['comp'], d: number, dpr: number) {
+  const s = canvas.style;
+  s.position = 'absolute';
+  s.left = `${place ? Math.round(place.x * d * dpr) / dpr : 0}px`;
+  s.top = `${place ? Math.round(place.y * d * dpr) / dpr : 0}px`;
+  s.width = `${(place ? place.width : comp.width) * d}px`;
+  s.height = `${(place ? place.height : comp.height) * d}px`;
 }
 
 function withTransform(p: Project, id: string, patch: Partial<Layer['transform']>) {

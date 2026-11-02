@@ -407,7 +407,6 @@ export function backplate3D(grow: number, preset: MaterialPreset): Backplate3D {
     zGap: 0,
     bevel: { width: 1.5, depth: 1.5, profile: 'round', segments: 6, curve: 0 },
     face: material3D(preset),
-    side: material3D(preset),
   };
 }
 
@@ -542,7 +541,6 @@ export function createTitle3DLayer(text = '確定'): Title3DLayer {
       edgeImage: 0,
       lighting: noLighting(),
       bands: [band3D(2.5, 2.5, 'gold', 'round')],
-      side: material3D('gold'),
       backplates: [],
       shadow: shadow3D(),
       glint: glint3D(),
@@ -645,5 +643,5 @@ export function defaultComp(): Comp {
 
 /** A new project: the default comp and no layers (the viewport shows its checkerboard). */
 export function createProject(): Project {
-  return { version: 9, name: 'Untitled', comp: defaultComp(), layers: [] };
+  return { version: 10, name: 'Untitled', comp: defaultComp(), layers: [] };
 }

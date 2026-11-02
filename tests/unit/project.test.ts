@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { migrateEffects, migrateProject, parseProjectFile, toBase64 } from '../../src/io/project';
-import { backplate3D, createBackgroundLayer, createProject, createTitle2DLayer, createTitle3DLayer, imageSource, material2D, solidFill } from '../../src/model/defaults';
-import type { CharAdjust, EffectInstance, Material2D, Project, Title2DLayer, Title3DLayer } from '../../src/model/types';
+import { backplate3D, band3D, createBackgroundLayer, createProject, createTitle2DLayer, createTitle3DLayer, imageSource, material2D, material3D, solidFill } from '../../src/model/defaults';
+import { charSide, plateSide, sideMaterial } from '../../src/model/sides';
+import type { CharAdjust, EffectInstance, Material2D, Material3D, Project, Title2DLayer, Title3DLayer, Title3DProps } from '../../src/model/types';
 
 // Loose JSON as it comes out of an older file.
 type Json = Record<string, any>;
@@ -44,7 +45,10 @@ function currentProject(): Project {
   return p;
 }
 
-/** `p` as an older `version` file would store it: every field added since v4 removed (no per-layer or per-part lighting). */
+/**
+ * `p` as an older `version` file would store it: every field added since v4 removed (no per-layer
+ * or per-part lighting), and every 3D side stored (v4–v9 had no inherited sides).
+ */
 function v4Like(p: Project, version: number): Json {
   const j: Json = structuredClone(p);
   j.version = version;
@@ -91,6 +95,8 @@ function v4Like(p: Project, version: number): Json {
     } else {
       const s3 = l.style3d;
       for (const k of ['mode', 'inflate', 'envLock', 'bevelPosition', 'faceImage', 'edgeImage', 'lighting']) delete s3[k];
+      s3.side ??= structuredClone(s3.bands.at(-1)?.material ?? s3.face);
+      for (const b of s3.backplates) b.side ??= structuredClone(b.face);
       strip3D(s3.face);
       strip3D(s3.side);
       for (const b of s3.bands) strip3D(b.material);
@@ -112,7 +118,7 @@ describe('migrateProject', () => {
     expect(JSON.stringify(old)).not.toMatch(/useGlobalLight|tateChuYoko|bevelPosition|gradientAxis|"surface"|"clip"|partEffects|"trace"|"dpi"|"erode"|"plate"|"weight"/);
     const snapshot = structuredClone(old);
     const got = migrateProject(old);
-    expect(got.version).toBe(9);
+    expect(got.version).toBe(10);
     expect(got).toEqual(want);
     // The input is not modified.
     expect(old).toEqual(snapshot);
@@ -173,11 +179,11 @@ describe('migrateProject', () => {
   });
 
   it.each([1, 2, 3])('refuses a version %i project, naming the version and the supported ones', (version) => {
-    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(new RegExp(`version ${version} project.*version 4 to 9`));
+    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(new RegExp(`version ${version} project.*version 4 to 10`));
   });
 
-  it.each([10, 0, '7', undefined])('refuses version %s as unsupported', (version) => {
-    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(/Unsupported project version .* \(expected 4 to 9\)/);
+  it.each([11, 0, '7', undefined])('refuses version %s as unsupported', (version) => {
+    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(/Unsupported project version .* \(expected 4 to 10\)/);
   });
 
   it('refuses non-projects', () => {
@@ -202,7 +208,7 @@ describe('v8 → v9 tiltY', () => {
 
   it('negates a v8 glyph’s tiltY and keeps its other 3D adjustments', () => {
     const got = migrateProject(withChars(8, { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, tiltX: 12, tiltY: 20, dz: 5 } }));
-    expect(got.version).toBe(9);
+    expect(got.version).toBe(10);
     expect(charsOf(got)[0]).toMatchObject({ tiltX: 12, tiltY: -20, dz: 5 });
   });
 
@@ -216,6 +222,79 @@ describe('v8 → v9 tiltY', () => {
     const v9 = migrateProject(withChars(9, { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, tiltX: 12, tiltY: 20, dz: 5 } }));
     expect(charsOf(v9)[0].tiltY).toBe(20);
     const once = migrateProject(withChars(8, { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, tiltY: 20 } }));
+    expect(migrateProject(once)).toEqual(once);
+  });
+});
+
+describe('v9 → v10 inherited sides', () => {
+  const mat = (preset: Material3D['preset'], o: Partial<Material3D> = {}): Material3D => ({ ...material3D(preset), ...o });
+  /** A 3D text title stored as `version` with `style` over the default one and letters `chars`. */
+  const stored = (version: number, style: Partial<Title3DProps>, chars: Record<number, CharAdjust> = {}): Json => {
+    const t3 = createTitle3DLayer('確定');
+    if (t3.source.kind !== 'text') throw new Error('expected text');
+    t3.source.chars = chars;
+    return { ...structuredClone({ ...createProject(), layers: [{ ...t3, style3d: { ...t3.style3d, ...style } }] }), version };
+  };
+  const style = (p: Project) => (p.layers[0] as Title3DLayer).style3d;
+  const charsOf = (p: Project) => {
+    const t3 = p.layers[0] as Title3DLayer;
+    if (t3.source.kind !== 'text') throw new Error('expected text');
+    return t3.source.chars;
+  };
+  const band = (m: Material3D) => ({ ...band3D(1, 1, 'custom', 'round'), material: m });
+  const plate = (face: Material3D, side: Material3D) => ({ ...backplate3D(2, 'custom'), face, side });
+
+  it('a side equal to its outermost band, a plate edge equal to its front and a bandless side equal to the face inherit', () => {
+    const gold = mat('gold', { link: 'g' });
+    const got = migrateProject(stored(9, { bands: [band(mat('chrome')), band(gold)], side: { ...gold }, backplates: [plate(mat('blackGloss'), mat('blackGloss'))] }));
+    expect(got.version).toBe(10);
+    expect(style(got)).not.toHaveProperty('side');
+    expect(style(got).backplates[0]).not.toHaveProperty('side');
+    expect(sideMaterial(style(got))).toEqual(gold);
+    const flat = migrateProject(stored(9, { bands: [], face: mat('silver'), side: mat('silver') }));
+    expect(style(flat)).not.toHaveProperty('side');
+  });
+
+  it('a side with another material or its own link stays, and so does an edge unlike its front', () => {
+    const other = migrateProject(stored(9, { bands: [band(mat('gold'))], side: mat('redMetal'), backplates: [plate(mat('gold'), mat('chrome'))] }));
+    expect(style(other).side?.preset).toBe('redMetal');
+    expect(style(other).backplates[0].side?.preset).toBe('chrome');
+    const linked = migrateProject(stored(9, { bands: [band(mat('gold'))], side: mat('gold', { link: 'own' }) }));
+    expect(style(linked).side?.link).toBe('own');
+  });
+
+  it('letters keep the side they showed: an equal own side inherits, a letter owning its outermost band gets a copy', () => {
+    const gold = mat('gold');
+    const chars: Record<number, CharAdjust> = {
+      0: { dx: 0, dy: 0, scale: 1, rotate: 0, face3d: mat('whiteGloss'), side3d: { ...gold, link: 'g' } },
+      1: { dx: 0, dy: 0, scale: 1, rotate: 0, bands3d: [mat('redMetal')] },
+      2: { dx: 0, dy: 0, scale: 1, rotate: 0, bands3d: [mat('redMetal')], side3d: mat('redMetal') },
+      3: { dx: 0, dy: 0, scale: 1, rotate: 0, side3d: { ...gold } },
+    };
+    const old = stored(9, { bands: [band({ ...gold, link: 'g' })], side: { ...gold, link: 'g' } }, chars);
+    const oldStyle = old.layers[0].style3d as Title3DProps;
+    const got = migrateProject(old);
+    expect(style(got)).not.toHaveProperty('side');
+    const c = charsOf(got);
+    // 0's own side deep-equals its new neighbour, the layer's band (link included)
+    expect(c[0]).not.toHaveProperty('side3d');
+    // 1 owns its band but showed the layer's side: it keeps an unlinked copy of it
+    expect(c[1].side3d).toEqual(gold);
+    // 2's own side equals its own band, its neighbour now
+    expect(c[2]).not.toHaveProperty('side3d');
+    // 3's own side lacks the band's link: it stays
+    expect(c[3].side3d).toEqual(gold);
+    // every letter shows what it showed (the renders stay the same)
+    for (const k of [0, 1, 2, 3]) expect({ ...charSide(style(got), c[k]), link: undefined }).toEqual({ ...(chars[k].side3d ?? oldStyle.side!), link: undefined });
+  });
+
+  it('v10 data keeps an owned side equal to its neighbour; migrating twice equals once', () => {
+    const gold = mat('gold');
+    const v10 = migrateProject(stored(10, { bands: [band(gold)], side: { ...gold }, backplates: [plate(gold, { ...gold })] }));
+    expect(style(v10).side).toEqual(gold);
+    expect(plateSide(style(v10).backplates[0])).toEqual(gold);
+    expect(style(v10).backplates[0].side).toEqual(gold);
+    const once = migrateProject(stored(9, { bands: [band(gold)], side: { ...gold } }, { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, bands3d: [mat('chrome')] } }));
     expect(migrateProject(once)).toEqual(once);
   });
 });
@@ -292,7 +371,7 @@ describe('parseProjectFile', () => {
   it('upgrades an older file and notes it; decodes embedded blobs', () => {
     const b = parseProjectFile(file(4));
     expect(b.version).toBe(4);
-    expect(b.project.version).toBe(9);
+    expect(b.project.version).toBe(10);
     expect(b.notes).toHaveLength(1);
     expect([...new Uint8Array(b.fonts[0].data)]).toEqual([1, 2, 3]);
     expect(b.assets[0]).toMatchObject({ id: 'a1', mime: 'application/octet-stream' });
@@ -300,11 +379,11 @@ describe('parseProjectFile', () => {
   });
 
   it('a current file has no notes', () => {
-    expect(parseProjectFile(file(9)).notes).toEqual([]);
+    expect(parseProjectFile(file(10)).notes).toEqual([]);
   });
 
   it('refuses a file whose version disagrees with its project, and non-JSON', () => {
-    expect(() => parseProjectFile(file(9, 4))).toThrow(/Unsupported project version 9/);
+    expect(() => parseProjectFile(file(10, 4))).toThrow(/Unsupported project version 10/);
     expect(() => parseProjectFile('{')).toThrow('JSON parse failed');
     expect(() => parseProjectFile('{"format":"other"}')).toThrow('Not a Pachislop project file');
   });

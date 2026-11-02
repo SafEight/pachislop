@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { EffectContext, EffectDef, EffectParams } from '../../engine/contracts';
+import { centreX, centreY } from '../../engine/frame';
 import { B, bool, C, col, DEG, drawObject, N, num, readGrid, rng, S, sel } from './common';
 
 // Shatter (ガラス割れ / 破片, AE Shatter): the layer's pixels are cut into pieces (glass spokes and
@@ -322,7 +323,7 @@ interface Piece {
   hi: number; // edge highlight multiplier
 }
 
-/** Pieces over `box`, cut from cells clipped to `frame` (the render target in comp px). */
+/** Pieces over `box`, cut from cells clipped to `frame` (the whole render, RenderFrame, in comp px). */
 function buildPieces(box: Box, frame: Box, p: EffectParams): Piece[] {
   const r = rng(N(p, 'seed') * 7.13 + 1);
   const pieces = Math.min(400, Math.max(10, Math.round(N(p, 'pieces'))));
@@ -454,15 +455,18 @@ function drawPieces(ctx: EffectContext, input: THREE.Texture, pieces: Piece[], p
   const E = (st.geo.getAttribute('aEdge') as THREE.BufferAttribute).array as Float32Array;
   const H = (st.geo.getAttribute('aHi') as THREE.BufferAttribute).array as Float32Array;
   const { width: W, height: Hh, pxScale: s } = ctx;
+  // comp px → target px (the comp centre at (cx0, cy0)), and → target uv
+  const cx0 = centreX(ctx.frame);
+  const cy0 = centreY(ctx.frame);
   let v = 0;
   const put = (pc: Piece, x: number, y: number, edge: number, cos: number, sin: number) => {
     const rx = x - pc.cx;
     const ry = y - pc.cy;
-    P[v * 3] = W / 2 + (pc.cx + cos * rx - sin * ry + pc.tx) * s;
-    P[v * 3 + 1] = Hh / 2 + (pc.cy + sin * rx + cos * ry + pc.ty) * s;
+    P[v * 3] = cx0 + (pc.cx + cos * rx - sin * ry + pc.tx) * s;
+    P[v * 3 + 1] = cy0 + (pc.cy + sin * rx + cos * ry + pc.ty) * s;
     P[v * 3 + 2] = 0;
-    U[v * 2] = (W / 2 + x * s) / W;
-    U[v * 2 + 1] = (Hh / 2 + y * s) / Hh;
+    U[v * 2] = (cx0 + x * s) / W;
+    U[v * 2 + 1] = (cy0 + y * s) / Hh;
     E[v] = edge * s;
     H[v] = pc.hi;
     v++;
@@ -532,8 +536,9 @@ const shatter: EffectDef = {
     B(p, 'cracksOnly') ? 0 : 1.45 * N(p, 'strength') + 0.5 * N(p, 'radius') * Math.min(1, N(p, 'rotation') * DEG),
   apply(ctx, input, output, p) {
     const box = inkBox(ctx);
-    const hw = ctx.width / ctx.pxScale / 2;
-    const hh = ctx.height / ctx.pxScale / 2;
+    // The whole frame (not just this target, a window of it), comp px: the outer pieces reach its edges.
+    const hw = ctx.frame.width / ctx.pxScale / 2;
+    const hh = ctx.frame.height / ctx.pxScale / 2;
     const pieces = box ? buildPieces(box, { x0: -hw, y0: -hh, x1: hw, y1: hh }, p) : [];
     if (pieces.length === 0) {
       ctx.kit.copy(input, output);
