@@ -16,7 +16,8 @@ export const ROTATE_CURSOR: CSSProperties['cursor'] =
 
 /**
  * One draggable on-canvas handle: the drawn `children` (visual only) plus an invisible hit
- * circle of `HIT_R` around (x, y) that takes the press, so small handles stay easy to grab.
+ * circle of `HIT_R` around (x, y) that takes the press, so small handles stay easy to grab
+ * (`hit`: an own hit shape instead, class `hit`, for arrows, arcs and rings).
  * Drawn after glyph / layer outlines, and its press stops propagation, so it always wins over
  * glyph and layer hit-testing. Hovering lights the handle up.
  */
@@ -27,6 +28,7 @@ export function Handle({
   title,
   onDown,
   className,
+  hit,
   children,
 }: {
   x: number;
@@ -35,6 +37,7 @@ export function Handle({
   title: string;
   onDown: (e: React.PointerEvent) => void;
   className?: string;
+  hit?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -50,7 +53,7 @@ export function Handle({
       }}
     >
       <title>{title}</title>
-      <circle className="hit" cx={x} cy={y} r={HIT_R} />
+      {hit ?? <circle className="hit" cx={x} cy={y} r={HIT_R} />}
       {children}
     </g>
   );

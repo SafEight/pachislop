@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { migrateEffects, migrateProject, parseProjectFile, toBase64 } from '../../src/io/project';
 import { backplate3D, createBackgroundLayer, createProject, createTitle2DLayer, createTitle3DLayer, imageSource, material2D, solidFill } from '../../src/model/defaults';
-import type { EffectInstance, Material2D, Project, Title2DLayer, Title3DLayer } from '../../src/model/types';
+import type { CharAdjust, EffectInstance, Material2D, Project, Title2DLayer, Title3DLayer } from '../../src/model/types';
 
 // Loose JSON as it comes out of an older file.
 type Json = Record<string, any>;
@@ -112,7 +112,7 @@ describe('migrateProject', () => {
     expect(JSON.stringify(old)).not.toMatch(/useGlobalLight|tateChuYoko|bevelPosition|gradientAxis|"surface"|"clip"|partEffects|"trace"|"dpi"|"erode"|"plate"|"weight"/);
     const snapshot = structuredClone(old);
     const got = migrateProject(old);
-    expect(got.version).toBe(8);
+    expect(got.version).toBe(9);
     expect(got).toEqual(want);
     // The input is not modified.
     expect(old).toEqual(snapshot);
@@ -173,16 +173,50 @@ describe('migrateProject', () => {
   });
 
   it.each([1, 2, 3])('refuses a version %i project, naming the version and the supported ones', (version) => {
-    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(new RegExp(`version ${version} project.*version 4 to 8`));
+    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(new RegExp(`version ${version} project.*version 4 to 9`));
   });
 
-  it.each([9, 0, '7', undefined])('refuses version %s as unsupported', (version) => {
-    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(/Unsupported project version .* \(expected 4 to 8\)/);
+  it.each([10, 0, '7', undefined])('refuses version %s as unsupported', (version) => {
+    expect(() => migrateProject({ ...v4Like(currentProject(), 4), version })).toThrow(/Unsupported project version .* \(expected 4 to 9\)/);
   });
 
   it('refuses non-projects', () => {
     for (const bad of [null, 'x', [], { version: 7, comp: {} }, { version: 7, layers: [] }, { version: 7, layers: {}, comp: {} }])
       expect(() => migrateProject(bad)).toThrow('Not a Pachislop project');
+  });
+});
+
+describe('v8 → v9 tiltY', () => {
+  /** A project with a 3D text title whose glyphs carry `chars`, stored as `version`. */
+  const withChars = (version: number, chars: Record<number, CharAdjust>): Json => {
+    const t3 = createTitle3DLayer('確定');
+    if (t3.source.kind !== 'text') throw new Error('expected text');
+    t3.source.chars = chars;
+    return { ...structuredClone({ ...createProject(), layers: [t3] }), version };
+  };
+  const charsOf = (p: Project) => {
+    const t3 = p.layers[0] as Title3DLayer;
+    if (t3.source.kind !== 'text') throw new Error('expected text');
+    return t3.source.chars;
+  };
+
+  it('negates a v8 glyph’s tiltY and keeps its other 3D adjustments', () => {
+    const got = migrateProject(withChars(8, { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, tiltX: 12, tiltY: 20, dz: 5 } }));
+    expect(got.version).toBe(9);
+    expect(charsOf(got)[0]).toMatchObject({ tiltX: 12, tiltY: -20, dz: 5 });
+  });
+
+  it('leaves a glyph without tiltY without it', () => {
+    const got = migrateProject(withChars(8, { 1: { dx: 0, dy: 0, scale: 1, rotate: 0, tiltX: 12 } }));
+    expect(charsOf(got)[1]).not.toHaveProperty('tiltY');
+    expect(charsOf(got)[1].tiltX).toBe(12);
+  });
+
+  it('passes v9 data unchanged (migrating twice equals once)', () => {
+    const v9 = migrateProject(withChars(9, { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, tiltX: 12, tiltY: 20, dz: 5 } }));
+    expect(charsOf(v9)[0].tiltY).toBe(20);
+    const once = migrateProject(withChars(8, { 0: { dx: 0, dy: 0, scale: 1, rotate: 0, tiltY: 20 } }));
+    expect(migrateProject(once)).toEqual(once);
   });
 });
 
@@ -258,7 +292,7 @@ describe('parseProjectFile', () => {
   it('upgrades an older file and notes it; decodes embedded blobs', () => {
     const b = parseProjectFile(file(4));
     expect(b.version).toBe(4);
-    expect(b.project.version).toBe(8);
+    expect(b.project.version).toBe(9);
     expect(b.notes).toHaveLength(1);
     expect([...new Uint8Array(b.fonts[0].data)]).toEqual([1, 2, 3]);
     expect(b.assets[0]).toMatchObject({ id: 'a1', mime: 'application/octet-stream' });
@@ -266,11 +300,11 @@ describe('parseProjectFile', () => {
   });
 
   it('a current file has no notes', () => {
-    expect(parseProjectFile(file(8)).notes).toEqual([]);
+    expect(parseProjectFile(file(9)).notes).toEqual([]);
   });
 
   it('refuses a file whose version disagrees with its project, and non-JSON', () => {
-    expect(() => parseProjectFile(file(8, 4))).toThrow(/Unsupported project version 8/);
+    expect(() => parseProjectFile(file(9, 4))).toThrow(/Unsupported project version 9/);
     expect(() => parseProjectFile('{')).toThrow('JSON parse failed');
     expect(() => parseProjectFile('{"format":"other"}')).toThrow('Not a Pachislop project file');
   });

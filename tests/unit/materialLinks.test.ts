@@ -10,7 +10,7 @@ import { TEMPLATES } from '../../src/presets/templates';
 import { syncLinks } from '../../src/store/links';
 import { getIn, updateIn } from '../../src/store/paths';
 
-const proj = (layers: Layer[], materialLinks?: Project['materialLinks']): Project => ({ version: 8, name: 'T', comp: defaultComp(), layers, ...(materialLinks ? { materialLinks } : {}) });
+const proj = (layers: Layer[], materialLinks?: Project['materialLinks']): Project => ({ version: 9, name: 'T', comp: defaultComp(), layers, ...(materialLinks ? { materialLinks } : {}) });
 
 const rainbowGlass = () => FACTORY_STYLES.find((s) => s.id === 'f-3d-rainbow-glass-gold')!;
 /** A 3D title wearing the rainbow glass look (its two gold tubes are one link named Gold). */

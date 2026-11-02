@@ -140,8 +140,9 @@ export interface CharAdjust {
   rotate: number; // degrees, clockwise on screen
   /**
    * 3D layers only (Element 3D per-character offsets): push the glyph toward the viewer
-   * (% of size, +z) and tilt it around its own centre (degrees; tiltX = top toward the viewer,
-   * tiltY = right side toward the viewer). The glyph, its bands and its own backplate stack
+   * (% of size, +z) and tilt it around its own centre (degrees, as the layer's Transform:
+   * tiltX = top toward the viewer, as rotX; tiltY = right side away from the viewer, the front
+   * turning right, as rotY). The glyph, its bands and its own backplate stack
    * (grown from that glyph alone) move as one rigid solid; the other glyphs share one plate.
    * Absent = 0. 2D layers ignore them.
    */
@@ -1241,7 +1242,7 @@ export interface Comp {
 }
 
 export interface Project {
-  version: 8;
+  version: 9;
   name: string;
   comp: Comp;
   /** Index 0 is the BOTTOM layer; last is drawn on top. */

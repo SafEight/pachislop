@@ -117,10 +117,11 @@ export function AlignBar() {
 }
 
 /**
- * Position, rotation, scale (+ Z / tilt / turn for 3D) of titles or generators in compact rows,
- * under the align / distribute / flip toolbar. Opacity is the Layers panel header's. Several
- * layers (a multi-selection) edit together: a typed value moves every layer there, scrubbing
- * moves them all by the same amount (keeping their spacing); Z / tilt / turn show when all are 3D.
+ * Position, rotation, scale of titles or generators in compact rows (3D: X / Y / Z, then
+ * rotation X / Y / Z, as the Letters section and the canvas gizmo), under the align / distribute
+ * / flip toolbar. Opacity is the Layers panel header's. Several layers (a multi-selection) edit
+ * together: a typed value moves every layer there, scrubbing moves them all by the same amount
+ * (keeping their spacing); Z and rotation X / Y show when all are 3D.
  */
 export function TransformSection({ layers }: { layers: readonly (TitleLayer | GeneratorLayer)[] }) {
   const t = useT();
@@ -139,9 +140,7 @@ export function TransformSection({ layers }: { layers: readonly (TitleLayer | Ge
       ? t('Follows a layer: it draws where that layer is, and the transform is an offset on top.')
       : fullFrame
         ? t('Fills the whole comp: the transform moves, turns and scales its pattern.')
-        : is3d
-          ? t('Tip: Alt/Option-drag the layer in the viewport (or toggle ⟲ Orbit) to tilt/turn it.')
-          : null;
+        : null;
   const reset = () => {
     // One undo step for every layer.
     const k = oneShot('reset-xf');
@@ -173,16 +172,17 @@ export function TransformSection({ layers }: { layers: readonly (TitleLayer | Ge
         <RefNum label="Y" refp={r('y')} min={-1000} max={1000} step={1} unit="px" slider={false} title={t('From comp centre, + = up')} />
         {is3d && <RefNum label="Z" refp={r('z')} min={-3000} max={1000} step={1} unit="px" slider={false} title={t('+ = toward the viewer')} />}
       </div>
-      <div className="xf-grid">
-        <RefNum label={t('Rotation')} refp={r('rotZ')} min={-180} max={180} step={0.5} unit="deg" slider={false} title={t('Clockwise on screen')} />
-        <RefNum label={t('Scale')} refp={r('scale')} min={0.05} max={4} step={0.01} display={100} unit="%" slider={false} />
-      </div>
       {is3d && (
         <div className="xf-grid">
-          <RefNum label={t('Tilt X')} refp={r('rotX')} min={-180} max={180} step={0.5} unit="deg" slider={false} title={t('+ = top toward the viewer')} />
-          <RefNum label={t('Turn Y')} refp={r('rotY')} min={-180} max={180} step={0.5} unit="deg" slider={false} title={t('+ = right side toward the viewer')} />
+          <RefNum label={t('Rotation X')} refp={r('rotX')} min={-180} max={180} step={0.5} unit="deg" slider={false} title={t('+ = top toward the viewer')} />
+          <RefNum label={t('Rotation Y')} refp={r('rotY')} min={-180} max={180} step={0.5} unit="deg" slider={false} title={t('+ = right side away from the viewer')} />
+          <RefNum label={t('Rotation Z')} refp={r('rotZ')} min={-180} max={180} step={0.5} unit="deg" slider={false} title={t('Clockwise on screen')} />
         </div>
       )}
+      <div className="xf-grid">
+        {!is3d && <RefNum label={t('Rotation')} refp={r('rotZ')} min={-180} max={180} step={0.5} unit="deg" slider={false} title={t('Clockwise on screen')} />}
+        <RefNum label={t('Scale')} refp={r('scale')} min={0.05} max={4} step={0.01} display={100} unit="%" slider={false} />
+      </div>
       {title && <EffectiveSize layer={title} />}
     </Section>
   );

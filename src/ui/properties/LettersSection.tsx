@@ -108,19 +108,30 @@ export function LettersSection({ layer, src }: { layer: SourceLayer; src: TextSo
         </div>
         {adj && primary !== null ? (
           <>
-            <NumRow label={t('Offset X')} id={`${id}:dx`} value={adj.dx} min={-50} max={50} step={0.1} unit="%" defaultValue={0} onChange={(v, c) => setAdj({ dx: v }, c, 'Character offset X')} title={t('% of font size')} />
-            <NumRow label={t('Offset Y')} id={`${id}:dy`} value={adj.dy} min={-50} max={50} step={0.1} unit="%" defaultValue={0} onChange={(v, c) => setAdj({ dy: v }, c, 'Character offset Y')} title={t('% of font size, + = up')} />
+            <NumRow label="X" id={`${id}:dx`} value={adj.dx} min={-50} max={50} step={0.1} unit="%" defaultValue={0} onChange={(v, c) => setAdj({ dx: v }, c, 'Character X')} title={t('% of font size, + = right')} />
+            <NumRow label="Y" id={`${id}:dy`} value={adj.dy} min={-50} max={50} step={0.1} unit="%" defaultValue={0} onChange={(v, c) => setAdj({ dy: v }, c, 'Character Y')} title={t('% of font size, + = up')} />
+            {layer.kind === 'title3d' && (
+              <>
+                <NumRow label="Z" id={`${id}:dz`} value={adj.dz ?? 0} min={-100} max={100} step={0.5} unit="%" defaultValue={0} onChange={(v, c) => setAdj({ dz: v }, c, 'Character Z')} title={t('% of font size, + = toward the viewer')} />
+                <NumRow label={t('Rotation X')} id={`${id}:tx`} value={adj.tiltX ?? 0} min={-89} max={89} step={0.5} unit="deg" clamp defaultValue={0} onChange={(v, c) => setAdj({ tiltX: v }, c, 'Character rotation X')} title={t('+ = top toward the viewer')} />
+                <NumRow label={t('Rotation Y')} id={`${id}:ty`} value={adj.tiltY ?? 0} min={-89} max={89} step={0.5} unit="deg" clamp defaultValue={0} onChange={(v, c) => setAdj({ tiltY: v }, c, 'Character rotation Y')} title={t('+ = right side away from the viewer')} />
+              </>
+            )}
+            <NumRow
+              label={layer.kind === 'title3d' ? t('Rotation Z') : t('Rotation')}
+              id={`${id}:r`}
+              value={adj.rotate}
+              min={-180}
+              max={180}
+              step={0.5}
+              unit="deg"
+              defaultValue={0}
+              onChange={(v, c) => setAdj({ rotate: v }, c, layer.kind === 'title3d' ? 'Character rotation Z' : 'Character rotation')}
+              title={t('Clockwise on screen')}
+            />
             <NumRow label={t('Scale')} id={`${id}:s`} value={adj.scale} min={0.2} max={3} step={0.01} display={100} unit="%" defaultValue={1} onChange={(v, c) => setAdj({ scale: Math.max(0.01, v) }, c, 'Character scale')} />
             <NumRow label={t('Width 長体')} id={`${id}:hs`} value={adj.hScale ?? 1} min={0.3} max={2} step={0.01} display={100} unit="%" defaultValue={1} onChange={(v, c) => setAdj({ hScale: Math.max(0.05, v) }, c, 'Character width (長体/平体)')} title={t("Horizontal glyph scale on top of the text's; < 100% = 長体 (condensed). The line reflows. Also: the side bars of the canvas gizmo")} />
             <NumRow label={t('Height 平体')} id={`${id}:vs`} value={adj.vScale ?? 1} min={0.3} max={2} step={0.01} display={100} unit="%" defaultValue={1} onChange={(v, c) => setAdj({ vScale: Math.max(0.05, v) }, c, 'Character height (長体/平体)')} title={t("Vertical glyph scale on top of the text's; < 100% = 平体 (flattened). Also: the top / bottom bars of the canvas gizmo")} />
-            <NumRow label={t('Rotate')} id={`${id}:r`} value={adj.rotate} min={-180} max={180} step={0.5} unit="deg" defaultValue={0} onChange={(v, c) => setAdj({ rotate: v }, c, 'Character rotation')} title={t('Clockwise on screen')} />
-            {layer.kind === 'title3d' && (
-              <>
-                <NumRow label={t('Push Z')} id={`${id}:dz`} value={adj.dz ?? 0} min={-100} max={100} step={0.5} unit="%" defaultValue={0} onChange={(v, c) => setAdj({ dz: v }, c, 'Character push Z')} title={t('% of font size, + = toward the viewer')} />
-                <NumRow label={t('Tilt X')} id={`${id}:tx`} value={adj.tiltX ?? 0} min={-89} max={89} step={0.5} unit="deg" clamp defaultValue={0} onChange={(v, c) => setAdj({ tiltX: v }, c, 'Character tilt X')} title={t('+ = top toward the viewer')} />
-                <NumRow label={t('Tilt Y')} id={`${id}:ty`} value={adj.tiltY ?? 0} min={-89} max={89} step={0.5} unit="deg" clamp defaultValue={0} onChange={(v, c) => setAdj({ tiltY: v }, c, 'Character tilt Y')} title={t('+ = right side toward the viewer')} />
-              </>
-            )}
             <LetterMaterials key={layer.id} layer={layer} src={src} selected={selected} />
             <Row label="">
               <button

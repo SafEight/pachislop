@@ -483,7 +483,7 @@ export interface LayerView {
 }
 
 /** The comp camera exactly as Engine sets it up (1 world unit = 1 comp px on z = 0). */
-function compCamera(comp: Comp): THREE.PerspectiveCamera {
+export function compCamera(comp: Comp): THREE.PerspectiveCamera {
   const c = comp.camera;
   const fov = Math.min(170, Math.max(1, c.fov));
   const dist = comp.height / 2 / Math.tan((fov * DEG) / 2);
@@ -496,7 +496,7 @@ function compCamera(comp: Comp): THREE.PerspectiveCamera {
 }
 
 /** Layer → world matrix as in Layer3DRenderer (position, rotation X→Y→Z with rotZ clockwise, uniform scale; the flip mirrors layer x / y before the rotation). */
-function layerMatrix(layer: Layer): THREE.Matrix4 {
+export function layerMatrix(layer: Layer): THREE.Matrix4 {
   const t = layer.transform;
   const { fx, fy } = flipSigns(t);
   const s = t.scale || 1e-6;
@@ -618,13 +618,13 @@ export function glyphPivotZ(layer: Layer): number {
 
 /**
  * A layer-space point of glyph `g` (z = 0 front face) after the 3D-only adjustments in `a`:
- * Rx(tiltX) then Ry(−tiltY) about (center, pivotZ), then the z push. Same as Geo3D.
+ * Rx(tiltX) then Ry(tiltY) about (center, pivotZ), then the z push. Same as Geo3D.
  */
 export function glyphPoint3(layer: Layer, center: Pt, a: Pick<CharAdjust, 'dz' | 'tiltX' | 'tiltY'> | undefined, p: Pt, z = 0): { p: Pt; z: number } {
   if (layer.kind !== 'title3d' || !a) return { p, z };
   const zp = glyphPivotZ(layer);
   const tx = (a.tiltX ?? 0) * DEG;
-  const ty = -(a.tiltY ?? 0) * DEG;
+  const ty = (a.tiltY ?? 0) * DEG;
   let x = p.x - center.x;
   let y = p.y - center.y;
   let w = z - zp;

@@ -3,19 +3,17 @@ import { useT, type TVars } from '../i18n';
 import { oneShot } from '../util';
 import { drag, type StageMap } from './drag';
 import type { Pt } from './geometry';
-import { snap, startGlyphMove, writeGlyphs, type TextLayer } from './glyphEdit';
+import { snap, writeGlyphs, type TextLayer } from './glyphEdit';
 import { pickedText, type GlyphGizmoGeom } from './glyphs';
 import { Handle, ROTATE_CURSOR } from './Handle';
 
 // On-canvas per-glyph gizmo: drag a picked glyph to move it (dx / dy), corners scale evenly, the
-// side bars set 長体 / 平体 (hScale / vScale), the stem
-// rotates; on 3D layers ⌥-drag or the Z handle pushes in depth (dz) and the two arc handles
-// tilt (tiltX / tiltY). Shift constrains moves to one axis and snaps scale to 5 %, rotation
-// and tilt to 15°. Every gesture is one undo step labelled with the picked characters.
+// side bars set 長体 / 平体 (hScale / vScale); on 2D layers the stem rotates (3D layers move and
+// rotate their glyphs with the shared 3D gizmo, Gizmo3D). Shift constrains moves to one axis and
+// snaps scale to 5 %, rotation to 15°. Every gesture is one undo step labelled with the picked
+// characters.
 
 const DEG = Math.PI / 180;
-/** Tilt degrees per screen px of handle travel. */
-const TILT_PER_PX = 0.5;
 const r1 = (v: number) => Math.round(v * 10) / 10;
 
 const mid = (a: Pt, b: Pt): Pt => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
@@ -38,9 +36,6 @@ export function GlyphGizmo({ layer, gz, stage, indices }: { layer: TextLayer; gz
   const sides = { left: mid(F[0], F[3]), right: mid(F[1], F[2]), top: topMid, bottom: mid(F[3], F[2]) };
   // Spaced so neighbouring hit areas (HIT_R) stay apart around glyphs of normal on-screen size.
   const rot = outward(c, topMid, 30);
-  const tiltXAt = outward(c, sides.bottom, 28);
-  const tiltYAt = outward(c, sides.right, 28);
-  const zAt = outward(c, F[1], 30);
   const chars0 = layer.source.chars;
   const primary = chars0[indices[0]];
   const label = pickedText(layer.source, indices);
@@ -105,22 +100,6 @@ export function GlyphGizmo({ layer, gz, stage, indices }: { layer: TextLayer; gz
     });
   };
 
-  const startTilt = (e: React.PointerEvent, axis: 'x' | 'y') => {
-    const key = oneShot(`glyph-tilt:${layer.id}`);
-    const sx = e.clientX;
-    const sy = e.clientY;
-    const t0 = (axis === 'x' ? primary?.tiltX : primary?.tiltY) ?? 0;
-    // A mirrored axis turns the other way on screen: the handles keep their screen sides.
-    const mirror = (axis === 'x' ? layer.transform.flipY : layer.transform.flipX) ? -1 : 1;
-    drag(e, (ev) => {
-      // Bottom handle: dragging down pulls the bottom toward the viewer (−tiltX). Right handle: dragging right brings the right side forward (+tiltY).
-      let delta = mirror * (axis === 'x' ? -(ev.clientY - sy) * TILT_PER_PX : (ev.clientX - sx) * TILT_PER_PX);
-      if (ev.shiftKey) delta = snap(t0 + delta, 15) - t0;
-      const clampT = (v: number) => r1(Math.max(-89, Math.min(89, v)));
-      writeGlyphs(layer, chars0, indices, (a) => (axis === 'x' ? { ...a, tiltX: clampT((a.tiltX ?? 0) + delta) } : { ...a, tiltY: clampT((a.tiltY ?? 0) + delta) }), key, 'Tilt {chars}');
-    });
-  };
-
   return (
     <g className="glyph-gizmo">
       {gz.selected.map((g) => {
@@ -129,7 +108,7 @@ export function GlyphGizmo({ layer, gz, stage, indices }: { layer: TextLayer; gz
       })}
       {/* Visual only: presses inside the frame reach the Viewport, which tells picked from unpicked glyphs. */}
       <polygon className="glyph-frame" points={poly(F)} />
-      <line className="rot-stem" x1={topMid.x} y1={topMid.y} x2={rot.x} y2={rot.y} />
+      {!is3D && <line className="rot-stem" x1={topMid.x} y1={topMid.y} x2={rot.x} y2={rot.y} />}
       {F.map((p, i) => (
         <Handle key={i} x={p.x} y={p.y} cursor={i % 2 === 0 ? 'nwse-resize' : 'nesw-resize'} title={t('Scale {chars} (Shift: 5% steps)', { chars: label })} onDown={startScale}>
           <rect className="handle glyph scale" x={p.x - 5} y={p.y - 5} width={10} height={10} />
@@ -159,33 +138,12 @@ export function GlyphGizmo({ layer, gz, stage, indices }: { layer: TextLayer; gz
           </Handle>
         );
       })}
-      <Handle x={rot.x} y={rot.y} cursor={ROTATE_CURSOR} title={t('Rotate {chars} (Shift: 15° steps)', { chars: label })} onDown={startRotate}>
-        <circle className="handle glyph rot" cx={rot.x} cy={rot.y} r={6} />
-      </Handle>
-      {is3D && (
-        <>
-          <Handle x={tiltXAt.x} y={tiltXAt.y + 5} cursor="ns-resize" title={t('Tilt {chars} about X: drag up / down (Shift: 15° steps)', { chars: label })} onDown={(e) => startTilt(e, 'x')}>
-            <path className="handle glyph tilt" d={arcPath(tiltXAt, 'h')} />
-          </Handle>
-          <Handle x={tiltYAt.x + 5} y={tiltYAt.y} cursor="ew-resize" title={t('Tilt {chars} about Y: drag left / right (Shift: 15° steps)', { chars: label })} onDown={(e) => startTilt(e, 'y')}>
-            <path className="handle glyph tilt" d={arcPath(tiltYAt, 'v')} />
-          </Handle>
-          <Handle
-            x={zAt.x}
-            y={zAt.y}
-            cursor="ns-resize"
-            className="z"
-            title={t('Push {chars} in Z: drag up = toward the viewer (Shift: 5% steps; or ⌥-drag the glyph)', { chars: label })}
-            onDown={(e) => startGlyphMove(e, layer, indices, gz, stage, true)}
-          >
-            <circle className="handle glyph z" cx={zAt.x} cy={zAt.y} r={8} />
-            <text className="z-label" x={zAt.x} y={zAt.y + 3.5} textAnchor="middle">
-              Z
-            </text>
-          </Handle>
-        </>
+      {!is3D && (
+        <Handle x={rot.x} y={rot.y} cursor={ROTATE_CURSOR} title={t('Rotate {chars} (Shift: 15° steps)', { chars: label })} onDown={startRotate}>
+          <circle className="handle glyph rot" cx={rot.x} cy={rot.y} r={6} />
+        </Handle>
       )}
-      <circle className="pivot glyph" cx={pivot.x} cy={pivot.y} r={2.5} />
+      {!is3D && <circle className="pivot glyph" cx={pivot.x} cy={pivot.y} r={2.5} />}
       <text className="glyph-readout" x={F[3].x} y={F[3].y + 16}>
         {readout(primary, is3D, t)}
       </text>
@@ -193,18 +151,12 @@ export function GlyphGizmo({ layer, gz, stage, indices }: { layer: TextLayer; gz
   );
 }
 
-/** A short double-headed arc handle centred on `p`: 'h' spans left-right (bottom tilt), 'v' up-down (side tilt). */
-function arcPath(p: Pt, dir: 'h' | 'v') {
-  const r = 9;
-  return dir === 'h'
-    ? `M ${p.x - r} ${p.y - 3} Q ${p.x} ${p.y + 7} ${p.x + r} ${p.y - 3} L ${p.x + r} ${p.y + 3} Q ${p.x} ${p.y + 13} ${p.x - r} ${p.y + 3} Z`
-    : `M ${p.x - 3} ${p.y - r} Q ${p.x + 7} ${p.y} ${p.x - 3} ${p.y + r} L ${p.x + 3} ${p.y + r} Q ${p.x + 13} ${p.y} ${p.x + 3} ${p.y - r} Z`;
-}
-
+/** The primary glyph's values in the Letters section's order: position (%), rotation (3D: X, Y, Z), scale, 長体 / 平体. */
 function readout(a: CharAdjust | undefined, is3D: boolean, t: (en: string, vars?: TVars) => string) {
   if (!a) return '';
-  const parts = [`${r1(a.dx)}, ${r1(a.dy)}%`, `${Math.round(a.scale * 100)}%`, `${r1(a.rotate)}°`];
+  const pos = is3D ? [a.dx, a.dy, a.dz ?? 0] : [a.dx, a.dy];
+  const rot = is3D ? [a.tiltX ?? 0, a.tiltY ?? 0, a.rotate] : [a.rotate];
+  const parts = [`${pos.map(r1).join(', ')}%`, rot.map((v) => `${r1(v)}°`).join(', '), `${Math.round(a.scale * 100)}%`];
   if ((a.hScale ?? 1) !== 1 || (a.vScale ?? 1) !== 1) parts.push(t('W {w}% H {h}%', { w: Math.round((a.hScale ?? 1) * 100), h: Math.round((a.vScale ?? 1) * 100) }));
-  if (is3D && (a.dz || a.tiltX || a.tiltY)) parts.push(`z ${r1(a.dz ?? 0)}%`, t('tilt {x}° / {y}°', { x: r1(a.tiltX ?? 0), y: r1(a.tiltY ?? 0) }));
   return parts.join(' · ');
 }

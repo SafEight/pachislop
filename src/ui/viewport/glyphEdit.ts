@@ -29,26 +29,17 @@ function layerDelta(gz: GlyphGizmoGeom, p0: Pt, p1: Pt): Pt | null {
   return a && b ? { x: b.x - a.x, y: b.y - a.y } : null;
 }
 
-/**
- * Move the picked glyphs with the pointer (dx / dy); with `depth`, vertical travel pushes them
- * in z instead (3D: up = toward the viewer). Shift: one axis.
- */
-export function startGlyphMove(e: React.PointerEvent, layer: TextLayer, indices: number[], gz: GlyphGizmoGeom, stage: StageMap, depth: boolean, onClick?: (ev: PointerEvent) => void) {
+/** Move the picked glyphs with the pointer (dx / dy on the glyph's plane). Shift: one axis. */
+export function startGlyphMove(e: React.PointerEvent, layer: TextLayer, indices: number[], gz: GlyphGizmoGeom, stage: StageMap, onClick?: (ev: PointerEvent) => void) {
   const chars0 = layer.source.chars;
   const size = layer.source.size;
   const p0 = stage.toComp(e.clientX, e.clientY);
   const sx = e.clientX;
   const sy = e.clientY;
   const key = oneShot(`glyph-move:${layer.id}`);
-  const scale = Math.max(1e-6, Math.abs(layer.transform.scale));
   press(e, {
     onClick,
     onDrag: (ev) => {
-      if (depth) {
-        const dz = ((-(ev.clientY - sy) / stage.d / scale) / size) * 100;
-        writeGlyphs(layer, chars0, indices, (a) => ({ ...a, dz: r2((a.dz ?? 0) + (ev.shiftKey ? snap(dz, 5) : dz)) }), key, 'Push {chars}');
-        return;
-      }
       let cx = ev.clientX;
       let cy = ev.clientY;
       if (ev.shiftKey) {

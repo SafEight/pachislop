@@ -35,7 +35,7 @@ export interface GoldenCase {
 
 const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, '_');
 
-const project = (name: string, layers: Layer[]): Project => ({ version: 8, name, comp: defaultComp(), layers: normalizeTree(layers) });
+const project = (name: string, layers: Layer[]): Project => ({ version: 9, name, comp: defaultComp(), layers: normalizeTree(layers) });
 
 /** The standard titles: 2D looks and effects on 確定, 3D looks on BIG. */
 const title2D = (text = '確定', y = 0) => {

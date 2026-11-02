@@ -44,9 +44,11 @@ import {
   viewCorners,
   type Pt,
 } from './viewport/geometry';
+import { Gizmo3D } from './viewport/Gizmo3D';
+import { glyphTarget, layerTarget, startFreeRotate } from './viewport/gizmoEdit';
 import { GlyphGizmo } from './viewport/GlyphGizmo';
 import { nudgeGlyphs, startGlyphMove, type TextLayer } from './viewport/glyphEdit';
-import { glyphGizmo } from './viewport/glyphs';
+import { glyphGizmo, type GlyphGizmoGeom } from './viewport/glyphs';
 import { gradientTarget } from './viewport/gradientTarget';
 import { ARROW_PX, Handle, ROTATE_CURSOR, SNAP_PX } from './viewport/Handle';
 import { LightDial } from './viewport/LightDial';
@@ -341,18 +343,17 @@ export function Viewport() {
   };
 
   /**
-   * Move gesture on the selected layers (or orbit of a single 3D layer). The moving layers'
-   * common box snaps its edges and centre to the comp edges / centre and to other visible
-   * layers' edges / centres (⌘/Ctrl held: no snapping); Shift constrains to the dominant axis.
-   * `onClick` runs when the press never travels.
+   * Move gesture on the selected layers (⌥ on a single 3D layer: free rotate, as the 3D gizmo's
+   * ring). The moving layers' common box snaps its edges and centre to the comp edges / centre
+   * and to other visible layers' edges / centres (⌘/Ctrl held: no snapping); Shift constrains to
+   * the dominant axis. `onClick` runs when the press never travels.
    */
   const startLayerDrag = (e: React.PointerEvent, target: Layer, onClick?: () => void) => {
-    const key = oneShot(`drag:${target.id}`);
     const st = useEditor.getState();
-    const t0 = target.transform;
+    if (target.kind === 'title3d' && e.altKey && !target.locked && st.selectedLayerIds.length <= 1) return startFreeRotate(e, layerTarget(target), onClick);
+    const key = oneShot(`drag:${target.id}`);
     const sx = e.clientX;
     const sy = e.clientY;
-    const orbit = target.kind === 'title3d' && (view.orbit || e.altKey) && st.selectedLayerIds.length <= 1;
     const layers = st.project.layers;
     const picked = st.selectedLayerIds.includes(target.id) ? st.selectedLayerIds : [target.id];
     const moving = new Set(withDescendants(layers, picked));
@@ -386,10 +387,6 @@ export function Viewport() {
       onDrag: (ev) => {
         let dx = ev.clientX - sx;
         let dy = ev.clientY - sy;
-        if (orbit) {
-          edit((p) => withTransform(p, target.id, { rotY: round1(t0.rotY + dx * 0.4), rotX: round1(t0.rotX + dy * 0.4) }), key, 'Orbit');
-          return;
-        }
         if (ev.shiftKey) {
           if (Math.abs(dx) > Math.abs(dy)) dy = 0;
           else dx = 0;
@@ -520,7 +517,7 @@ export function Viewport() {
   const onMovePress = (e: React.PointerEvent, s: EditorState, p: Pt) => {
     if (e.altKey && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
       // ⌥-click on a title selects the style part under the cursor (face, rim, band, side, plate);
-      // an ⌥-drag still moves it (orbits a 3D title).
+      // an ⌥-drag still moves it (free-rotates a 3D title).
       const layers = s.project.layers;
       const sel = layers.find((l) => l.id === s.selectedLayerId);
       const title = isTitleLayer(sel) && pickable(layers)(sel) && layerHit(comp, sel, p) ? sel : hitLeaf(comp, layers, p, isTitleLayer);
@@ -557,9 +554,9 @@ export function Viewport() {
 
   /**
    * Per-letter tool: a press on a glyph of any text layer selects that layer and glyph and
-   * drags it (⇧ adds to the pick on the same layer; ⌥ on 3D pushes in depth). Around the picked
-   * glyphs' gizmo box the press belongs to the gizmo; on empty canvas a drag marquees glyphs of
-   * the selected text and a click drops the pick.
+   * drags it (⇧ adds to the pick on the same layer; ⌥ on 3D rotates it freely, as the 3D gizmo's
+   * ring). Around the picked glyphs' gizmo box the press belongs to the gizmo; on empty canvas a
+   * drag marquees glyphs of the selected text and a click drops the pick.
    */
   const onGlyphPress = (e: React.PointerEvent, s: EditorState, p: Pt) => {
     const layers = s.project.layers;
@@ -570,9 +567,13 @@ export function Viewport() {
       const gz = glyphGizmo(comp, l, chars);
       return { gz, hit: gz ? [...gz.glyphs].reverse().find((g) => inPolygon(gz.polys.get(g.index) ?? [], p)) : undefined };
     };
+    const grab = (l: TextLayer, chars: number[], gz: GlyphGizmoGeom, onClick?: () => void) => {
+      const free = e.altKey ? glyphTarget(l, chars, gz) : null;
+      if (free) startFreeRotate(e, free, onClick);
+      else startGlyphMove(e, l, chars, gz, stage, onClick);
+    };
     if (textSel) {
       const { gz, hit } = glyphAt(textSel, s.selectedChars);
-      const depth = textSel.kind === 'title3d' && e.altKey;
       if (gz && s.selectedChars.length > 0) {
         // Just around the gizmo box (a near-miss on a handle) belongs to the gizmo, even over a
         // neighbouring glyph; only a press clearly on another glyph picks it.
@@ -582,18 +583,18 @@ export function Viewport() {
         if (hit && !picked.has(hit.index) && !nearFrame) {
           const next = e.shiftKey ? [...s.selectedChars, hit.index].sort((x, y) => x - y) : [hit.index];
           selectChars(next);
-          startGlyphMove(e, textSel, next, glyphGizmo(comp, textSel, next)!, stage, depth);
+          grab(textSel, next, glyphGizmo(comp, textSel, next)!);
           return;
         }
         if (hit || inFrame || nearFrame) {
           // Shift-click (no drag) on a picked glyph drops it from the pick.
           const drop = hit && e.shiftKey ? () => selectChars(s.selectedChars.filter((i) => i !== hit.index)) : undefined;
-          startGlyphMove(e, textSel, s.selectedChars, gz, stage, depth, drop);
+          grab(textSel, s.selectedChars, gz, drop);
           return;
         }
       } else if (hit) {
         selectChars([hit.index]);
-        startGlyphMove(e, textSel, [hit.index], glyphGizmo(comp, textSel, [hit.index])!, stage, depth);
+        grab(textSel, [hit.index], glyphGizmo(comp, textSel, [hit.index])!);
         return;
       }
     }
@@ -605,7 +606,7 @@ export function Viewport() {
       if (!hit) continue;
       selectLayer(l.id);
       selectChars([hit.index]);
-      startGlyphMove(e, l as TextLayer, [hit.index], glyphGizmo(comp, l, [hit.index])!, stage, l.kind === 'title3d' && e.altKey);
+      grab(l as TextLayer, [hit.index], glyphGizmo(comp, l, [hit.index])!);
       return;
     }
     if (!isEmptyPress(e)) return;
@@ -933,7 +934,9 @@ export function Viewport() {
 
   const stageBg =
     view.previewBg === 'checker' ? undefined : { background: view.previewBg === 'black' ? '#000' : view.previewBg === 'white' ? '#fff' : view.previewBgColor };
-  const is3D = layer?.kind === 'title3d';
+  // A single selected 3D layer gets the 3D gizmo instead of the rotate stem; picked glyphs of a 3D text get it too.
+  const gizmoLayer = transformHandles && layer?.kind === 'title3d' && layer.visible && selectedIds.length === 1 ? layer : null;
+  const glyphGizmo3D = glyphMode && gz && textLayer ? glyphTarget(textLayer, selectedChars, gz) : null;
   const cursorClass = `tool-${tool}${tool === 'zoom' && altDown ? ' zoom-out' : ''}`;
   return (
     <div className="viewport">
@@ -987,28 +990,29 @@ export function Viewport() {
               return pts ? <polygon key={g.index} className={`glyph-box ${faced.has(g.index) ? 'has-face' : ''}`} points={poly(pts.map(S))} /> : null;
             })}
           {layer && corners && !layer.locked && !editing && (
-            <g className={`selection ${is3D && view.orbit ? 'orbit' : ''} ${glyphTool ? 'glyph-mode' : ''}`}>
+            <g className={`selection ${glyphTool ? 'glyph-mode' : ''}`}>
               {fxCorners && (
                 <polygon className="fx-box" points={poly(fxCorners)}>
                   <title>{t("Reach of the layer's effects")}</title>
                 </polygon>
               )}
               <polygon className="sel-box" points={poly(corners)} />
-              {transformHandles && rotHandle && <line className="rot-stem" x1={rotHandle.from.x} y1={rotHandle.from.y} x2={rotHandle.at.x} y2={rotHandle.at.y} />}
+              {transformHandles && !gizmoLayer && rotHandle && <line className="rot-stem" x1={rotHandle.from.x} y1={rotHandle.from.y} x2={rotHandle.at.x} y2={rotHandle.at.y} />}
               {transformHandles &&
                 corners.map((c, i) => (
                   <Handle key={i} x={c.x} y={c.y} cursor={i % 2 === 0 ? 'nwse-resize' : 'nesw-resize'} title={t('Drag to scale (Shift: 5% steps)')} onDown={(e) => startScale(e, layer)}>
                     <rect className="handle scale" x={c.x - 5} y={c.y - 5} width={10} height={10} />
                   </Handle>
                 ))}
-              {transformHandles && rotHandle && (
+              {transformHandles && !gizmoLayer && rotHandle && (
                 <Handle x={rotHandle.at.x} y={rotHandle.at.y} cursor={ROTATE_CURSOR} title={t('Drag to rotate (Shift: 15° steps)')} onDown={(e) => startRotate(e, layer)}>
                   <circle className="handle rot" cx={rotHandle.at.x} cy={rotHandle.at.y} r={6} />
                 </Handle>
               )}
-              {transformHandles && pivot && <circle className="pivot" cx={pivot.x} cy={pivot.y} r={3} />}
+              {transformHandles && !gizmoLayer && pivot && <circle className="pivot" cx={pivot.x} cy={pivot.y} r={3} />}
             </g>
           )}
+          {gizmoLayer && <Gizmo3D key={`layer:${gizmoLayer.id}`} comp={comp} target={layerTarget(gizmoLayer)} stage={stage} />}
           {!editing &&
             partShapes.map((shape) => (
               <g key={shape.key} className="part-outline">
@@ -1025,6 +1029,8 @@ export function Viewport() {
           {genHandles && <GeneratorHandles comp={comp} layer={genHandles} stage={stage} />}
           {maskShown && <MaskHandles layer={maskShown.layer} mask={maskShown.mask} stage={stage} active={maskActive} />}
           {glyphMode && gz && textLayer && <GlyphGizmo layer={textLayer} gz={gz} stage={stage} indices={selectedChars} />}
+          {/* Above the glyph handles: the side bars it may cover have twins on the other side (left / bottom). */}
+          {glyphGizmo3D && <Gizmo3D key={`glyph:${glyphGizmo3D.id}`} comp={comp} target={glyphGizmo3D} stage={stage} />}
           {lightAt && <LightDial comp={comp} at={lightAt} />}
           {band && (
             <rect
@@ -1083,7 +1089,6 @@ export function Viewport() {
   );
 }
 
-const round1 = (v: number) => Math.round(v * 10) / 10;
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
 /** Corners of an axis-aligned comp box: TL, TR, BR, BL (screen order). */

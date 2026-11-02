@@ -93,7 +93,7 @@ export const isAdd = (m: Match): m is AddMatch => 'def' in m;
 const SYNONYMS: readonly (readonly string[])[] = [
   ['blur', 'soften', 'feather', 'defocus', 'ぼかし', 'ぼけ', 'ソフト'],
   ['depth', 'extrude', 'extrusion', 'thickness', 'push z', '奥行き', '深さ', '押し出し', '厚み'],
-  ['tilt', 'tilt x', 'tilt y', 'turn y', 'rotx', 'roty', '傾き', 'チルト'],
+  ['tilt', 'tilt x', 'tilt y', 'turn y', 'orbit', 'rotation x', 'rotation y', 'rotx', 'roty', '傾き', 'チルト', 'x 回転', 'y 回転'],
   ['gold', '金', 'ゴールド'],
   ['silver', '銀', 'シルバー'],
   ['rim', 'stroke', 'border', 'band', '境界線', '縁', 'フチ', 'バンド'],

@@ -54,7 +54,7 @@ import { createTonemapMaterial, TONEMAP_IDS } from './tonemap';
 //
 // Oblique extrusion (skew): x += skew.x·(−z), y += skew.y·(−z) as the `sheared` group's
 // matrix; three's normal matrix (inverse transpose) keeps the lighting exact. Rigged glyphs:
-// p' = T(pivot + dz·ẑ) · Ry(−tiltY) · Rx(tiltX) · T(−pivot), pivot = the glyph's em-cell
+// p' = T(pivot + dz·ẑ) · Ry(tiltY) · Rx(tiltX) · T(−pivot), pivot = the glyph's em-cell
 // centre at mid-depth of the main solid (title.ts). Both are matrices, so dragging them
 // never rebuilds geometry.
 //
@@ -327,7 +327,7 @@ function geometryKey(layer: Title3DLayer, outputScale: number): string {
 function rigMatrix(out: THREE.Matrix4, rig: GlyphRig, layer: Title3DLayer, pivotZ: number): THREE.Matrix4 {
   const a = layer.source.kind === 'text' ? layer.source.chars[rig.char] : undefined;
   const dz = ((a?.dz ?? 0) / 100) * layer.source.size;
-  _euler.set((a?.tiltX ?? 0) * DEG, -(a?.tiltY ?? 0) * DEG, 0, 'YXZ'); // X applied first, then Y
+  _euler.set((a?.tiltX ?? 0) * DEG, (a?.tiltY ?? 0) * DEG, 0, 'YXZ'); // X applied first, then Y
   out.makeRotationFromEuler(_euler);
   _pivot.set(rig.pivot.x, rig.pivot.y, pivotZ);
   _move.copy(_pivot).applyMatrix4(out); // R·pivot

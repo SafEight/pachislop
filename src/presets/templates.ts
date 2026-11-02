@@ -294,7 +294,7 @@ function project(name: string, layers: Layer[], o: { width?: number; height?: nu
   const pending = lit.flatMap((l: WithLook<Layer>) => (l[LOOK] ? [{ id: l.id, look: l[LOOK] }] : []));
   const materialLinks: MaterialLinks = Object.assign({}, ...lit.map((l: WithLook<Layer>) => l[LINKS] ?? {}));
   let out: Project = {
-    version: 8,
+    version: 9,
     name,
     comp,
     layers: lit.map((l: WithLook<Layer>) => {

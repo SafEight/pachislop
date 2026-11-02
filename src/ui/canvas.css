@@ -158,11 +158,6 @@
   stroke: var(--accent);
   stroke-width: 1.5;
 }
-.overlay .handle.glyph.tilt {
-  fill: #ffd34a;
-  stroke: #000;
-  stroke-width: 1;
-}
 .overlay .pivot.glyph {
   fill: var(--accent);
 }
@@ -190,16 +185,6 @@
   stroke: var(--accent);
 }
 
-.overlay .handle.glyph.z {
-  fill: #46d7ff;
-  stroke: #000;
-  stroke-width: 1;
-}
-.overlay .z-label {
-  fill: #000;
-  font-weight: 700;
-  font-size: 10px;
-}
 .overlay .bend-stem {
   stroke: #46d7ff;
   stroke-width: 1;
@@ -497,6 +482,116 @@
   stroke: #fff;
   stroke-width: 2.5;
   filter: drop-shadow(0 0 3px var(--accent2));
+}
+
+/* 3D gizmo (viewport/Gizmo3D.tsx): X red, Y green, Z blue; arrows, arcs and the free-rotate
+   ring take presses on their stroke only (hit lines), so the object stays draggable between them. */
+.overlay .gz3 .ax0 {
+  --ax: #ff6b5f;
+}
+.overlay .gz3 .ax1 {
+  --ax: #62d46f;
+}
+.overlay .gz3 .ax2 {
+  --ax: #55a2ff;
+}
+.overlay .gz3 .hh .hit.stroke,
+.overlay .gz3 .hh:hover .hit.stroke {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16px;
+  stroke-linecap: round;
+  pointer-events: stroke;
+}
+.overlay .gz3 .hh .hit.ring,
+.overlay .gz3 .hh:hover .hit.ring {
+  stroke-width: 10px;
+}
+/* An arrowhead takes presses on itself plus a 3 px margin: heads of arrows pointing alike stay apart. */
+.overlay .gz3 .hh .hit.head,
+.overlay .gz3 .hh:hover .hit.head {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 6px;
+  stroke-linejoin: round;
+}
+/* A dark halo keeps the colours readable over bright gold faces. */
+.overlay .gz3-shaft,
+.overlay .gz3-arc {
+  fill: none;
+  stroke: var(--ax);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 1px #000);
+}
+.overlay .gz3-arc {
+  stroke-width: 3;
+}
+/* An axis seen head-on, drawn on the down-left diagonal. */
+.overlay .gz3-shaft.diag {
+  stroke-dasharray: 5 3;
+}
+.overlay .gz3-head,
+.overlay .gz3-tip {
+  fill: var(--ax);
+}
+.overlay .gz3-head,
+.overlay .gz3-ring {
+  filter: drop-shadow(0 0 1px #000);
+}
+.overlay .gz3 text.gz3-label {
+  fill: var(--ax);
+  font-size: 10px;
+  font-weight: 700;
+}
+.overlay .gz3-ring {
+  fill: none;
+  stroke: #ffffffa0;
+  stroke-width: 1.2;
+}
+.overlay .gz3-centre {
+  fill: #ffffffd0;
+  stroke: #000;
+  stroke-width: 1;
+}
+/* Hovered ('hot', both parts of an arrow) or dragged ('active'). */
+.overlay .gz3 .hot .gz3-shaft,
+.overlay .gz3 .active .gz3-shaft,
+.overlay .gz3 .hot .gz3-arc,
+.overlay .gz3 .active .gz3-arc {
+  stroke-width: 4.5;
+  filter: drop-shadow(0 0 3px var(--ax));
+}
+.overlay .gz3 .hot .gz3-head,
+.overlay .gz3 .active .gz3-head {
+  stroke: #fff;
+  stroke-width: 1;
+  filter: drop-shadow(0 0 3px var(--ax));
+}
+.overlay .gz3 .hot .gz3-ring,
+.overlay .gz3 .active .gz3-ring {
+  stroke: #fff;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 3px var(--accent2));
+}
+.overlay .gz3 .hot .gz3-centre,
+.overlay .gz3 .active .gz3-centre {
+  fill: #fff;
+  filter: drop-shadow(0 0 3px var(--accent2));
+}
+/* While dragging, the other handles step back. */
+.overlay .gz3.dragging > g:not(.active) {
+  opacity: 0.35;
+}
+.overlay .gz3-guide {
+  stroke: var(--ax);
+  stroke-width: 1;
+  stroke-dasharray: 6 4;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.overlay .gz3-readout {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Files dragged over the canvas (viewport/FileDrop.tsx): the drop zones cover the whole area,

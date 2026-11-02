@@ -29,7 +29,7 @@ import { materialEffects } from './migrate/materialEffects';
 
 // `.pslot.json` project files: the Project JSON plus every referenced non-builtin font and binary
 // asset, base64-encoded, so a file is self-contained. Builtin fonts are referenced by id only (they
-// ship with the app and load lazily). Version 8 is written; version 4 to 7 files (and autosaves)
+// ship with the app and load lazily). Version 9 is written; version 4 to 8 files (and autosaves)
 // are upgraded by `migrateProject`; versions 1–3 are rejected with a clear message.
 
 export const PROJECT_EXT = '.pslot.json';
@@ -42,9 +42,9 @@ interface EmbeddedBlob {
 }
 
 /** Project versions this app opens (older ones are upgraded on load). */
-export type ProjectVersion = 4 | 5 | 6 | 7 | 8;
+export type ProjectVersion = 4 | 5 | 6 | 7 | 8 | 9;
 
-const isSupported = (v: unknown): v is ProjectVersion => v === 4 || v === 5 || v === 6 || v === 7 || v === 8;
+const isSupported = (v: unknown): v is ProjectVersion => v === 4 || v === 5 || v === 6 || v === 7 || v === 8 || v === 9;
 
 export interface ProjectFile {
   format: 'pslot';
@@ -60,7 +60,7 @@ export interface Bundle {
   assets: { id: string; name: string; mime: string; data: ArrayBuffer }[];
   /** Project version the data was saved as (4: see `compensateV4CharScale`). */
   version: ProjectVersion;
-  /** Notes about the load (e.g. a v7 file upgraded to v8); empty for current files. */
+  /** Notes about the load (e.g. a v8 file upgraded to v9); empty for current files. */
   notes: Msg[];
 }
 
@@ -132,7 +132,7 @@ export async function installBundle(b: Omit<Bundle, 'notes' | 'version'>): Promi
 }
 
 // ---------------------------------------------------------------------------------------------
-// v4 / v5 / v6 / v7 → v8 migration
+// v4 / v5 / v6 / v7 / v8 → v9 migration
 //
 // Every function below fills fields that are MISSING with their current value and keeps whatever
 // is present, so it is idempotent and safe on current data (user presets of any version go through
@@ -169,6 +169,10 @@ export async function installBundle(b: Omit<Bundle, 'notes' | 'version'>): Promi
 // reached (the layer's blur was a floor for part environments), which inherit, so the layer's
 // blur keeps reaching the part and its repeat now does too (a part with repeat 1 under a layer
 // repeating the environment is the one render that changes); `null` sets none.
+// v9 turned CharAdjust.tiltY around to match the layer's Transform.rotY (+ = right side away from
+// the viewer; before, + brought the right side toward the viewer). It is read by version, like the
+// v8 lighting (a v8 tilt and a v9 one look alike): a v4–v8 text layer's stored tiltY is negated
+// (`flipTiltY`, `migrateChars`); absent or 0 stays as is, so every glyph keeps its tilt.
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -344,20 +348,22 @@ export function migrateEffects(effects: EffectInstance[]): EffectInstance[] {
   });
 }
 
-function migrateChars(chars: Record<number, CharAdjust>, is3D: boolean, legacy: LegacyLighting | null): Record<number, CharAdjust> {
+/** `flipTiltY`: v4–v8 data, whose tiltY turned the other way (see the v9 notes). */
+function migrateChars(chars: Record<number, CharAdjust>, is3D: boolean, legacy: LegacyLighting | null, flipTiltY: boolean): Record<number, CharAdjust> {
   const out: Record<number, CharAdjust> = {};
   for (const [k, c] of Object.entries(chars)) {
     const face = !is3D && c.face ? migrateMaterial2D(c.face) : c.face;
     const face3d = c.face3d && migrateMaterial3D(c.face3d, legacy);
     const bands3d = c.bands3d?.map((m) => m && migrateMaterial3D(m, legacy));
     const side3d = c.side3d && migrateMaterial3D(c.side3d, legacy);
-    out[Number(k)] = { ...c, ...(face ? { face } : {}), ...(face3d ? { face3d } : {}), ...(bands3d ? { bands3d } : {}), ...(side3d ? { side3d } : {}) };
+    const tilt = flipTiltY && c.tiltY ? { tiltY: -c.tiltY } : {};
+    out[Number(k)] = { ...c, ...tilt, ...(face ? { face } : {}), ...(face3d ? { face3d } : {}), ...(bands3d ? { bands3d } : {}), ...(side3d ? { side3d } : {}) };
   }
   return out;
 }
 
-/** `legacy`: v4–v7 data (see the v8 notes), in a document whose environment blur is `docBlur`. */
-function migrateLayer(l: Layer, legacy: { docBlur: number } | undefined): Layer {
+/** `legacy`: v4–v7 data (see the v8 notes), in a document whose environment blur is `docBlur`; `flipTiltY`: v4–v8 data (see the v9 notes). */
+function migrateLayer(l: Layer, legacy: { docBlur: number } | undefined, flipTiltY: boolean): Layer {
   const effects = migrateEffects(l.effects ?? []);
   const clip = l.clip ?? false;
   const masks = l.masks ?? [];
@@ -375,7 +381,7 @@ function migrateLayer(l: Layer, legacy: { docBlur: number } | undefined): Layer 
           vScale: l.source.vScale ?? 1,
           tsume: l.source.tsume ?? 0,
           tateChuYoko: l.source.tateChuYoko ?? false,
-          chars: migrateChars(l.source.chars ?? {}, l.kind === 'title3d', charLegacy),
+          chars: migrateChars(l.source.chars ?? {}, l.kind === 'title3d', charLegacy, flipTiltY),
           lines: l.source.lines ?? {},
         }
       : l.source.kind === 'image'
@@ -388,7 +394,7 @@ function migrateLayer(l: Layer, legacy: { docBlur: number } | undefined): Layer 
 }
 
 /**
- * A version 4 to 8 project as a complete version 8 project (see the migration notes above).
+ * A version 4 to 9 project as a complete version 9 project (see the migration notes above).
  * Throws on anything else.
  */
 export function migrateProject(json: unknown): Project {
@@ -399,11 +405,12 @@ export function migrateProject(json: unknown): Project {
   const comp = defaultComp();
   const environment = migrateEnvironment(p.comp.environment);
   const legacy = version < 8 ? { docBlur: environment.blur } : undefined;
+  const flipTiltY = version < 9;
   const filledIn: Project = {
     ...p,
-    version: 8,
+    version: 9,
     comp: { ...p.comp, globalLight: filled(comp.globalLight, p.comp.globalLight), dpi: p.comp.dpi ?? comp.dpi, environment },
-    layers: p.layers.map((l) => migrateLayer(l, legacy)),
+    layers: p.layers.map((l) => migrateLayer(l, legacy, flipTiltY)),
   };
   // The migration steps of src/io/migrate/, in order.
   return contentEffects(materialEffects(effectDedupe(generatorParams(filledIn))));
@@ -411,8 +418,8 @@ export function migrateProject(json: unknown): Project {
 
 function unsupported(version: unknown): Msg {
   return version === 1 || version === 2 || version === 3
-    ? msg('This is a version {version} project; this version of the app opens version 4 to 8 projects only', { version })
-    : msg('Unsupported project version {version} (expected 4 to 8)', { version: String(version) });
+    ? msg('This is a version {version} project; this version of the app opens version 4 to 9 projects only', { version })
+    : msg('Unsupported project version {version} (expected 4 to 9)', { version: String(version) });
 }
 
 /**
@@ -420,7 +427,7 @@ function unsupported(version: unknown): Msg {
  * upgraded on load; `version` is the one it was saved as.
  */
 export const upgradeNote = (what: string, version: ProjectVersion): Msg =>
-  msg('{what} was made with an earlier version (v{version}) and has been upgraded to v8', { what: msg(what), version });
+  msg('{what} was made with an earlier version (v{version}) and has been upgraded to v9', { what: msg(what), version });
 
 /** Added after `upgradeNote` when `compensateV4CharScale` moved glyphs back to their v4 positions. */
 export const charScaleNote: Msg = msg(
@@ -434,7 +441,7 @@ export function serializeProject(project: Project): string {
   const b = collectBundle(project);
   const file: ProjectFile = {
     format: 'pslot',
-    version: 8,
+    version: 9,
     project,
     fonts: b.fonts.map((f) => ({ id: f.id, name: f.name, data: toBase64(f.data) })),
     assets: b.assets.map((a) => ({ id: a.id, name: a.name, mime: a.mime, data: toBase64(a.data) })),
@@ -464,7 +471,7 @@ export function parseProjectFile(text: string): Bundle {
       data: fromBase64(a.data),
     })),
     version,
-    notes: version === 8 ? [] : [upgradeNote('This project file', version)],
+    notes: version === 9 ? [] : [upgradeNote('This project file', version)],
   };
 }
 

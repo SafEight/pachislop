@@ -580,10 +580,6 @@ canvas.value-check {
   stroke: var(--accent2);
   stroke-width: 1.2;
 }
-.overlay .orbit .sel-box {
-  stroke: #ff9a3d;
-  stroke-dasharray: 6 4;
-}
 .overlay .rot-stem {
   stroke: var(--accent2);
   stroke-width: 1;

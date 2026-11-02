@@ -645,5 +645,5 @@ export function defaultComp(): Comp {
 
 /** A new project: the default comp and no layers (the viewport shows its checkerboard). */
 export function createProject(): Project {
-  return { version: 8, name: 'Untitled', comp: defaultComp(), layers: [] };
+  return { version: 9, name: 'Untitled', comp: defaultComp(), layers: [] };
 }

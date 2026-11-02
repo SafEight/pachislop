@@ -3,8 +3,8 @@ import { ColorInput } from '../controls';
 import { useT } from '../i18n';
 
 // The slim bar under the canvas (Photoshop's bottom-left status): zoom, preview resolution,
-// backdrop, 引き目 checks, guides, 3D orbit drag, CMYK gamut warning, comp size and a hint for
-// the active tool. Everything here is view state: never exported, never undone.
+// backdrop, 引き目 checks, guides, CMYK gamut warning, comp size and a hint for the active tool.
+// Everything here is view state: never exported, never undone.
 
 const ZOOMS: { v: 'fit' | number; label: string }[] = [
   { v: 'fit', label: 'Fit' },
@@ -31,8 +31,8 @@ const DISTANCES: { v: number; label: string }[] = [
 
 /** What a press does with each tool (the status bar's hint). */
 const TOOL_HINT: Record<Tool, string> = {
-  move: 'Move: drag a layer (snaps; ⌘ free, ⇧ one axis / add) · ⌘-click: the other Auto-Select level · drag empty: marquee · ⌥-drag 3D: orbit',
-  glyph: 'Per-letter: click a glyph of any text layer · drag it to move · ⇧-click adds · ⌥-drag 3D: depth · drag empty: marquee glyphs · Esc: back',
+  move: 'Move: drag a layer (snaps; ⌘ free, ⇧ one axis / add) · ⌘-click: the other Auto-Select level · drag empty: marquee · 3D: arrows move, arcs rotate, the ring or ⌥-drag rotates freely',
+  glyph: 'Per-letter: click a glyph of any text layer · drag it to move · ⇧-click adds · 3D: arrows move, arcs rotate, the ring or ⌥-drag rotates freely · drag empty: marquee glyphs · Esc: back',
   text: 'Text: click the canvas to add text · click a text layer to type in it',
   shape: 'Shape: drag to draw the shape (⇧ keeps its proportions) · click adds it at the default size',
   gradient: 'Gradient: drag across the layer to lay the fill (⇧ 15°) · drag the handles to adjust · click picks a layer',
@@ -133,15 +133,6 @@ export function StatusBar({ d, tool }: { d: number; tool: Tool }) {
           aria-label={t('Guides')}
         >
           {t('Guides')}
-        </button>
-        <button
-          className={view.orbit ? 'active' : ''}
-          aria-pressed={view.orbit}
-          onClick={() => setView({ orbit: !view.orbit })}
-          title={t('Orbit: dragging a 3D layer rotates it (X/Y). Alt/Option-drag orbits without this toggle.')}
-          aria-label={t('Orbit')}
-        >
-          ⟲ {t('Orbit')}
         </button>
         <button
           className={view.gamut ? 'active' : ''}

@@ -5,16 +5,17 @@ import { errorMsg, msg, type Msg } from '../store/msg';
 
 // Autosave: the project plus its referenced fonts/assets as a structured-clone record in
 // IndexedDB (ArrayBuffers stored natively, no base64). Builtin fonts are stored by id only and
-// lazy-load when first rendered. When there is no v8 autosave ('current-v8'), a v7, v6, v5 or v4 one
-// ('current-v7', 'current-v6', 'current-v5', 'current-v4', newest first) is upgraded through `migrateProject` (a v4 one
+// lazy-load when first rendered. When there is no v9 autosave ('current-v9'), a v8, v7, v6, v5 or v4 one
+// ('current-v8', 'current-v7', 'current-v6', 'current-v5', 'current-v4', newest first) is upgraded through `migrateProject` (a v4 one
 // then through `compensateV4CharScale`); autosaves of v1–v3 ('current', 'current-v2',
 // 'current-v3') can't be restored, so loading reports and deletes them.
 
 const DB = 'pachislot-visuals';
 const STORE = 'autosave';
-const KEY = 'current-v8';
+const KEY = 'current-v9';
 /** Autosaves of earlier versions that are upgraded, newest first, with the version they hold. */
 const UPGRADED_KEYS = [
+  { key: 'current-v8', version: 8 },
   { key: 'current-v7', version: 7 },
   { key: 'current-v6', version: 6 },
   { key: 'current-v5', version: 5 },
@@ -70,7 +71,7 @@ export async function loadAutosave(): Promise<AutosaveRestore> {
     await tx('readwrite', (s) => s.delete(key));
   }
   let found: { key: string; version: ProjectVersion; b: Stored } | null = null;
-  for (const { key, version } of [{ key: KEY, version: 8 } as const, ...UPGRADED_KEYS]) {
+  for (const { key, version } of [{ key: KEY, version: 9 } as const, ...UPGRADED_KEYS]) {
     const b = (await tx('readonly', (s) => s.get(key))) as Stored | undefined;
     if (!b) continue;
     if (!found) found = { key, version, b };
@@ -89,7 +90,7 @@ export async function loadAutosave(): Promise<AutosaveRestore> {
   // Fonts first: the v4 char-scale compensation measures with them.
   const errors = await installBundle(b);
   const compensated = await compensateV4CharScale(project, version === 4);
-  const notes = version === 8 ? [] : [upgradeNote('The autosaved project', version), ...(compensated !== project ? [charScaleNote] : [])];
+  const notes = version === 9 ? [] : [upgradeNote('The autosaved project', version), ...(compensated !== project ? [charScaleNote] : [])];
   return { kind: 'restored', project: compensated, errors, notes };
 }
 

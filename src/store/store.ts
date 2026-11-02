@@ -103,8 +103,6 @@ export interface ViewState {
   previewBgColor: string;
   /** Title/action-safe + centre guides. */
   safeGuides: boolean;
-  /** Dragging a 3D layer orbits it (rotX/rotY) instead of moving it (Alt/Option-drag does too). */
-  orbit: boolean;
   /** 引き目 distance check: an inset of the comp drawn at `distanceScale` of its pixel size. */
   distance: boolean;
   /** Inset scale, comp px → CSS px (0.25 ≈ an LCD seen from the seat). */

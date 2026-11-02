@@ -31,7 +31,6 @@ export const DEFAULT_VIEW: ViewState = {
   previewBg: 'checker',
   previewBgColor: '#202028',
   safeGuides: false,
-  orbit: false,
   distance: false,
   distanceScale: 0.25,
   valueCheck: false,
