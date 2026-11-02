@@ -9,7 +9,7 @@ Make flashy pachislot title art in your browser. A mix of Photoshop and After Ef
 ## Features
 
 - **2D titles:** stacked rims, bevels, satin, metal finishes, reflection maps, glass and patterns
-- **3D titles:** extrude or inflate, bevel bands, backplates, PBR materials, HDR environments, glints and AO
+- **3D titles:** extrude or inflate, bevels, stacked bands, PBR materials, HDR environments, glints and AO
 - **Effects:** glows, Deep Glow, shadows, blurs, distortions, keylines, gradient overlays, adjustments
 - **Generators:** particles, glints, speed lines, sunbursts, light streaks, fire, smoke, lightning, lens flares
 - **Compositing:** groups, clipping, layer masks, adjustment layers, blend modes
