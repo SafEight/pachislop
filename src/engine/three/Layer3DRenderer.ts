@@ -554,14 +554,32 @@ class Layer3DRendererImpl implements LayerRenderer {
     if (glint) tu.uGlintUv.value.copy(glint.uv);
     tu.uMode.value = TONEMAP_IDS[lighting.toneMapping] ?? 0;
     tu.uExposure.value = Math.max(0, lighting.exposure);
+    this.toneMapInto(kit, target, W, H, k);
+    // the ink an outline effect asked for (ctx.ink): the same pixels without the glint's light
+    if (!ctx.ink) return;
+    if (glint) {
+      tu.uGlint.value = false;
+      this.toneMapInto(kit, ctx.ink, W, H, k);
+    } else kit.copy(target.texture, ctx.ink);
+  }
+
+  /** The tone map pass as set up, at the render resolution `W`×`H`, into `out` (filtered down when supersampled). */
+  private toneMapInto(kit: PassKit, out: THREE.WebGLRenderTarget, W: number, H: number, k: number) {
     if (k === 1) {
-      kit.run(this.tonemap, target);
+      kit.run(this.tonemap!, out);
       return;
     }
     const post = this.postTarget(W, H);
-    kit.run(this.tonemap, post);
+    kit.run(this.tonemap!, post);
     this.down ??= new Downsampler(kit);
-    this.down.run(post, target, k);
+    this.down.run(post, out, k);
+  }
+
+  /** The glint's bloom and star streaks are light added over the title (LayerRenderer.addsLight). */
+  addsLight(layer: Layer): boolean {
+    if (layer.kind !== 'title3d') return false;
+    const g = layer.style3d.glint;
+    return g.enabled && g.intensity > 0;
   }
 
   /**

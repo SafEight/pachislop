@@ -17,7 +17,10 @@ import type { PassKit } from '../passkit';
 //                  one mip where the detail size is a few texels. Isolated hot spots and
 //                  corners throw rays; broad faces, their straight edges and long bevel lines
 //                  (bright along one axis) don't, so the rays read as star glints instead of
-//                  curtains.
+//                  curtains. Each ray is a long thin streak on that mip plus a short, hot,
+//                  twice-as-wide one on the next, so it starts thick and bright at the source
+//                  and tapers into a faint hairline; a round bloom of the detected points sits
+//                  under the rays as the glint's hot core.
 //                ─ sum × tint × intensity → glint texture on the whole render's level-B
 //                  lattice (a preview window gets the texels of that lattice covering it)
 //
@@ -89,12 +92,27 @@ const LUMA_CLAMP = 64;
  */
 const KNEE = 4;
 /**
- * Ray brightness at its start for a source spot one detail-size wide. A ray sums the source
- * along its line, so the gain is divided by the detail size in texels. Tuned on 1× exports.
+ * Ray brightness at its start for a source spot one detail-size wide: the long thin streak. A
+ * ray sums the source along its line, so the gain is divided by the detail size in texels.
+ * Tuned on 1× exports.
  */
-const STREAK_PEAK = 1.2;
+const STREAK_PEAK = 1.5;
 /** Fraction of a ray's start intensity left at its nominal length. */
 const STREAK_TAIL = 0.02;
+/** Start brightness of a ray's short, wide, hot part (one mip coarser), same units as STREAK_PEAK. */
+const STREAK_CORE = 2.5;
+/** Length of a ray's short hot part, fraction of the ray length: the taper from thick to thin. */
+const STREAK_CORE_LEN = 0.22;
+/** Gain of the round bloom on the detected points under the rays (the glint's hot core). */
+const POINT_BLOOM = 8;
+/** Sigma of that bloom, × the detail size. */
+const POINT_BLOOM_SIGMA = 1.2;
+/**
+ * How hard the long rays' source is pinched to the points' centres (see PINCH): a small point
+ * stands at least this far above its bloom and keeps its centre; wider spots and stretches of
+ * curved edges, which stand far less, mostly feed the short hot rays instead.
+ */
+const PINCH_K = 8;
 /** Target gaussian sigma in texels: the mip level is picked to keep sigma near this. */
 const MIP_SIGMA = 5;
 /** Smallest point-detector sigma in texels: below ~3 the detector is pixel-limited. */
@@ -201,11 +219,33 @@ void main() {
 }
 `;
 
+// Narrows the detected points to their centres for the long rays (`tBlur` = the points'
+// bloom): a point is brighter than its blur at its centre and dimmer on its flanks, and a
+// small point stands out of its blur far more than a stretch of a curved edge or a broad
+// spot does. Keeping the point × (point / (blur × uK))², at most 1×, gives a wide hot spot a
+// hairline ray and a curved edge (which the H/V detector passes) a faint sheet, not a curtain.
+const PINCH = /* glsl */ `
+uniform sampler2D tSrc;
+uniform sampler2D tBlur;
+uniform float uK;
+in vec2 vUv;
+out vec4 o;
+void main() {
+  vec3 p = texture( tSrc, vUv ).rgb;
+  vec3 b = texture( tBlur, vUv ).rgb;
+  float lp = max( p.r, max( p.g, p.b ) );
+  float lb = max( b.r, max( b.g, b.b ) );
+  float k = clamp( lp / max( lb * uK, 1e-6 ), 0.0, 1.0 );
+  o = vec4( p * k * k, 1.0 );
+}
+`;
+
 export class GlintPass {
   private readonly bright: THREE.ShaderMaterial;
   private readonly down: THREE.ShaderMaterial;
   private readonly blur: THREE.ShaderMaterial;
   private readonly highpass: THREE.ShaderMaterial;
+  private readonly pinch: THREE.ShaderMaterial;
   private readonly streak: THREE.ShaderMaterial;
   private readonly add: THREE.ShaderMaterial;
   /** Scratch targets keyed `${level}:${slot}`. */
@@ -228,6 +268,7 @@ export class GlintPass {
       fragmentShader: BLUR,
     });
     this.highpass = kit.shader({ uniforms: { tSrc: { value: null }, tBlurX: { value: null }, tBlurY: { value: null } }, fragmentShader: HIGHPASS });
+    this.pinch = kit.shader({ uniforms: { tSrc: { value: null }, tBlur: { value: null }, uK: { value: 1 } }, fragmentShader: PINCH });
     this.streak = kit.shader({
       uniforms: { tSrc: { value: null }, uStep: { value: new THREE.Vector2() }, uFall: { value: 0.5 } },
       fragmentShader: STREAK,
@@ -319,7 +360,8 @@ export class GlintPass {
       slot,
       level: levelFor(sigma, MIP_SIGMA / 2),
     }));
-    const deepest = Math.max(base, ...bloom.map((b) => b.level), streaking ? sl : base);
+    // the rays' short hot part runs one mip below them (sl + 1)
+    const deepest = Math.max(base, ...bloom.map((b) => b.level), streaking ? sl + 1 : base);
     // output texels (whole render's level-B lattice)
     const lx = outLattice(frame.width, frame.x, width, grid);
     const ly = outLattice(frame.height, frame.y, height, grid);
@@ -378,30 +420,49 @@ export class GlintPass {
       this.highpass.uniforms.tBlurX.value = blurX.texture;
       this.highpass.uniforms.tBlurY.value = blurY.texture;
       kit.run(this.highpass, peaks);
-      const fall = STREAK_TAIL ** (1 / len); // per texel
-      const passes = Math.max(1, Math.ceil(Math.log(len + 1) / Math.log(4)));
-      // each pass normalises its 4 taps; undo that so the kernel's first tap weighs 1
-      let kernelSum = 1;
-      for (let i = 0; i < passes; i++) {
-        const f = fall ** 4 ** i;
-        kernelSum *= 1 + f + f * f + f * f * f;
-      }
-      const ping = [this.target(sl, 4, W, H), this.target(sl, 5, W, H)];
-      for (let r = 0; r < rays; r++) {
-        const a = p.angle + (r * 2 * Math.PI) / rays;
-        const dx = Math.cos(a) / peaks.width;
-        const dy = Math.sin(a) / peaks.height;
-        let srcTex = peaks.texture;
+      // hot core: a round bloom of the detected points under the rays
+      const pointBloom = this.gaussian(peaks, sl, 10, sigma * POINT_BLOOM_SIGMA, W, H);
+      addInto(pointBloom.texture, POINT_BLOOM);
+      // one ray per direction of `src` (on `level`), `n` texels long, starting at `gain`
+      const streakRays = (src: THREE.WebGLRenderTarget, level: number, n: number, gain: number) => {
+        const fall = STREAK_TAIL ** (1 / n); // per texel
+        const passes = Math.max(1, Math.ceil(Math.log(n + 1) / Math.log(4)));
+        // each pass normalises its 4 taps; undo that so the kernel's first tap weighs 1
+        let kernelSum = 1;
         for (let i = 0; i < passes; i++) {
-          const stride = 4 ** i;
-          this.streak.uniforms.tSrc.value = srcTex;
-          this.streak.uniforms.uStep.value.set(dx * stride, dy * stride);
-          this.streak.uniforms.uFall.value = fall ** stride;
-          kit.run(this.streak, ping[i % 2]);
-          srcTex = ping[i % 2].texture;
+          const f = fall ** 4 ** i;
+          kernelSum *= 1 + f + f * f + f * f * f;
         }
-        addInto(srcTex, (STREAK_PEAK * kernelSum) / Math.max(1, sigma));
-      }
+        const ping = [this.target(level, 4, W, H), this.target(level, 5, W, H)];
+        for (let r = 0; r < rays; r++) {
+          const a = p.angle + (r * 2 * Math.PI) / rays;
+          const dx = Math.cos(a) / src.width;
+          const dy = Math.sin(a) / src.height;
+          let srcTex = src.texture;
+          for (let i = 0; i < passes; i++) {
+            const stride = 4 ** i;
+            this.streak.uniforms.tSrc.value = srcTex;
+            this.streak.uniforms.uStep.value.set(dx * stride, dy * stride);
+            this.streak.uniforms.uFall.value = fall ** stride;
+            kit.run(this.streak, ping[i % 2]);
+            srcTex = ping[i % 2].texture;
+          }
+          addInto(srcTex, gain * kernelSum);
+        }
+      };
+      // the long thin rays from the points pinched to their centres on sl, then their short,
+      // twice-as-wide hot starts from the whole points on sl + 1: thick and bright at the
+      // source, tapering into a faint hairline
+      const pinched = this.target(sl, 11, W, H);
+      this.pinch.uniforms.tSrc.value = peaks.texture;
+      this.pinch.uniforms.tBlur.value = pointBloom.texture;
+      this.pinch.uniforms.uK.value = PINCH_K;
+      kit.run(this.pinch, pinched);
+      streakRays(pinched, sl, len, STREAK_PEAK / Math.max(1, sigma));
+      const coarse = this.target(sl + 1, 7, W, H);
+      this.down.uniforms.tSrc.value = peaks.texture;
+      kit.run(this.down, coarse);
+      streakRays(coarse, sl + 1, Math.max(1, (len * STREAK_CORE_LEN) / 2), STREAK_CORE / Math.max(1, sigma / 2));
     }
     // target uv → output uv
     this.uv.set(
@@ -416,6 +477,6 @@ export class GlintPass {
   dispose() {
     for (const rt of this.rts.values()) rt.dispose();
     this.rts.clear();
-    for (const m of [this.bright, this.down, this.blur, this.highpass, this.streak, this.add]) m.dispose();
+    for (const m of [this.bright, this.down, this.blur, this.highpass, this.pinch, this.streak, this.add]) m.dispose();
   }
 }

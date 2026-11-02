@@ -6,7 +6,7 @@ import type { Bounds } from '../text/layout';
 import { C, DEG, floatRT, G, gridDistance, grad, N, num, S, sel, col } from '../effects/b/common';
 import { inkBounds } from '../effects/lib';
 import { centreX, centreY } from '../engine/frame';
-import { clearTarget, compToRender, drawInstancedQuads, followed, followParam, type GpuContext, lightGlow, rng } from './common';
+import { clearTarget, compToRender, drawInstancedQuads, followed, followParam, GLINT_MIN_THIN, GLINT_STAR_GLSL, type GpuContext, lightGlow, rng } from './common';
 
 // Particle field (Trapcode Particular for stills): one CPU-built list of seeded particles drawn as
 // instanced quads. Free, it emits from its own shapes around the layer position; following a layer,
@@ -337,15 +337,8 @@ uniform int uShape; uniform float uRing, uSheen; uniform bool uLight;
 const int DOT = 0, GLINT4 = 1, GLINT6 = 2, EMBER = 3, SQUARE = 4, CONFETTI = 5, PETAL = 6, STAR = 7, HEART = 8, BOKEH = 9, RAIN = 10;
 float max3(vec3 c) { return max(c.r, max(c.g, c.b)); }
 float cover(float d, float e) { return 1.0 - smoothstep(-e, e, d); }
-// One glint ray (the Glints star look, src/generators/glints.ts): a sharp spike plus a softer sheath.
-float ray(vec2 v, float ang, float thin) {
-  vec2 d = vec2(cos(ang), sin(ang));
-  float al = abs(dot(v, d));
-  if (al >= 1.0) return 0.0;
-  float pe = abs(dot(v, vec2(-d.y, d.x)));
-  float w = thin * (1.0 - al) + 0.003;
-  return (exp(-pe / w) + 0.35 * exp(-pe / (w * 4.0))) * pow(1.0 - al, 1.2);
-}
+// The glint shapes are the Glints star look (src/generators/glints.ts).
+${GLINT_STAR_GLSL}
 // Signed distances (Inigo Quilez): a 5-point star pointing up, a heart with its tip at the origin.
 float sdStar5(vec2 p, float r, float rf) {
   const vec2 k1 = vec2(0.809016994375, -0.587785252292);
@@ -375,25 +368,16 @@ void main() {
   float s = 1.0 + b;
   float I = 0.0;   // light intensity, or coverage of solids
   float hot = 0.0; // white-hot core of light shapes
+  vec3 glint = vec3(0.0); // glint shapes: their light, colour included
   vec3 tint = vec3(1.0);
   if (uShape == DOT) {
     I = exp(-2.6 * r * r / (s * s)) / s;
     hot = 0.5 * exp(-18.0 * r * r) / (1.0 + 4.0 * b);
   } else if (uShape == GLINT4 || uShape == GLINT6) {
+    // The colour unpremultiplied (it saturates toward the ray tips), the light × opacity.
     vec2 v = l / s;
-    float rv = length(v);
-    float thin = 0.035 * (1.0 + 3.0 * b);
-    float rays, haloK;
-    if (uShape == GLINT4) {
-      rays = ray(v, 0.0, thin) + ray(v, 1.5708, thin);
-      haloK = 0.6;
-    } else {
-      rays = ray(v, 1.5708, 0.7 * thin) + ray(v, 0.5236, 0.7 * thin) + ray(v, 2.618, 0.7 * thin);
-      haloK = 0.35;
-    }
-    float halo = exp(-rv * 6.0) * haloK * (1.0 - smoothstep(0.7, 1.0, rv));
-    I = (rays + halo) / s;
-    hot = (2.0 * exp(-rv * rv * 50.0) + 0.6 * rays * exp(-rv * 2.5)) / s;
+    float a = max(vColor.a, 1e-4);
+    glint = glintStar(v, uShape == GLINT4 ? 4 : 6, 0.035 * (1.0 + 3.0 * b), vExtra.w, max(fw.x, fw.y) / s, vColor.rgb / a, false) * (vColor.a / s);
   } else if (uShape == EMBER) {
     // A dot dragged along its motion: dim tail at −x, hot head at +x.
     float hl = A - 1.0;
@@ -435,7 +419,7 @@ void main() {
     tint *= 1.0 + 0.25 * exp(-8.0 * dot(hl, hl));
   }
   if (uLight) {
-    vec3 c = vColor.rgb * I + vColor.a * hot;
+    vec3 c = vColor.rgb * I + vColor.a * hot + glint;
     o = vec4(c, min(1.0, max3(c)));
   } else {
     o = vec4(vColor.rgb * tint, vColor.a) * (I / (1.0 + 0.6 * b));
@@ -481,7 +465,7 @@ function drawPass(ctx: GpuContext, target: THREE.WebGLRenderTarget, list: Partic
     buf.extra[i * 4] = q.blur;
     buf.extra[i * 4 + 1] = q.aspect;
     buf.extra[i * 4 + 2] = q.phase;
-    buf.extra[i * 4 + 3] = 0;
+    buf.extra[i * 4 + 3] = (2 * GLINT_MIN_THIN) / q.h; // glints: GLINT_MIN_THIN in half quad heights
   }
   const light = !SOLID.includes(shape);
   quadUniforms.uShape.value = SHAPE_ID[shape];

@@ -13,16 +13,39 @@ import { Handle, ROTATE_CURSOR } from './Handle';
 // - one quarter of each rotation's gimbal ring, between two axes of its frame: dragging along
 //   it turns the object as far as the hand sweeps, all the way round;
 // - a thin ring around it all: free rotate, a trackball (like ⌥-drag on the object).
-// Hover names the action; a drag shows its axis and value.
+// Hover names the action; a drag shows its axis and value. Every coloured stroke is drawn twice,
+// a wide dark halo then the colour, so the handles read on white chrome, black lacquer and rainbow.
 
 const AXES = ['X', 'Y', 'Z'] as const;
-/** Radius of the free-rotate ring, CSS px. */
-const RING_R = ARM_PX + 20;
+/** Radius of the free-rotate ring, CSS px: clear of the axis letters at the arrows' tips. */
+const RING_R = ARM_PX + 30;
 /** Segments of a drawn rotation arc. */
 const ARC_STEPS = 18;
+/** Angle (radians) the drawn arc stops short of each end, so its arrowheads clear the move arrows' shafts there. */
+const ARC_INSET = 0.32;
 /** The gap between the centre square and the arrows' shafts, CSS px. */
-const SHAFT_GAP = 10;
+const SHAFT_GAP = 11;
+/** Move arrowhead length and half width, CSS px. */
+const HEAD_LEN = 15;
+const HEAD_HALF = 6.5;
+/** Rotation arc arrowhead length and half width, CSS px. */
+const TIP_LEN = 9;
+const TIP_HALF = 5;
+/** Distance from an arrow's tip to the centre of its axis letter, CSS px. */
+const LABEL_GAP = 13;
 const r1 = (v: number) => Math.round(v * 10) / 10;
+type Pt = { x: number; y: number };
+/** SVG points of a triangle with its point at `p`, pointing along the unit `u`. */
+const triangle = (p: Pt, u: Pt, len: number, half: number) => {
+  const bx = p.x - u.x * len;
+  const by = p.y - u.y * len;
+  return `${r1(p.x)},${r1(p.y)} ${r1(bx - u.y * half)},${r1(by + u.x * half)} ${r1(bx + u.y * half)},${r1(by - u.x * half)}`;
+};
+/** Unit vector from `a` to `b` (null when they coincide). */
+const toward = (a: Pt, b: Pt): Pt | null => {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  return len < 1e-3 ? null : { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+};
 
 type Active = { action: GizmoAction; axis: Axis | null; kind: 'move' | 'rotate' | 'free' };
 
@@ -58,21 +81,20 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
   const guideLen = guide ? Math.hypot(guide.x, guide.y) || 1 : 1;
   const arrows = view.arms.map(({ arm }, i) => {
     const len = Math.hypot(arm.x, arm.y) || 1;
-    const ux = arm.x / len;
-    const uy = arm.y / len;
+    const u = { x: arm.x / len, y: arm.y / len };
     const tip = { x: c.x + arm.x, y: c.y + arm.y };
-    // Arrowhead: 11 px long, 9 px wide, its point at the tip; the shaft from just outside the centre square.
-    const base = { x: tip.x - ux * 11, y: tip.y - uy * 11 };
+    // Arrowhead: its point at the tip; the shaft from just outside the centre square.
+    const base = { x: tip.x - u.x * HEAD_LEN, y: tip.y - u.y * HEAD_LEN };
     return {
       axis: i as Axis,
       action: MOVE_ACTIONS[i],
       tip,
       base,
-      from: { x: c.x + ux * Math.min(SHAFT_GAP, len / 2), y: c.y + uy * Math.min(SHAFT_GAP, len / 2) },
+      from: { x: c.x + u.x * Math.min(SHAFT_GAP, len / 2), y: c.y + u.y * Math.min(SHAFT_GAP, len / 2) },
       // The shaft takes presses beyond the arcs (drawn at 0.6 of the arm) only, so both stay grabbable where they cross.
       grab: { x: c.x + arm.x * 0.74, y: c.y + arm.y * 0.74 },
-      head: `${tip.x},${tip.y} ${base.x - uy * 4.5},${base.y + ux * 4.5} ${base.x + uy * 4.5},${base.y - ux * 4.5}`,
-      label: { x: tip.x + ux * 10, y: tip.y + uy * 10 },
+      head: triangle(tip, u, HEAD_LEN, HEAD_HALF),
+      label: { x: tip.x + u.x * LABEL_GAP, y: tip.y + u.y * LABEL_GAP },
     };
   });
   const startMove = (e: React.PointerEvent, axis: Axis | null) => {
@@ -81,13 +103,6 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
   };
   return (
     <g className={`gz3 ${active ? 'dragging' : ''}`}>
-      <defs>
-        {AXES.map((_, i) => (
-          <marker key={i} id={`gz3-tip-${i}`} className={`ax${i}`} viewBox="0 0 10 10" refX={5} refY={5} markerWidth={3.5} markerHeight={3.5} orient="auto-start-reverse">
-            <path className="gz3-tip" d="M0,0 L10,5 L0,10 z" />
-          </marker>
-        ))}
-      </defs>
       {guide && (
         <line
           className={`gz3-guide ax${active!.axis}`}
@@ -109,13 +124,27 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
             startFreeRotate(e, target, comp, end, end);
           }}
         >
+          <circle className="gz3-halo gz3-ring" cx={c.x} cy={c.y} r={RING_R} />
           <circle className="gz3-ring" cx={c.x} cy={c.y} r={RING_R} />
         </Handle>
       </g>
       {view.arcs.map((arc, i) => {
         const axis = i as Axis;
-        const pts = Array.from({ length: ARC_STEPS + 1 }, (_, j) => arcPoint(c, arc, (j / ARC_STEPS) * (Math.PI / 2)));
-        const d = `M ${pts.map((p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' L ')}`;
+        /** The arc's points from angle `from` to `to` (radians), and their SVG path. */
+        const span = (from: number, to: number) => {
+          const pts = Array.from({ length: ARC_STEPS + 1 }, (_, j) => arcPoint(c, arc, from + (j / ARC_STEPS) * (to - from)));
+          return { pts, d: `M ${pts.map((p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' L ')}` };
+        };
+        const { d } = span(0, Math.PI / 2);
+        // Drawn arc: the quarter less ARC_INSET at each end, an arrowhead beyond each end along it.
+        const th0 = ARC_INSET;
+        const th1 = Math.PI / 2 - ARC_INSET;
+        const { pts: shown, d: drawn } = span(th0, th1);
+        const ends = [
+          [shown[0], toward(arcPoint(c, arc, th0 + 0.02), shown[0])],
+          [shown[ARC_STEPS], toward(arcPoint(c, arc, th1 - 0.02), shown[ARC_STEPS])],
+        ] as const;
+        const tips = ends.flatMap(([p, u]) => (u ? [triangle({ x: p.x + u.x * TIP_LEN, y: p.y + u.y * TIP_LEN }, u, TIP_LEN, TIP_HALF)] : []));
         const action = ROTATE_ACTIONS[axis];
         return (
           <g key={`arc${i}`} {...hovered(action)} className={`ax${i} ${lit(action, active?.kind === 'rotate' && active.axis === axis)}`}>
@@ -130,12 +159,19 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
                 startGizmoRotate(e, target, view, axis, toStage, end);
               }}
             >
-              <path className="gz3-arc" d={d} markerStart={`url(#gz3-tip-${i})`} markerEnd={`url(#gz3-tip-${i})`} />
+              <path className="gz3-halo gz3-arc" d={drawn} />
+              {tips.map((p, j) => (
+                <polygon key={j} className="gz3-halo gz3-tip" points={p} />
+              ))}
+              <path className="gz3-arc" d={drawn} />
+              {tips.map((p, j) => (
+                <polygon key={j} className="gz3-tip" points={p} />
+              ))}
             </Handle>
           </g>
         );
       })}
-      {arrows.map(({ axis, action, grab, from, base }) => (
+      {arrows.map(({ axis, action, grab, from, base, head }) => (
         // Shafts first: where arrows overlap on screen (two axes pointing alike), every head stays on top.
         <g key={`shaft${axis}`} {...hovered(action)} className={`ax${axis} ${lit(action, active?.kind === 'move' && active.axis === axis)}`}>
           <Handle
@@ -146,6 +182,8 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
             hit={<line className="hit stroke" x1={grab.x} y1={grab.y} x2={base.x} y2={base.y} />}
             onDown={(e) => startMove(e, axis)}
           >
+            <line className="gz3-halo gz3-shaft" x1={from.x} y1={from.y} x2={base.x} y2={base.y} />
+            <polygon className="gz3-halo gz3-head" points={head} />
             <line className="gz3-shaft" x1={from.x} y1={from.y} x2={base.x} y2={base.y} />
           </Handle>
         </g>
@@ -162,7 +200,8 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
             onDown={(e) => startMove(e, axis)}
           >
             <polygon className="gz3-head" points={head} />
-            <text className="gz3-label" x={label.x} y={label.y + 4} textAnchor="middle">
+            <circle className="gz3-badge" cx={label.x} cy={label.y} r={7.5} />
+            <text className="gz3-label" x={label.x} y={label.y} textAnchor="middle" dominantBaseline="central">
               {AXES[axis]}
             </text>
           </Handle>
@@ -170,7 +209,7 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
       ))}
       <g {...hovered('Move')} className={lit('Move', active?.kind === 'move' && active.axis === null)}>
         <Handle x={c.x} y={c.y} cursor="move" title={t('Move in the screen plane (Shift: {step} steps)', { step })} onDown={(e) => startMove(e, null)}>
-          <rect className="gz3-centre" x={c.x - 5} y={c.y - 5} width={10} height={10} />
+          <rect className="gz3-centre" x={c.x - 6} y={c.y - 6} width={12} height={12} rx={2} />
         </Handle>
       </g>
       {readout && (

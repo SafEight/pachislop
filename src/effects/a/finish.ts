@@ -124,7 +124,7 @@ const grain: EffectDef = {
 // ---------- keyline ----------
 
 const keylineFrag = /* glsl */ `
-uniform sampler2D tSrc, tSdf, tContent; uniform vec3 uColor; uniform float uWidth, uSoft, uOpacity; uniform bool uLayer;
+uniform sampler2D tSrc, tSdf, tContent, tInk; uniform vec3 uColor; uniform float uWidth, uSoft, uOpacity; uniform bool uLayer, uLit;
 void main() {
   vec4 L = texture(tSrc, vUv);
   float d = texture(tSdf, vUv).r;   // render px from the alpha edge, + outside
@@ -132,6 +132,16 @@ void main() {
   float k = 1.0 - smoothstep(uWidth * (1.0 - uSoft) - 0.5, uWidth + 0.5, d);
   float a = k * uOpacity;
   vec4 K = vec4(uColor * a, a);
+  if (uLit) {
+    // Light in the stack (glow, glint): the line goes with the ink S (the stack without the
+    // light) as below, then the light L − S is added over it as light adds (alpha by its share).
+    vec4 S = texture(tInk, vUv);
+    vec4 C = uLayer ? texture(tContent, vUv) : S;
+    vec4 base = C + K * (1.0 - C.a) + (S - C) * (1.0 - K.a);
+    float la = S.a < 0.999 ? clamp((L.a - S.a) / (1.0 - S.a), 0.0, 1.0) : 0.0;
+    o = max(vec4(base.rgb + L.rgb - S.rgb, base.a + (1.0 - base.a) * la), 0.0);
+    return;
+  }
   if (!uLayer) { o = L + K * (1.0 - L.a); return; }
   // Follow Layer: behind the layer's own pixels C but over what the stack drew around them
   // (L − C, e.g. a glow), so a glow below doesn't bury the line; where K is 0 this is L.
@@ -145,7 +155,8 @@ const keyline: EffectDef = {
   category: 'Material',
   description:
     'Outline traced from the layer’s alpha, drawn behind it just outside the silhouette: the thin dark keyline that ' +
-    'separates a 3D title’s edge from the background, or a stroke. Several following the stack below make stacked strokes.',
+    'separates a 3D title’s edge from the background, or a stroke. Several following the stack below make stacked strokes. ' +
+    'Light (glows, 3D glints) is never traced and stays over the line.',
   params: [
     pPx('width', 'Width', 1.5, 0.5, 100, 0.25),
     pColor('color', 'Color', '#0a0604'),
@@ -157,15 +168,19 @@ const keyline: EffectDef = {
   reach: (p) => num(p, 'width'),
   // the edge distance out to the width (+1 px antialiasing)
   gather: (p) => num(p, 'width') + 1,
+  outline: true,
   apply(ctx, input, output, p) {
-    const field = sdf(ctx, followed(ctx, input, p), num(p, 'threshold'));
+    const lit = ctx.inputInk !== input;
+    const field = sdf(ctx, followed(ctx, p), num(p, 'threshold'));
     pass(
       ctx,
       'keyline',
       keylineFrag,
       {
         tSrc: input,
-        tContent: ctx.content,
+        tContent: lit ? ctx.ink : ctx.content,
+        tInk: lit ? ctx.inputInk : null,
+        uLit: lit,
         uLayer: p.follow === 'layer',
         tSdf: field.texture,
         uColor: col(p, 'color'),

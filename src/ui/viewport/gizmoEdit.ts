@@ -31,9 +31,9 @@ const ROT_PER_PX = 0.4;
 /** Shift snaps rotations to this many degrees. */
 const ROT_SNAP = 15;
 /** Screen length of a move arrow seen side-on, CSS px. */
-export const ARM_PX = 70;
-/** Radius of the rotation arcs seen face-on, CSS px. */
-export const ARC_PX = 42;
+export const ARM_PX = 84;
+/** Radius of the rotation arcs seen face-on, CSS px (0.6 of the arm). */
+export const ARC_PX = 50;
 /** Share of a head-on direction's depth (toward the viewer) drawn along the down-left diagonal. */
 const DEPTH_SHARE = 0.5;
 /** Projected length (share of the full arm) from which a direction is drawn as it truly points. */

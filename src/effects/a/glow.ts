@@ -96,6 +96,8 @@ const outerGlow: EffectDef = {
   ],
   directions: [{ angle: 'angle', label: 'Gradient direction', convention: 'cwFromRight', when: { key: 'fill', value: 'gradient' } }],
   reach: (p) => num(p, 'size'),
+  // added as light; Behind is the halo behind the layer a Stroke-like keyline may follow
+  addsLight: (p) => p.mode === 'add',
   // blurs of radius `size` (taps to ~1.33 ×) or the edge distance up to `size`; the gradient fill spans the layer box
   gather: (p) => (p.fill === 'gradient' ? null : 1.5 * num(p, 'size')),
   apply(ctx, input, output, p) {
@@ -247,6 +249,7 @@ const deepGlow: EffectDef = {
     pNum('onFace', 'Glow Over Face', 0, 0, 1),
   ],
   reach: (p) => num(p, 'radius'),
+  addsLight: () => true,
   // the widest PSF octave: σ = radius / 3, × 1.2 at full chromatic scatter, taps to 3σ
   gather: (p) => 1.25 * num(p, 'radius'),
   apply(ctx, input, output, p) {
@@ -361,9 +364,12 @@ const contourLines: EffectDef = {
   reach: (p) =>
     (p.mode === 'inside' ? 0 : num(p, 'offset') + (Math.max(1, num(p, 'count')) - 1) * num(p, 'spacing') + num(p, 'width') / 2) +
     num(p, 'glowSize'),
+  // glowing lines along the ink's contour, added as light
+  addsLight: () => true,
+  outline: true,
   apply(ctx, input, output, p) {
     const s = ctx.pxScale;
-    const traced = followed(ctx, input, p);
+    const traced = followed(ctx, p);
     const field = sdf(ctx, traced);
     const box = bounds(ctx, traced);
     const lines = ctx.kit.acquire();

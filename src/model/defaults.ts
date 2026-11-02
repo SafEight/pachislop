@@ -79,8 +79,22 @@ export const GRADIENTS: Record<string, Gradient> = {
   paleGoldRimFill: g([0, '#7a6030'], [0.2, '#fbf0c0'], [0.4, '#b89a58'], [0.6, '#f6e7b4'], [0.8, '#a88a4a'], [1, '#f8eecb']),
   chromeFill: g([0, '#ffffff'], [0.2, '#d8e6f5'], [0.47, '#7c8ea6'], [0.5, '#1c222c'], [0.56, '#5a4a3a'], [0.75, '#d9c9b0'], [1, '#ffffff']),
   hologramFill: g([0, '#b8f6ff'], [0.2, '#ffc6f5'], [0.4, '#fff7c0'], [0.6, '#c6ffdc'], [0.8, '#c9c5ff'], [1, '#b8f6ff']),
-  // White kept as a narrow highlight band: a wide white stop washes the neighbouring hues pastel.
-  rainbowFill: g([0, '#f64849'], [0.17, '#f63bfc'], [0.34, '#029cff'], [0.52, '#36f7f1'], [0.58, '#ffffff'], [0.64, '#2ee860'], [0.78, '#10da0d'], [1, '#ffff0d']),
+  // 虹 (top → bottom): red, orange, golden yellow, green, sky blue, blue, violet, saturated
+  // throughout. Metal banding without a white stop (a white stop reads as a white band across
+  // the letters): a narrow deep teal-blue horizon between green and cyan, as gold has its
+  // dark band. The top stays saturated: the 2D gloss cap and bevel lay the white highlight on it.
+  rainbowFill: g(
+    [0, '#ff1838'],
+    [0.14, '#ff5a00'],
+    [0.28, '#ffc400'],
+    [0.42, '#20d838'],
+    [0.5, '#008a40'],
+    [0.53, '#004a8a'],
+    [0.58, '#0088e8'],
+    [0.68, '#18b8ff'],
+    [0.82, '#2a34f0'],
+    [1, '#9a10f0'],
+  ),
   rainbowSpectrum: g([0, '#ff2a2a'], [0.17, '#ff9b00'], [0.33, '#fff200'], [0.5, '#2bff3a'], [0.67, '#00c8ff'], [0.83, '#3a3aff'], [1, '#d22cff']),
   blackCrimsonRadial: g([0, '#ff1a3a'], [0.55, '#6a0010'], [1, '#000000']),
   blackGreenRadial: g([0, '#3dff6a'], [0.55, '#00501a'], [1, '#000000']),
@@ -236,6 +250,28 @@ export function defaultTitleStyle2D(): TitleStyle2D {
  */
 const GOLD_BANDING = g([0, '#fff4b0'], [0.18, '#ffd400'], [0.42, '#ff9800'], [0.5, '#b83000'], [0.58, '#ff7c00'], [0.8, '#ffb800'], [1, '#ffe070']);
 
+/**
+ * 虹 banding (top → bottom), the 3D form of GRADIENTS.rainbowFill: the same hues over the gold
+ * banding's lightness (a hot red top, the deep teal-blue horizon just below the middle, a
+ * lifted violet bottom edge), since a flat 3D face has no gloss cap to light its top. No white
+ * stop: a pale horizon reads as a white band across the letters. Yellow leans golden so its
+ * dark side reads as gold, not olive.
+ */
+const RAINBOW_BANDING = g(
+  [0, '#ff7080'],
+  [0.1, '#ff2a3a'],
+  [0.22, '#ff7a00'],
+  [0.34, '#ffd400'],
+  [0.44, '#30e040'],
+  [0.5, '#0a8a3a'],
+  [0.53, '#003a5a'],
+  [0.57, '#0070c0'],
+  [0.66, '#20b8ff'],
+  [0.82, '#3040ff'],
+  [0.94, '#9020ff'],
+  [1, '#e0a0ff'],
+);
+
 const PRESET_VALUES: Record<Exclude<MaterialPreset, 'custom'>, Partial<Material3D> & { color: string }> = {
   // Metals carry a banded tint gradient (top → bottom: white-hot, mid tone, dark band just
   // below the middle, mid tone, pale) — the classic pachislot metal banding, which reads
@@ -323,25 +359,26 @@ const PRESET_VALUES: Record<Exclude<MaterialPreset, 'custom'>, Partial<Material3
   blackGloss: { color: '#050505', metalness: 0.2, roughness: 0.08, clearcoat: 1 },
   whiteGloss: { color: '#ffffff', metalness: 0, roughness: 0.15, clearcoat: 1 },
   /**
-   * 虹 paint: saturated hues as the DIFFUSE colour under a clear gloss coat (research: rainbow
-   * titles read as paint plus a gold rim). A full metal multiplies the hues into coloured
-   * reflections and goes olive / navy when orbited; low metalness keeps them pure at any angle.
-   * The ramp is the uneven 7-hue spectrum with a white horizon stop, spanning each LINE so a
-   * two-line title shows the whole spectrum on both lines. Low reflectivity keeps the tone
-   * mapper from washing the hues to pastel; the white emissive is tinted by the gradient
-   * (engine/three/materials.ts), a small self-lit floor in the hues' own colours.
+   * 虹 candy metal: the spectrum (RAINBOW_BANDING) as the tint of a metallic base under a thin
+   * clear coat. The metal reflects the environment in each hue, so every band shades from its
+   * own deep tone to its bright tone with the light; the coat adds crisp white highlights on the
+   * bevels. A full coat (or high reflectivity) lays a white veil over the whole flat face and
+   * the tone mapper washes the hues pastel. The ramp runs top → bottom over each LINE so a
+   * two-line title shows the whole spectrum on both lines; the white emissive is tinted by the
+   * gradient (engine/three/materials.ts), a small self-lit floor in the hues' own colours so the
+   * turned-away sides never go grey.
    */
   rainbow: {
     color: '#ffffff',
-    metalness: 0.2,
+    metalness: 0.8,
     roughness: 0.2,
-    reflectivity: 0.4,
-    clearcoat: 1,
-    iridescence: 0.1,
+    reflectivity: 0.55,
+    specBoost: 1.4,
+    clearcoat: 0.4,
     emissive: '#ffffff',
-    emissiveIntensity: 0.1,
+    emissiveIntensity: 0.08,
     gradientSpan: 'line',
-    gradient: g([0, '#ff1e2a'], [0.16, '#ff8c00'], [0.32, '#ffe800'], [0.39, '#ffffff'], [0.46, '#7cf04a'], [0.54, '#22e03a'], [0.68, '#00b4ff'], [0.84, '#2a3cff'], [1, '#b026ff']),
+    gradient: RAINBOW_BANDING,
   },
   glass: { color: '#d4f2ff', metalness: 0, roughness: 0.02, opacity: 0.22, clearcoat: 1 },
   plastic: { color: '#ff3b3b', metalness: 0, roughness: 0.35, clearcoat: 0.8 },

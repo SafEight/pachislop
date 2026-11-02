@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { EffectParams, GeneratorDef, PassContext } from '../engine/contracts';
 import { B, bool, C, col, common, DEG, drawObject, gridDistance, type Grid, hash, HEAD, material, N, num, readGrid, rng, S, sel } from '../effects/b/common';
 import { centreX, centreY } from '../engine/frame';
-import { ANAMORPHIC_GLSL, drawFollowed, followed, followParam } from './common';
+import { ANAMORPHIC_GLSL, drawFollowed, followed, followParam, GLINT_MIN_THIN, GLINT_STAR_GLSL } from './common';
 
 // Glints: star sparkles on a followed layer — on its highlight peaks (a few large glints plus small
 // ones, favouring the face over the outer rims), on its hottest peaks (big flare stars), one long
@@ -28,58 +28,23 @@ export interface Star {
 
 const starVert = /* glsl */ `
 in vec2 iPos; in float iSize; in float iRot; in float iInt; in vec3 iCol;
-out vec2 vL; out float vI; out vec3 vC;
-uniform vec2 uRes;
+out vec2 vL; out float vI; out vec3 vC; out float vMinThin;
+uniform vec2 uRes; uniform float uPxScale;
 void main() {
   vL = position.xy; vI = iInt; vC = iCol;
+  vMinThin = ${GLINT_MIN_THIN.toFixed(2)} * uPxScale / iSize;
   float c = cos(iRot), s = sin(iRot);
   vec2 p = iPos + mat2(c, s, -s, c) * position.xy * iSize;
   gl_Position = vec4(p / uRes * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
 const starFrag = /* glsl */ `
-in vec2 vL; in float vI; in vec3 vC; out vec4 o;
+in vec2 vL; in float vI; in vec3 vC; in float vMinThin; out vec4 o;
 uniform int uRays; uniform float uThin; uniform bool uSpectral;
-// Hue wheel, t = 0 red … 0.72 violet.
-vec3 spectrum(float t) {
-  return clamp(abs(fract(t + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
-}
-vec3 ray(vec2 v, float ang, float len, float thin) {
-  vec2 d = vec2(cos(ang), sin(ang));
-  float al = abs(dot(v, d)) / len;
-  if (al >= 1.0) return vec3(0.0);
-  float pe = abs(dot(v, vec2(-d.y, d.x)));
-  float w = thin * (1.0 - al) + 0.003;
-  float fall = pow(1.0 - al, 1.2);
-  // Sharp spike plus a softer sheath around it.
-  if (!uSpectral) return vec3((exp(-pe / w) + 0.35 * exp(-pe / (w * 4.0))) * fall);
-  // Cross-screen diffraction: the sheath fans out by wavelength (red widest, blue tightest)
-  // and the ray runs violet → red outward, twice, leaving the hot centre white.
-  vec3 wc = w * vec3(1.4, 1.0, 0.7);
-  vec3 i = exp(-pe / wc) + 0.5 * exp(-pe / (wc * 4.0));
-  vec3 tint = mix(vec3(1.0), 1.7 * spectrum(0.72 * (1.0 - fract(al * 2.0 + 0.15))), smoothstep(0.04, 0.2, al));
-  return i * tint * fall;
-}
+${GLINT_STAR_GLSL}
 void main() {
-  vec2 v = vL;
-  float r = length(v);
-  vec3 I;
-  float haloK = 0.6;
-  if (uRays == 4) {
-    I = ray(v, 0.0, 1.0, uThin) + ray(v, 1.5708, 1.0, uThin);
-  } else if (uRays == 6) {
-    // Snow cross (6-line cross-screen filter): three equal needle axes, vertical + ±60°.
-    float t = uThin * 0.7;
-    I = ray(v, 1.5708, 1.0, t) + ray(v, 0.5236, 1.0, t) + ray(v, 2.618, 1.0, t);
-    haloK = 0.35;
-  } else {
-    I = ray(v, 0.0, 1.0, uThin) + ray(v, 1.5708, 1.0, uThin) + 0.6 * (ray(v, 0.7854, 0.5, uThin) + ray(v, -0.7854, 0.5, uThin));
-  }
-  float core = exp(-r * r * 50.0);
-  float halo = exp(-r * 6.0) * haloK * (1.0 - smoothstep(0.7, 1.0, r));
-  float lum = dot(I, vec3(0.3333));
-  vec3 c = vC * (I + halo) + vec3(1.0) * (core * 2.0 + lum * 0.6 * exp(-r * 2.5));
-  c *= vI;
+  vec2 fw = fwidth(vL);
+  vec3 c = glintStar(vL, uRays, uThin, vMinThin, max(fw.x, fw.y), vC, uSpectral) * vI;
   o = vec4(c, max(c.r, max(c.g, c.b)));
 }`;
 
@@ -112,6 +77,7 @@ function starMesh(kit: object, n: number) {
               uRes: { value: new THREE.Vector2() },
               uRays: { value: 4 },
               uThin: { value: 0.02 },
+              uPxScale: { value: 1 },
               uSpectral: { value: false },
             },
             depthTest: false,
@@ -132,7 +98,7 @@ function starMesh(kit: object, n: number) {
 interface StarLook {
   /** Ray count of the shape: 4 (cross), 6 (snow cross) or 8 (4 long + 4 short). */
   rays: number;
-  /** Ray half-width at the centre, fraction of the radius. */
+  /** Ray half-width at the centre, fraction of the radius (at least GLINT_MIN_THIN comp px). */
   thin: number;
   /** Rainbow diffraction fringe on the rays. */
   spectral: boolean;
@@ -160,6 +126,7 @@ function drawStars(ctx: PassContext, stars: Star[], look: StarLook, target: THRE
   m.uniforms.uRes.value.set(ctx.width, ctx.height);
   m.uniforms.uRays.value = look.rays;
   m.uniforms.uThin.value = look.thin;
+  m.uniforms.uPxScale.value = ctx.pxScale;
   m.uniforms.uSpectral.value = look.spectral;
   drawObject(ctx, st.mesh, target);
 }
@@ -665,7 +632,13 @@ function renderPeaks(ctx: PassContext, target: THREE.WebGLRenderTarget, shape: T
     const small = pickHighlights(hl, Math.round(N(p, 'small')), () => size * SMALL_SPARKLE, 0.6, minD * 0.5, large);
     // Big glints read brightest; Brightness variation dims the smaller ones.
     for (const pk of large) stars.push(star(pk, 1 - bv * (1 - pk.r / size)));
-    for (const pk of small) stars.push(star(pk, 1 - bv * 0.6));
+    // Small twinkles vary in size with Size variation (dimmer as they shrink), so they never read as a uniform scatter.
+    for (const pk of small) {
+      const v = 1 + 1.2 * sv * (wobble(pk.h.x, pk.h.y, seed, 2) - 0.5);
+      const s = star(pk, (1 - bv * 0.6) * (0.75 + 0.25 * v));
+      s.size *= v;
+      stars.push(s);
+    }
     renderStars(ctx, target, stars, look, gain);
     return;
   }

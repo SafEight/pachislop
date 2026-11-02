@@ -486,94 +486,156 @@
 
 /* 3D gizmo (viewport/Gizmo3D.tsx): X red, Y green, Z blue; arrows, arcs and the free-rotate
    ring take presses on their stroke only (hit lines), so the object stays draggable between them. */
+.overlay .gz3 {
+  --gz3-halo: #07070acc;
+}
 .overlay .gz3 .ax0 {
-  --ax: #ff6b5f;
+  --ax: #ff5a4c;
+  --ax-lit: #ff9489;
 }
 .overlay .gz3 .ax1 {
-  --ax: #62d46f;
+  --ax: #4ee35f;
+  --ax-lit: #8dfa99;
 }
 .overlay .gz3 .ax2 {
-  --ax: #55a2ff;
+  --ax: #4a9dff;
+  --ax-lit: #8fc6ff;
 }
 .overlay .gz3 .hh .hit.stroke,
 .overlay .gz3 .hh:hover .hit.stroke {
   fill: none;
   stroke: transparent;
-  stroke-width: 16px;
+  stroke-width: 20px;
   stroke-linecap: round;
   pointer-events: stroke;
 }
 .overlay .gz3 .hh .hit.ring,
 .overlay .gz3 .hh:hover .hit.ring {
-  stroke-width: 10px;
+  stroke-width: 14px;
 }
-/* An arrowhead takes presses on itself plus a 3 px margin: heads of arrows pointing alike stay apart. */
+/* An arrowhead takes presses on itself plus a 4 px margin: heads of arrows pointing alike stay apart. */
 .overlay .gz3 .hh .hit.head,
 .overlay .gz3 .hh:hover .hit.head {
   fill: transparent;
   stroke: transparent;
-  stroke-width: 6px;
+  stroke-width: 8px;
   stroke-linejoin: round;
 }
-/* A dark halo keeps the colours readable over bright gold faces. */
+/* Two passes: a wide dark halo under every coloured stroke and arrowhead, then the colour,
+   so the handles read over white chrome, black lacquer and rainbow faces alike. */
 .overlay .gz3-shaft,
 .overlay .gz3-arc {
   fill: none;
   stroke: var(--ax);
-  stroke-width: 2.5;
+  stroke-width: 3.5;
   stroke-linecap: round;
-  filter: drop-shadow(0 0 1px #000);
 }
 .overlay .gz3-arc {
-  stroke-width: 3;
+  stroke-width: 4;
 }
 .overlay .gz3-head,
 .overlay .gz3-tip {
   fill: var(--ax);
 }
-.overlay .gz3-head,
-.overlay .gz3-ring {
-  filter: drop-shadow(0 0 1px #000);
+.overlay .gz3-halo.gz3-shaft {
+  stroke: var(--gz3-halo);
+  stroke-width: 7.5;
+}
+.overlay .gz3-halo.gz3-arc {
+  stroke: var(--gz3-halo);
+  stroke-width: 8;
+}
+.overlay .gz3-halo.gz3-head,
+.overlay .gz3-halo.gz3-tip {
+  fill: var(--gz3-halo);
+  stroke: var(--gz3-halo);
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+/* Axis letters on a dark disc ringed in the axis colour. */
+.overlay .gz3-badge {
+  fill: #0d0d10e6;
+  stroke: var(--ax);
+  stroke-width: 1.5;
 }
 .overlay .gz3 text.gz3-label {
-  fill: var(--ax);
+  fill: var(--ax-lit);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 800;
 }
+/* The free-rotate ring: readable, but quieter than the axis handles. */
 .overlay .gz3-ring {
   fill: none;
-  stroke: #ffffffa0;
-  stroke-width: 1.2;
+  stroke: #ffffffb3;
+  stroke-width: 1.5;
+}
+.overlay .gz3-halo.gz3-ring {
+  stroke: #07070a80;
+  stroke-width: 4;
 }
 .overlay .gz3-centre {
-  fill: #ffffffd0;
-  stroke: #000;
-  stroke-width: 1;
+  fill: #fff;
+  stroke: #07070a;
+  stroke-width: 2;
 }
-/* Hovered ('hot', both parts of an arrow) or dragged ('active'). */
+/* Hovered ('hot', both parts of an arrow) or dragged ('active'): lighter, thicker, glowing. */
 .overlay .gz3 .hot .gz3-shaft,
 .overlay .gz3 .active .gz3-shaft,
 .overlay .gz3 .hot .gz3-arc,
 .overlay .gz3 .active .gz3-arc {
-  stroke-width: 4.5;
-  filter: drop-shadow(0 0 3px var(--ax));
+  stroke: var(--ax-lit);
+  stroke-width: 5;
+  filter: drop-shadow(0 0 4px var(--ax));
+}
+.overlay .gz3 .hot .gz3-halo.gz3-shaft,
+.overlay .gz3 .active .gz3-halo.gz3-shaft,
+.overlay .gz3 .hot .gz3-halo.gz3-arc,
+.overlay .gz3 .active .gz3-halo.gz3-arc {
+  stroke: var(--gz3-halo);
+  stroke-width: 9.5;
+  filter: none;
 }
 .overlay .gz3 .hot .gz3-head,
-.overlay .gz3 .active .gz3-head {
-  stroke: #fff;
-  stroke-width: 1;
-  filter: drop-shadow(0 0 3px var(--ax));
+.overlay .gz3 .active .gz3-head,
+.overlay .gz3 .hot .gz3-tip,
+.overlay .gz3 .active .gz3-tip {
+  fill: var(--ax-lit);
+  filter: drop-shadow(0 0 4px var(--ax));
+}
+.overlay .gz3 .hot .gz3-halo.gz3-head,
+.overlay .gz3 .active .gz3-halo.gz3-head,
+.overlay .gz3 .hot .gz3-halo.gz3-tip,
+.overlay .gz3 .active .gz3-halo.gz3-tip {
+  fill: var(--gz3-halo);
+  stroke-width: 6;
+  filter: none;
+}
+.overlay .gz3 .hot .gz3-badge,
+.overlay .gz3 .active .gz3-badge {
+  fill: var(--ax);
+  stroke: var(--ax-lit);
+}
+.overlay .gz3 .hot text.gz3-label,
+.overlay .gz3 .active text.gz3-label {
+  fill: #000;
 }
 .overlay .gz3 .hot .gz3-ring,
 .overlay .gz3 .active .gz3-ring {
   stroke: #fff;
-  stroke-width: 2.5;
+  stroke-width: 3;
   filter: drop-shadow(0 0 3px var(--accent2));
+}
+.overlay .gz3 .hot .gz3-halo.gz3-ring,
+.overlay .gz3 .active .gz3-halo.gz3-ring {
+  stroke: var(--gz3-halo);
+  stroke-width: 6.5;
+  filter: none;
 }
 .overlay .gz3 .hot .gz3-centre,
 .overlay .gz3 .active .gz3-centre {
   fill: #fff;
-  filter: drop-shadow(0 0 3px var(--accent2));
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 4px var(--accent2));
 }
 /* While dragging, the other handles step back. */
 .overlay .gz3.dragging > g:not(.active) {
@@ -581,10 +643,11 @@
 }
 .overlay .gz3-guide {
   stroke: var(--ax);
-  stroke-width: 1;
+  stroke-width: 1.5;
   stroke-dasharray: 6 4;
-  opacity: 0.8;
+  opacity: 0.85;
   pointer-events: none;
+  filter: drop-shadow(0 0 1px #000);
 }
 .overlay .gz3-readout {
   font-variant-numeric: tabular-nums;

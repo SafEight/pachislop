@@ -158,20 +158,19 @@ export const pSelect = (key: string, label: string, def: string, options: [strin
 });
 
 /**
- * 'Follow' select for effects that trace the outline: 'layer' (default) traces the layer's own
- * silhouette (ctx.content) wherever they sit, 'stack' everything the stack drew before them (a
- * Stroke's outer edge, but also a glow's halo). Instances saved before the param existed traced
- * the stack: migrateEffects (io/project.ts) fills 'stack' for them. Read the traced texture
- * through `followed`.
+ * 'Follow' select for effects that trace the outline (EffectDef.outline): 'layer' (default)
+ * traces the layer's own silhouette (ctx.ink) wherever they sit, 'stack' everything the stack
+ * drew before them (a Stroke's outer edge, but also a glow's halo), light left out either way
+ * (ctx.inputInk). Instances saved before the param existed traced the stack: migrateEffects
+ * (io/project.ts) fills 'stack' for them. Read the traced texture through `followed`.
  */
 export const pFollow = (): ParamDef =>
   pSelect('follow', 'Follow', 'layer', [
     ['layer', 'Layer'],
     ['stack', 'Stack below'],
   ]);
-/** The texture an effect with `pFollow` traces. */
-export const followed = (ctx: EffectContext, input: THREE.Texture, p: EffectParams): THREE.Texture =>
-  p.follow === 'layer' ? ctx.content : input;
+/** The texture an effect with `pFollow` traces: the layer's or the stack's ink, never light. */
+export const followed = (ctx: EffectContext, p: EffectParams): THREE.Texture => (p.follow === 'layer' ? ctx.ink : ctx.inputInk);
 
 export const BLEND_OPTIONS: [string, string][] = [
   ['normal', 'Normal'],

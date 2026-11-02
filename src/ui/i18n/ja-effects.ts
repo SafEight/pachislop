@@ -71,8 +71,8 @@ export const JA_EFFECTS: Readonly<Record<string, string>> = {
   'Zoom blur streaking toward a centre point (impact cut-in), or spin blur around it.': '中心点へ向かって流れるズームのぼかし（インパクトのカットイン）、または中心の周りを回る回転のぼかし。',
   'Sine ripple displacement: a linear wave (flag) or circular ripples from a centre.': 'サイン波による変位：直線の波（旗のなびき）、または中心からの円形の波紋。',
   'RGB split: red and blue pushed apart radially from a centre or along a direction.': 'RGB 分離：赤と青を中心から放射状に、または一方向にずらします。',
-  'Outline traced from the layer’s alpha, drawn behind it just outside the silhouette: the thin dark keyline that separates a 3D title’s edge from the background, or a stroke. Several following the stack below make stacked strokes.':
-    'シルエットのすぐ外側、背面に描くアウトライン（レイヤーのアルファから生成）：3D タイトルのエッジを背景から切り離す細く暗いキーライン、または境界線。下のスタックに追従させて重ねると多重の境界線になります。',
+  'Outline traced from the layer’s alpha, drawn behind it just outside the silhouette: the thin dark keyline that separates a 3D title’s edge from the background, or a stroke. Several following the stack below make stacked strokes. Light (glows, 3D glints) is never traced and stays over the line.':
+    'シルエットのすぐ外側、背面に描くアウトライン（レイヤーのアルファから生成）：3D タイトルのエッジを背景から切り離す細く暗いキーライン、または境界線。下のスタックに追従させて重ねると多重の境界線になります。光（グロー、3D のグリント）はなぞらず、線の上に残ります。',
   'Film grain over the layer, monochrome or colour; transparency is left untouched.': 'レイヤーにフィルムグレインを加えます（モノクロまたはカラー、透明部分はそのまま）。',
   'Digital glitch (逆押し style): horizontal slices of the layer jump sideways, each with its own RGB split.': 'デジタルグリッチ（逆押し風）：レイヤーを水平にスライスして横にずらし、それぞれに RGB 分離を付けます。',
   'Bevel, chrome, glass or metal grain on the shape: the same material as a title’s face and rims (bevel & emboss, reflection map, metal finish, pattern, satin, texture, sheen, glass, inner glow, gloss), over the layer’s own colours or its own fill.':

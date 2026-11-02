@@ -36,6 +36,20 @@ export function effectFillsComp(fx: EffectInstance): boolean {
 }
 
 /**
+ * True when an enabled effect of `effects` traces the ink (EffectDef.outline): only then does the
+ * engine render the ink of what holds light apart (LayerRenderer.addsLight, light effects).
+ */
+export const effectsTraceInk = (effects: readonly EffectInstance[]): boolean => effects.some((fx) => fx.enabled && byType.get(fx.type)?.outline);
+
+/** True when an enabled effect of `effects` adds light with its params (EffectDef.addsLight). */
+export function effectsAddLight(effects: readonly EffectInstance[]): boolean {
+  return effects.some((fx) => {
+    const def = byType.get(fx.type);
+    return !!(fx.enabled && def?.addsLight?.(resolved(def, fx)));
+  });
+}
+
+/**
  * How far (comp px) back into its input an effect instance looks, with its defaults filled in
  * (see EffectDef.gather): 0 when disabled or of an unknown type (it does nothing), null when it
  * may depend on the whole layer.

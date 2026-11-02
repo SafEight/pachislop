@@ -51,10 +51,11 @@ import type { ApplyColourway, Colourway } from './types';
 // Gradient geometry (kind / angle / scale / offset / span) stays the element's own, except that
 // FACES span each text line ('char' is kept): a two-line title shows the whole colourway ramp
 // (金 banding, 虹 spectrum) on both lines, as pachislot titles are set.
-// 柄 colourways (zebra / giraffe / leopard) are a gold face plus pattern marks. Every other one
-// clears colour patterns; a relief-only pattern (和柄 as a low bump, opacity 0) is surface
-// structure like a texture and stays, as do surfaces (liquid / crumple), alpha profiles and 3D
-// depth fades. 3D 保留 orbs keep their material model and only change body tint (`tintOrb`).
+// 柄 colourways are a metal face plus pattern marks (ゼブラ: black stripes on pearl silver; キリン /
+// ヒョウ: gold). Every other one clears colour patterns; a relief-only pattern (和柄 as a low bump,
+// opacity 0) is surface structure like a texture and stays, as do surfaces (liquid / crumple),
+// alpha profiles and 3D depth fades. 3D 保留 orbs keep their material model and only change body
+// tint (`tintOrb`).
 
 interface Paint {
   fill: () => Fill;
@@ -96,6 +97,8 @@ interface ColourwayDef {
   glint: string;
   /** CSS layers drawn over the face gradient in UI swatches (柄 colourways). */
   swatchPattern?: string;
+  /** 柄 colourways: the ground a pattern fill's marks sit on (default the gold PATTERN_GROUND). */
+  patternGround?: string;
 }
 
 /**
@@ -170,15 +173,33 @@ const RED_3D_BANDS = g([0, '#ff6a6a'], [0.2, '#ff1414'], [0.45, '#ff0000'], [0.5
 const red3DFace = () =>
   m3('redMetal', { color: '#ff0000', gradient: RED_3D_BANDS, metalness: 0.3, roughness: 0.22, reflectivity: 0.2, clearcoat: 0.5 });
 
-/** 虹: the 3D rainbow paint's spectrum (7 uneven hues, white horizon), so 2D and 3D agree. */
-const RAINBOW_FACE_FILL: Gradient = structuredClone(material3D('rainbow').gradient!);
+/**
+ * 虹: the saturated spectrum with a deep metal horizon and no white stop (GRADIENTS.rainbowFill);
+ * in 3D the rainbow candy metal, whose banding is the same hues with a hot top (no gloss cap there).
+ */
+const RAINBOW_FACE_FILL: Gradient = GRADIENTS.rainbowFill;
 
 /** A colourway pattern on the gold face: the same marks in 2D and 3D (3D relief a little stronger). */
 function goldPatternFace(p: Pattern): Paint {
   return { ...GOLD_FACE, pattern: p, m3d: () => m3('gold', { pattern: { ...p, relief: Math.min(1, p.relief * 1.6) } }) };
 }
 
-const ZEBRA = pattern({ kind: 'zebra', color: '#0a0604', scale: 15, angle: -8, seed: 3, shade: 0.55, relief: 0.25 });
+/**
+ * ゼブラ body: pale pearl silver (white top, a soft grey horizon, cool light below), silver-ramp
+ * mapped in 2D so the bevel shines like metal; in 3D satin pearl metal under a clear coat, its
+ * banding kept light so the black stripes always read against it.
+ */
+const PEARL_FILL = g([0, '#ffffff'], [0.4, '#eef1f6'], [0.5, '#a9b0bd'], [0.56, '#e2e6ed'], [0.8, '#f7f9fc'], [1, '#c9cfd9']);
+const PEARL_3D_BANDS = g([0, '#ffffff'], [0.22, '#f2f4f8'], [0.45, '#c9ced8'], [0.52, '#8e96a4'], [0.6, '#d2d7df'], [0.8, '#f4f6fa'], [1, '#ffffff']);
+const pearl3D = () => m3('silver', { color: '#eef1f6', gradient: PEARL_3D_BANDS, metalness: 0.75, roughness: 0.18, clearcoat: 1, reflectivity: 0.85 });
+
+/** A colourway pattern on the pearl face, as `goldPatternFace`. */
+function pearlPatternFace(p: Pattern): Paint {
+  const face = metalPaint(PEARL_FILL, GRADIENTS.silverRamp, '#2a3040', pearl3D);
+  return { ...face, pattern: p, m3d: () => ({ ...pearl3D(), pattern: { ...p, relief: Math.min(1, p.relief * 1.6) } }) };
+}
+
+const ZEBRA = pattern({ kind: 'zebra', color: '#060608', scale: 12, angle: -8, seed: 3, shade: 0.55, relief: 0.25 });
 const GIRAFFE = pattern({ kind: 'giraffe', color: '#6a300a', scale: 11, seed: 5, shade: 0.5, relief: 0.25 });
 const LEOPARD = pattern({ kind: 'leopard', color: '#140800', color2: '#b0580e', scale: 8, seed: 2, shade: 0.5, relief: 0.2 });
 
@@ -294,18 +315,19 @@ const COLOURWAY_DEFS: Record<Colourway, ColourwayDef> = {
   zebra: {
     label: 'ゼブラ',
     name: 'Zebra',
-    face: goldPatternFace(ZEBRA),
-    faceGlow: '#fff3b0',
+    face: pearlPatternFace(ZEBRA),
+    faceGlow: '#ffffff',
     dark: BLACK,
     accents: [WHITE, GOLD_RIM],
-    base: darkPaint('#0a0400'),
-    side3d: () => m3('copper'),
-    orb: orbTint('#fff4a0', '#ffb000', '#a83800'),
-    glow: '#ffc830',
-    glowGradient: g([0, '#ffffff'], [0.3, '#ffe060'], [1, '#ff8a00']),
-    shadow: '#2a1400',
-    glint: '#fff4dc',
-    swatchPattern: 'repeating-linear-gradient(104deg, #0a0604 0 2px, transparent 2px 4px, #0a0604 4px 5px, transparent 5px 8px)',
+    base: darkPaint('#050608'),
+    side3d: () => m3('silver', '#5a6270'),
+    orb: orbTint('#ffffff', '#e6eaf2', '#7a8496'),
+    glow: '#e8eeff',
+    glowGradient: g([0, '#ffffff'], [0.35, '#dfe6ff'], [1, '#6a7aa0']),
+    shadow: '#0c0e14',
+    glint: '#ffffff',
+    patternGround: '#f2f2f0',
+    swatchPattern: 'repeating-linear-gradient(104deg, #060608 0 2px, transparent 2px 4px, #060608 4px 5px, transparent 5px 8px)',
   },
   giraffe: {
     label: 'キリン',
@@ -348,7 +370,8 @@ const COLOURWAY_DEFS: Record<Colourway, ColourwayDef> = {
     label: '虹',
     name: 'Rainbow',
     face: metalPaint(RAINBOW_FACE_FILL, null, '#3a0060', () => m3('rainbow')),
-    faceGlow: '#ffffff',
+    // deep violet: the inner glow darkens the edges toward the bevel like candy depth (white washes the hues pastel)
+    faceGlow: '#3a0080',
     dark: darkPaint('#1a0030'),
     accents: [WHITE, GOLD_RIM],
     base: darkPaint('#0a0014'),
@@ -594,7 +617,8 @@ function recolorOrb(s: Title3DProps, colourway: Colourway): Title3DProps {
 // yellow → orange → brown). Near-white colours stay (白芯: light keeps its hot core) unless they
 // are the layer's only visible colour (white focus lines take the colourway glow). 虹 puts the
 // spectrum on every gradient (a white core stop stays) and turns solid particle / line fills into
-// gradient fills so it shows; 柄 colourways map like gold and turn a pattern fill into their pattern.
+// gradient fills so it shows; 柄 colourways map like their face metal (ゼブラ silver, キリン / ヒョウ
+// gold) and turn a pattern fill into their pattern.
 // Recolouring is idempotent: a colour already on the ramp stays.
 
 /** Light ramps, luma ascending; black and white close the ends. 白 → 金 rise in saturation and heat. */
@@ -606,7 +630,7 @@ const LIGHT: Record<Colourway, string[]> = {
   red: ['#1a0000', '#6a0000', '#ff0000', '#ff2a00', '#ff7a1a', '#ffb040', '#ffe0b0'],
   gold: ['#2a1000', '#8a3000', '#c85a00', '#ff9400', '#ffb000', '#ffd820', '#fff8b8'],
   silver: ['#101622', '#3a4660', '#7a8aa8', '#b8c8e0', '#cfe4ff', '#f0f6ff'],
-  zebra: ['#2a1000', '#8a3000', '#c85a00', '#ff9400', '#ffc830', '#ffe060', '#fff8b8'],
+  zebra: ['#0c0e12', '#3a3e48', '#7a8090', '#b8bfcc', '#e2e6ed', '#f4f6fa'],
   giraffe: ['#2a1000', '#7a3000', '#e06a10', '#ff9a20', '#ffc860', '#fff0d8'],
   leopard: ['#2a0800', '#801800', '#e04010', '#ff8a20', '#ffb848', '#fff0dc'],
   // 虹 for solid colours: hue by brightness (deep violet → magenta → orange → yellow → ice).
@@ -619,7 +643,7 @@ const WHITE_CORE = 0.92;
 const ON_RAMP = 4 / 255;
 /** 虹 on a gradient with a white core stop: the share the core keeps before the spectrum starts. */
 const CORE_SPAN = 0.15;
-/** 柄 colourways: the gold ground a pattern fill's marks sit on. */
+/** 柄 colourways: the ground a pattern fill's marks sit on, unless the colourway has its own (`patternGround`). */
 const PATTERN_GROUND = '#ffc81e';
 
 type Rgb = [number, number, number];
@@ -683,7 +707,8 @@ const SPECTRUM_FILL: Record<string, { key: string; from: string; to: string }> =
 /** Every colour and gradient param of a generator or light effect of `type` (params `params`, defs `defs`) in `colourway`. */
 function recolorLight(type: string, defs: readonly ParamDef[], params: EffectParams, colourway: Colourway): EffectParams {
   const marks = COLOURWAY_DEFS[colourway].face.pattern;
-  if (type === 'patternFill' && marks) return { ...params, kind: marks.kind, color: marks.color, color2: marks.color2, background: PATTERN_GROUND };
+  if (type === 'patternFill' && marks)
+    return { ...params, kind: marks.kind, color: marks.color, color2: marks.color2, background: COLOURWAY_DEFS[colourway].patternGround ?? PATTERN_GROUND };
   const r = RAMPS[colourway];
   const rainbow = colourway === 'rainbow';
   const p: EffectParams = { ...params };

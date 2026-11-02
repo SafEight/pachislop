@@ -60,6 +60,12 @@ export interface LayerRenderContext {
    * layers (GeneratorContext.layerAlpha / layerAlphaKey / layerBounds / layerContent / layerContentKey).
    */
   layerSource?: LayerSource;
+  /**
+   * Set by the engine around one render, only when an outline effect of the layer needs it and
+   * the renderer adds light of its own (LayerRenderer.addsLight): the renderer also writes the
+   * layer's ink there, the very pixels of `target` without that light.
+   */
+  ink?: THREE.WebGLRenderTarget;
 }
 
 /**
@@ -73,6 +79,12 @@ export interface LayerRenderContext {
  */
 export interface LayerRenderer {
   render(layer: Layer, ctx: LayerRenderContext, target: THREE.WebGLRenderTarget): void;
+  /**
+   * True when render() adds light of its own to `layer`'s pixels (the 3D glint's bloom and
+   * star streaks), light rather than ink; it then writes the ink to `ctx.ink` when that is set.
+   * Omitted: the renderer's pixels are all ink.
+   */
+  addsLight?(layer: Layer): boolean;
   dispose(): void;
 }
 
@@ -164,11 +176,23 @@ export interface EffectContext extends PassContext {
    * The pixels of the layer, group or part (for an adjustment layer: the adjusted composite)
    * BEFORE any of its effects: same size and convention as `input` (comp-size, premultiplied
    * linear), and the same texture as `input` for the first effect of the stack. Effects that
-   * take a shape from the silhouette (emission edge, crack layout, keyline, aura source) read it
-   * here, so an earlier glow, shadow or stroke does not move that shape, and still composite
-   * over `input`.
+   * take a shape from the silhouette (emission edge, crack layout, aura source) read it here
+   * (outline effects read `ink`), so an earlier glow, shadow or stroke does not move that shape,
+   * and still composite over `input`.
    */
   content: THREE.Texture;
+  /**
+   * `content` without light (the 3D glint its renderer added): the layer's ink. The same
+   * texture as `content` when the content holds no light of its own.
+   */
+  ink: THREE.Texture;
+  /**
+   * `input` without the light in it: what the stack so far drew with every light effect left out
+   * (EffectDef.addsLight), from `ink`. The same texture as `input` while no light is in it. Only
+   * outline effects (EffectDef.outline) get it apart from `input`; for any other effect it is
+   * `input`.
+   */
+  inputInk: THREE.Texture;
 }
 
 /** Resolved parameter values (defaults filled in for missing keys). */
@@ -234,6 +258,17 @@ export interface EffectDef {
    * on the whole layer. Read it through `effectGather()` in effects/registry.
    */
   gather?(p: EffectParams): number | null;
+  /**
+   * True when, with params `p`, this effect adds light rather than ink (Deep Glow, a glow added
+   * as light, contour lines): outline effects after it trace and stack on the ink without it and
+   * the light stays on top of them. Omitted: ink.
+   */
+  addsLight?(p: EffectParams): boolean;
+  /**
+   * Traces the ink (Keyline): it reads its shape from `ctx.ink` / `ctx.inputInk`, never from
+   * light, and draws under the light `input` holds beyond `ctx.inputInk`.
+   */
+  outline?: boolean;
   /**
    * Read `input` and write the full result to `output` (both comp-size, premultiplied linear).
    * `input` and `output` are always different targets. Scratch targets come from

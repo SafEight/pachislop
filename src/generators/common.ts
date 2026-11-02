@@ -156,6 +156,89 @@ vec3 anamorphicStreak(vec2 lv, float size, float len, vec3 col) {
   return mix(col, vec3(1.0), exp(-sx * 6.0) * exp(-sy * 40.0)) * streak;
 }`;
 
+/**
+ * Smallest ray half-width at a glint's core, comp px (the tips keep 60 % of it): small sparkles
+ * get relatively thicker rays so they still read as crosses. In comp px, so the same at every
+ * export scale.
+ */
+export const GLINT_MIN_THIN = 0.6;
+
+/**
+ * A glint star as light (the Glints sprites, the particles' 4/6-point glints): an overexposed
+ * white core (HDR, burns out under Add) in a soft round bloom, and rays that start thick and
+ * hot at the core and fall off fast into hair-thin, faint tips. Colour runs from white at the
+ * core to `col`, more saturated, at the tips; `spectral` fans each ray out by wavelength (red
+ * reaches furthest and widest, blue least) and rings the bloom with a faint rainbow.
+ *
+ * `v` = position in star radii (the star's frame), `rays` = 4 (cross plus faint short
+ * diagonals), 6 (snow cross: three needle axes) or 8 (4 long + 4 short), `thin` = ray half-width
+ * at the core in star radii, `minThin` = GLINT_MIN_THIN comp px in star radii, `px` = one render
+ * pixel in star radii (rays never get thinner than about half a pixel: a sub-pixel tip keeps its
+ * light spread over the pixel, so the look is the same at every export scale).
+ */
+export const GLINT_STAR_GLSL = /* glsl */ `
+// One tapered ray along d (unit) reaching len radii: intensity at v. Its half-width runs from
+// thin at the core down to 12 %, but not below minW.
+float glintRay(vec2 v, vec2 d, float len, float thin, float minW, float px) {
+  float al = abs(dot(v, d)) / len;
+  if (al >= 1.0) return 0.0;
+  float pe = abs(dot(v, vec2(-d.y, d.x)));
+  float u = 1.0 - al;
+  float w = max(thin * (0.12 + 0.88 * u * u), minW);
+  float we = sqrt(w * w + 0.25 * px * px);
+  // spike (crisp; under a pixel it keeps its light, spread over the pixel, so the look is the
+  // same at every export scale) + a soft sheath that dies off near the core
+  float spike = exp(-pe / we) * (w / we);
+  float sheath = 0.22 * exp(-pe / (we * 4.0)) * exp(-al * 3.0);
+  // hot near the core, a long faint exponential tail, reaching 0 at the tip
+  float fall = (exp(-al * 5.0) * 2.0 + 1.3 * exp(-al * 1.3)) * sqrt(u);
+  return (spike + sheath) * fall;
+}
+vec3 glintSpectrum(float t) {
+  return clamp(abs(fract(t + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+}
+// All rays of the shape for one wavelength: len and width scaled by ls, ws.
+float glintRays(vec2 v, int rays, float thin, float minW, float px, float ls, float ws) {
+  float t = thin * ws;
+  if (rays == 6) {
+    t *= 0.7;
+    return glintRay(v, vec2(0.0, 1.0), ls, t, minW, px) + glintRay(v, vec2(0.866025, 0.5), ls, t, minW, px) + glintRay(v, vec2(-0.866025, 0.5), ls, t, minW, px);
+  }
+  float I = glintRay(v, vec2(1.0, 0.0), ls, t, minW, px) + glintRay(v, vec2(0.0, 1.0), ls, t, minW, px);
+  // 8: four short diagonals at 60 %; 4: a faint short diagonal pair, the secondary set of a star filter
+  float dk = rays == 8 ? 0.6 : 0.16;
+  float dl = rays == 8 ? 0.5 : 0.3;
+  return I + dk * (glintRay(v, vec2(0.707107, 0.707107), ls * dl, t * 0.8, minW, px) + glintRay(v, vec2(0.707107, -0.707107), ls * dl, t * 0.8, minW, px));
+}
+// minThin: the smallest core half-width (GLINT_MIN_THIN comp px, in star radii); the tips keep 60 % of it.
+vec3 glintStar(vec2 v, int rays, float thin, float minThin, float px, vec3 col, bool spectral) {
+  float r = length(v);
+  if (r >= 1.0) return vec3(0.0);
+  thin = max(thin, minThin);
+  float minW = 0.6 * minThin;
+  // source colour, more saturated, toward the tips; white at the core
+  float m = max(max(col.r, col.g), max(col.b, 1e-4));
+  vec3 hue = col / m;
+  vec3 sat = m * clamp(mix(vec3(dot(hue, vec3(0.2126, 0.7152, 0.0722))), hue, 1.4), 0.0, 1.0);
+  float tip = smoothstep(0.08, 0.9, r);
+  vec3 rayCol = mix(vec3(m), sat, tip);
+  vec3 I;
+  if (spectral) {
+    I = vec3(glintRays(v, rays, thin, minW, px, 1.0, 1.3), glintRays(v, rays, thin, minW, px, 0.93, 1.0), glintRays(v, rays, thin, minW, px, 0.84, 0.75));
+    // diffraction: the ray runs white → violet … red outward
+    rayCol *= mix(vec3(1.0), 1.6 * glintSpectrum(0.75 * (1.0 - smoothstep(0.1, 0.95, r))), smoothstep(0.08, 0.35, r));
+  } else I = vec3(glintRays(v, rays, thin, minW, px, 1.0, 1.0));
+  float edge = 1.0 - smoothstep(0.55, 1.0, r);
+  // round bloom: a tight glow on the core plus a wide faint skirt
+  float bloom = (0.8 * exp(-r * r * 45.0) + 0.35 * exp(-r * 5.0)) * edge;
+  vec3 bloomCol = mix(vec3(m), sat, smoothstep(0.0, 0.25, r));
+  if (spectral) bloomCol += 0.5 * m * glintSpectrum(0.72 - 2.0 * r) * exp(-pow((r - 0.24) / 0.07, 2.0));
+  // overexposed core: well past 1, white
+  float rc = 0.04 + thin;
+  float core = 4.0 * exp(-r * r / (rc * rc));
+  return rayCol * I + bloomCol * bloom + vec3(m) * core;
+}`;
+
 // ---------- instanced quads ----------
 
 /**
