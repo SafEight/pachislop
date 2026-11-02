@@ -6,20 +6,20 @@ import { drag, press, type StageMap } from './drag';
 import { compCamera, glyphPivotZ, glyphPoint3, layerMatrix, type Pt } from './geometry';
 import { snap, writeGlyphs, type TextLayer } from './glyphEdit';
 import type { GlyphGizmoGeom } from './glyphs';
-import { arcPlane, glyphRotation, layerRotation, trackball, turnAbout, type Channel, type Frame, type RotationModel, type Vec3 } from './rotation3d';
+import { arcPlane, compAxis, glyphRotation, layerRotation, moveValues, trackball, turnAbout, type Channel, type RotationModel, type Vec3 } from './rotation3d';
 
 // The shared 3D gizmo (Gizmo3D.tsx) of a 3D layer (Move tool) and of the picked glyphs of a 3D
 // text (Per-letter tool): the same handles and gestures, through a target that says what is
-// edited (the layer's transform / the glyphs' CharAdjust), where the pivot is, its frame and how
-// its rotation channels compose (rotation3d.ts). Values share one convention: X / Y / Z move
-// (+ right / up / toward the viewer) and rotation X / Y / Z (+ top toward the viewer / right side
-// away / clockwise on screen): Transform x, y, z, rotX, rotY, rotZ and CharAdjust dx, dy, dz,
-// tiltX, tiltY, rotate.
+// edited (the layer's transform / the glyphs' CharAdjust), where the pivot is, how its move values
+// move it and how its rotation channels compose (rotation3d.ts). Values share one convention:
+// X / Y / Z move (+ right / up / toward the viewer) and rotation X / Y / Z (+ top toward the
+// viewer / right side away / clockwise on screen): Transform x, y, z, rotX, rotY, rotZ and
+// CharAdjust dx, dy, dz, tiltX, tiltY, rotate.
 //
-// Arrows and arcs share one frame that never turns with the object: the comp's axes for a
-// layer, the layer's own axes for its glyphs. An arc is the quarter ring around one frame axis,
-// between the other two axes' arms; dragging it turns the object about that axis (on top of its
-// orientation at the press), written back as its own rotation channels, several at once.
+// Every gizmo, a layer's or a letter's, is drawn on the comp's axes (X right, Y up, Z toward the
+// viewer), so it looks the same whatever is turned and no arc ever collapses. An arrow moves the
+// object straight along its comp axis; an arc turns it about that axis through the pivot; both
+// are written back as the target's own values (a letter's through its layer), several at once.
 //
 // On screen every direction is drawn as its true projection at the pivot, plus, as it turns
 // toward the viewer and foreshortens, a growing share of its depth along the down-left diagonal
@@ -74,17 +74,15 @@ export interface Gizmo3DTarget {
   id: string;
   /** The pivot (gizmo centre), world space (comp px on z = 0). */
   origin: THREE.Vector3;
-  /** World displacement per unit of the X / Y / Z move values. */
+  /** World displacement per unit of the X / Y / Z move values (a letter's run through its layer). */
   axes: readonly [THREE.Vector3, THREE.Vector3, THREE.Vector3];
-  /** The gizmo's frame (world unit vectors): the axes the arcs turn about. */
-  frame: Frame;
   /** How the rotation channels compose into an orientation. */
   rotation: RotationModel;
   /** Move values and rotations of the target (glyphs: the primary one). */
   pos: Vec3;
   rot: Vec3;
   unit: 'px' | '%';
-  /** Shift step of the move values. */
+  /** Shift step of the move values (along a comp axis: that many units of X). */
   step: number;
   /** Write the gesture's result: `dPos` added to the move values, `dRot` to the rotations (values with a 0 delta stay as stored). */
   write(dPos: Vec3, dRot: Vec3, key: string, action: GizmoAction): void;
@@ -94,14 +92,13 @@ const UNIT = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.
 /** No change. */
 const NONE: Vec3 = [0, 0, 0];
 
-/** A 3D layer's transform: comp axes about the layer's anchor. */
+/** A 3D layer's transform, about the layer's anchor. */
 export function layerTarget(layer: Layer): Gizmo3DTarget {
   const t = layer.transform;
   return {
     id: layer.id,
     origin: new THREE.Vector3(t.x, t.y, t.z),
     axes: UNIT,
-    frame: UNIT,
     rotation: layerRotation,
     pos: [t.x, t.y, t.z],
     rot: [t.rotX, t.rotY, t.rotZ],
@@ -121,19 +118,18 @@ export function layerTarget(layer: Layer): Gizmo3DTarget {
 }
 
 /**
- * The picked glyphs of a 3D text: the layer's own axes (they turn with an orbited layer; Z
- * follows the oblique extrusion's skew), about the primary glyph's rotation pivot (its centre at
+ * The picked glyphs of a 3D text, about the primary glyph's rotation pivot (its centre at
  * mid-depth, pushed by dz), the point its tilts and rotate keep in place, so the gizmo stays put
- * while the letter turns.
+ * while the letter turns. Their dx / dy / dz run along the layer's own axes (Z with the
+ * extrusion's skew) and their tilts turn inside the layer.
  */
 export function glyphTarget(layer: TextLayer, indices: readonly number[], gz: GlyphGizmoGeom): Gizmo3DTarget | null {
   if (layer.kind !== 'title3d' || !gz.pivotL || indices.length === 0) return null;
   const m = layerMatrix(layer);
   const m3 = new THREE.Matrix3().setFromMatrix4(m);
-  // The layer's rotation and flip without its scale: the glyph's frame, the one its tilts turn in.
+  // The layer's rotation and flip without its scale: the frame the glyph's tilts turn in.
   const s = Math.abs(layer.transform.scale) || 1e-6;
   const base = m3.clone().multiplyScalar(1 / s);
-  const col = (i: number) => new THREE.Vector3().setFromMatrix3Column(base, i);
   const { x: kx, y: ky } = layer.style3d.skew;
   const chars0 = layer.source.chars;
   const a = chars0[indices[0]];
@@ -143,7 +139,6 @@ export function glyphTarget(layer: TextLayer, indices: readonly number[], gz: Gl
     id: layer.id,
     origin: new THREE.Vector3(pz.p.x - kx * pz.z, pz.p.y - ky * pz.z, pz.z).applyMatrix4(m),
     axes: [new THREE.Vector3(k, 0, 0).applyMatrix3(m3), new THREE.Vector3(0, k, 0).applyMatrix3(m3), new THREE.Vector3(-kx * k, -ky * k, k).applyMatrix3(m3)],
-    frame: [col(0), col(1), col(2)],
     rotation: glyphRotation(base),
     pos: [a?.dx ?? 0, a?.dy ?? 0, a?.dz ?? 0],
     rot: [a?.tiltX ?? 0, a?.tiltY ?? 0, a?.rotate ?? 0],
@@ -171,14 +166,14 @@ export function glyphTarget(layer: TextLayer, indices: readonly number[], gz: Gl
   };
 }
 
-/** A move arrow on screen: the drawn arrow from the centre (stage px), and the move-value change per px of drag along it. */
+/** A move arrow on screen: the drawn arrow from the centre (stage px), and the world distance a drag moves along its comp axis. */
 export interface GizmoArm {
   arm: Pt;
-  /** Value change of a drag (gx, gy) screen px. */
-  value(gx: number, gy: number): number;
+  /** World distance (comp px) of a drag (gx, gy) screen px along the arrow. */
+  dist(gx: number, gy: number): number;
 }
 
-/** A rotation arc on screen: the quarter ring c + cosθ·A + sinθ·B, θ 0→90° turning the object positively about its frame axis. */
+/** A rotation arc on screen: the quarter ring c + cosθ·A + sinθ·B, θ 0→90° turning the object positively about its comp axis. */
 export interface GizmoArc {
   a: Pt;
   b: Pt;
@@ -191,8 +186,8 @@ export interface GizmoView {
   at: Pt;
   arms: readonly [GizmoArm, GizmoArm, GizmoArm];
   arcs: readonly [GizmoArc, GizmoArc, GizmoArc];
-  /** Move-value deltas of a drag by (gx, gy) screen px in the screen plane through the pivot. */
-  plane(gx: number, gy: number): Vec3;
+  /** World displacement of a drag by (gx, gy) screen px in the screen plane through the pivot. */
+  plane(gx: number, gy: number): THREE.Vector3;
 }
 
 /** The comp camera's right / up axes (world unit vectors): the screen plane. */
@@ -233,53 +228,50 @@ export function gizmoView(comp: Comp, target: Gizmo3DTarget, stage: StageMap): G
     const depth = DEPTH_SHARE * fade * d.dot(toViewer);
     return { x: ARM_PX * (p.x / k + depth * DIAG.x), y: ARM_PX * (p.y / k + depth * DIAG.y) };
   };
-  const arm = (axis: THREE.Vector3): GizmoArm => {
-    const len = axis.length() || 1e-9;
-    const a = drawn(axis.clone().divideScalar(len));
+  const arm = (i: Channel): GizmoArm => {
+    const a = drawn(compAxis(i));
     const n2 = Math.max(a.x * a.x + a.y * a.y, MIN_ARM_PX * MIN_ARM_PX);
     // Dragging the arrow's drawn length moves the target ARM_PX / k world units along the axis (exactly under the pointer for an axis across the view).
-    return { arm: a, value: (gx, gy) => (((gx * a.x + gy * a.y) / n2) * (ARM_PX / k)) / len };
+    return { arm: a, dist: (gx, gy) => ((gx * a.x + gy * a.y) / n2) * (ARM_PX / k) };
   };
-  // Each arc from the frame alone: it stays put however the object is turned.
   const arc = (i: Channel): GizmoArc => {
-    const { a, b } = arcPlane(target.frame, i);
+    const { a, b } = arcPlane(i);
     return { a: drawn(a), b: drawn(b) };
   };
-  const toValues = new THREE.Matrix4().makeBasis(target.axes[0], target.axes[1], target.axes[2]).invert();
   const det = ur.x * uu.y - ur.y * uu.x;
   return {
     c,
     at,
-    arms: [arm(target.axes[0]), arm(target.axes[1]), arm(target.axes[2])],
+    arms: [arm(0), arm(1), arm(2)],
     arcs: [arc(0), arc(1), arc(2)],
     plane(gx, gy) {
-      if (Math.abs(det) < 1e-12) return [0, 0, 0];
+      if (Math.abs(det) < 1e-12) return new THREE.Vector3();
       const a = (gx * uu.y - gy * uu.x) / det;
       const b = (ur.x * gy - ur.y * gx) / det;
-      const w = right.clone().multiplyScalar(a).addScaledVector(up, b).applyMatrix4(toValues);
-      return [w.x, w.y, w.z];
+      return right.clone().multiplyScalar(a).addScaledVector(up, b);
     },
   };
 }
 
-/** Drag an arrow (`axis`) or the centre square (null: the screen plane). Shift: the target's move steps. */
+/**
+ * Drag an arrow (`axis`: straight along that comp axis) or the centre square (null: the screen
+ * plane); the world move is written as the target's move values. Shift: steps of the target's
+ * move step (along the comp axes).
+ */
 export function startGizmoMove(e: React.PointerEvent, target: Gizmo3DTarget, view: GizmoView, axis: Axis | null, onEnd: () => void) {
   const key = oneShot(`gizmo-move:${target.id}`);
   const sx = e.clientX;
   const sy = e.clientY;
+  // The step in world px: that many units of X.
+  const step = target.step * target.axes[0].length();
   drag(
     e,
     (ev) => {
       const gx = ev.clientX - sx;
       const gy = ev.clientY - sy;
-      let d: Vec3;
-      if (axis === null) d = view.plane(gx, gy);
-      else {
-        const t = view.arms[axis].value(gx, gy);
-        d = [axis === 0 ? t : 0, axis === 1 ? t : 0, axis === 2 ? t : 0];
-      }
-      if (ev.shiftKey) d = [snap(d[0], target.step), snap(d[1], target.step), snap(d[2], target.step)];
-      target.write(d, NONE, key, axis === null ? 'Move' : MOVE_ACTIONS[axis]);
+      const w = axis === null ? view.plane(gx, gy) : compAxis(axis).multiplyScalar(view.arms[axis].dist(gx, gy));
+      if (ev.shiftKey) w.set(snap(w.x, step), snap(w.y, step), snap(w.z, step));
+      target.write(moveValues(target.axes, w), NONE, key, axis === null ? 'Move' : MOVE_ACTIONS[axis]);
     },
     onEnd,
   );
@@ -304,7 +296,7 @@ function nearestOnArc(c: Pt, arc: GizmoArc, from: number, to: number, p: Pt): { 
 }
 
 /**
- * Drag a rotation arc: the object turns about the arc's frame axis by the angle swept along the
+ * Drag a rotation arc: the object turns about the arc's comp axis by the angle swept along the
  * ring (its whole ellipse on screen, beyond the drawn quarter), so it turns as far and the same
  * way as the hand goes, all the way round. Each move steps along the ring's tangent from the
  * last angle, then settles on the ring point nearest the pointer within ±45° of it (pointer near
@@ -316,7 +308,7 @@ export function startGizmoRotate(e: React.PointerEvent, target: Gizmo3DTarget, v
   const key = oneShot(`gizmo-rot:${target.id}`);
   const { c } = view;
   const arc = view.arcs[axis];
-  const { n } = arcPlane(target.frame, axis);
+  const { n } = arcPlane(axis);
   const w0 = target.rotation.orient(target.rot);
   let prev = target.rot;
   const r = ARC_PX / ARM_PX;

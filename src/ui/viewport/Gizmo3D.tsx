@@ -8,11 +8,11 @@ import { Handle, ROTATE_CURSOR } from './Handle';
 // The 3D gizmo of a selected 3D layer (Move tool) and of the picked glyphs of a 3D text
 // (Per-letter tool), the same for both (gizmoEdit.ts holds the targets and gestures). Fixed
 // on-screen size, centred on the pivot, X red / Y green / Z blue:
-// - move arrows along each frame axis as it points (a foreshortened axis blends toward the
-//   down-left diagonal, see gizmoEdit.ts), and a centre square that moves in the screen plane;
-// - per frame axis, a quarter of the ring around it between the other two axes' arms: dragging
+// - move arrows along the comp's X / Y / Z, the same frame for a layer and a letter (a
+//   foreshortened axis blends toward the down-left diagonal, see gizmoEdit.ts), and a centre
+//   square that moves in the screen plane;
+// - per comp axis, a quarter of the ring around it between the other two axes' arms: dragging
 //   along it turns the object about that axis as far as the hand sweeps, all the way round;
-//   arrows and arcs share the frame (comp axes for a layer, the layer's axes for a letter), so
 //   nothing in the gizmo moves while the object turns;
 // - a thin ring around it all: free rotate, a trackball (like ⌥-drag on the object).
 // Hover names the action; a drag shows its axis and value. Every coloured stroke is drawn twice,
@@ -49,8 +49,8 @@ const toward = (a: Pt, b: Pt): Pt | null => {
   return len < 1e-3 ? null : { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
 };
 
-/** The gesture in progress; `rot0`: the rotations at its press (the readout names the ones that change). */
-type Active = { action: GizmoAction; axis: Axis | null; kind: 'move' | 'rotate' | 'free'; rot0?: Vec3 };
+/** The gesture in progress; `from`: the values it changes (move values or rotations) at its press, so the readout names the ones that change. */
+type Active = { action: GizmoAction; axis: Axis | null; kind: 'move' | 'rotate' | 'free'; from: Vec3 };
 
 export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTarget; stage: StageMap }) {
   const t = useT();
@@ -71,13 +71,10 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
   const lit = (action: GizmoAction, dragged: boolean) => (dragged ? 'active' : !active && hover === action ? 'hot' : '');
   const unit = (v: number) => `${r1(v)} ${target.unit}`;
   const deg = (v: number) => `${r1(v)}°`;
+  const now = active?.kind === 'move' ? target.pos : target.rot;
   const readout = !active
     ? hover && t(hover)
-    : active.kind !== 'move'
-      ? t(active.action) + AXES.flatMap((a, i) => (active.rot0 && Math.abs(target.rot[i] - active.rot0[i]) > 0.05 ? [` · ${a} ${deg(target.rot[i])}`] : [])).join('')
-      : active.axis === null
-        ? `${t(active.action)} · X ${unit(target.pos[0])} · Y ${unit(target.pos[1])} · Z ${unit(target.pos[2])}`
-        : `${t(active.action)} · ${unit(target.pos[active.axis])}`;
+    : t(active.action) + AXES.flatMap((a, i) => (Math.abs(now[i] - active.from[i]) > 0.05 ? [` · ${a} ${active.kind === 'move' ? unit(now[i]) : deg(now[i])}`] : [])).join('');
   const guide = active?.kind === 'move' && active.axis !== null ? view.arms[active.axis].arm : null;
   const guideLen = guide ? Math.hypot(guide.x, guide.y) || 1 : 1;
   const arrows = view.arms.map(({ arm }, i) => {
@@ -99,7 +96,7 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
     };
   });
   const startMove = (e: React.PointerEvent, axis: Axis | null) => {
-    setActive({ action: axis === null ? 'Move' : MOVE_ACTIONS[axis], axis, kind: 'move' });
+    setActive({ action: axis === null ? 'Move' : MOVE_ACTIONS[axis], axis, kind: 'move', from: target.pos });
     startGizmoMove(e, target, view, axis, end);
   };
   return (
@@ -121,7 +118,7 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
           title={t('Free rotate: drag to turn it like a trackball (Shift: 15° steps; or ⌥-drag the object)')}
           hit={<circle className="hit stroke ring" cx={c.x} cy={c.y} r={RING_R} />}
           onDown={(e) => {
-            setActive({ action: 'Free rotate', axis: null, kind: 'free', rot0: target.rot });
+            setActive({ action: 'Free rotate', axis: null, kind: 'free', from: target.rot });
             startFreeRotate(e, target, comp, end, end);
           }}
         >
@@ -156,7 +153,7 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
               title={t('Rotate about {axis}: drag along the arc (Shift: 15° steps)', { axis: AXES[i] })}
               hit={<path className="hit stroke" d={d} />}
               onDown={(e) => {
-                setActive({ action, axis, kind: 'rotate', rot0: target.rot });
+                setActive({ action, axis, kind: 'rotate', from: target.rot });
                 startGizmoRotate(e, target, view, axis, toStage, end);
               }}
             >

@@ -2,9 +2,10 @@ import * as THREE from 'three';
 
 // Rotation channels of the 3D gizmo as matrices: a layer's rotX / rotY / rotZ and a glyph's
 // tiltX / tiltY / rotate, each an Euler composition (degrees), to world orientation and back.
-// The gizmo turns the object about the axes of its fixed frame (arcs) or the screen's
-// (trackball) on top of its orientation at the press, then writes the result back as these
-// channels. Pure (no editor state), so the round trips are unit-tested.
+// The gizmo turns the object about the comp's axes (arcs) or the screen's (trackball) on top
+// of its orientation at the press, then writes the result back as these channels; a letter's
+// channels live inside its layer, so its turn is L⁻¹·R·L·G0. Pure (no editor state), so the round
+// trips are unit-tested.
 //
 // Layer (Layer3DRenderer / layerMatrix): R = Rz(−rotZ)·Ry(rotY)·Rx(rotX), three's 'ZYX' with
 // (rotX, rotY, −rotZ): rotZ (clockwise on screen) is outermost, about the comp's Z.
@@ -88,19 +89,28 @@ export function glyphRotation(base: THREE.Matrix3): RotationModel {
   };
 }
 
-/** A gizmo frame: three orthogonal world unit vectors (X, Y, Z; left-handed on a mirrored layer). */
-export type Frame = readonly [THREE.Vector3, THREE.Vector3, THREE.Vector3];
+/** The gizmo's frame, the same for a layer and a letter: the comp's X (right), Y (up), Z (toward the viewer). */
+const COMP_AXES = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)] as const;
 
 /**
- * The rotation arc around `frame` axis `i`: the other two axes A, B (cyclic order, so the arcs
- * read the same on every frame) and the world axis `n` = A×B a turn A→B is positive about (the
- * frame axis itself, reversed on a mirrored frame). It depends on the frame alone, never on the
- * object's rotation.
+ * The rotation arc around comp axis `i`: the other two axes A, B (cyclic order) and the axis `n`
+ * a turn A→B is positive about. The comp's axes never line up on screen, so no arc collapses.
  */
-export function arcPlane(frame: Frame, i: Channel): { a: THREE.Vector3; b: THREE.Vector3; n: THREE.Vector3 } {
-  const a = frame[(i + 1) % 3];
-  const b = frame[(i + 2) % 3];
-  return { a, b, n: a.clone().cross(b).normalize() };
+export function arcPlane(i: Channel): { a: THREE.Vector3; b: THREE.Vector3; n: THREE.Vector3 } {
+  return { a: COMP_AXES[(i + 1) % 3].clone(), b: COMP_AXES[(i + 2) % 3].clone(), n: COMP_AXES[i].clone() };
+}
+
+/** A comp axis (world unit vector). */
+export const compAxis = (i: Channel): THREE.Vector3 => COMP_AXES[i].clone();
+
+/**
+ * The move values giving world displacement `w`, for a target whose values move it `axes` (world
+ * displacement per unit of X / Y / Z: a layer's comp px, a letter's % of size through the layer's
+ * rotation, flip, scale and the extrusion's skew).
+ */
+export function moveValues(axes: readonly [THREE.Vector3, THREE.Vector3, THREE.Vector3], w: THREE.Vector3): Vec3 {
+  const v = w.clone().applyMatrix4(new THREE.Matrix4().makeBasis(axes[0], axes[1], axes[2]).invert());
+  return [v.x, v.y, v.z];
 }
 
 /** `w0` turned `deg` degrees about world unit axis `n`, in world space (on the left). */
