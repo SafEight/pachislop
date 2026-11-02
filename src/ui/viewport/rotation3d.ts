@@ -92,16 +92,34 @@ export function glyphRotation(base: THREE.Matrix3): RotationModel {
 /** The gizmo's frame, the same for a layer and a letter: the comp's X (right), Y (up), Z (toward the viewer). */
 const COMP_AXES = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)] as const;
 
-/**
- * The rotation arc around comp axis `i`: the other two axes A, B (cyclic order) and the axis `n`
- * a turn A→B is positive about. The comp's axes never line up on screen, so no arc collapses.
- */
-export function arcPlane(i: Channel): { a: THREE.Vector3; b: THREE.Vector3; n: THREE.Vector3 } {
-  return { a: COMP_AXES[(i + 1) % 3].clone(), b: COMP_AXES[(i + 2) % 3].clone(), n: COMP_AXES[i].clone() };
-}
-
-/** A comp axis (world unit vector). */
+/** A comp axis (world unit vector). The arc around axis i runs from axis i+1 to axis i+2 (cyclic), positive about axis i. */
 export const compAxis = (i: Channel): THREE.Vector3 => COMP_AXES[i].clone();
+
+/** Screen length of the X / Y arms of the gizmo, CSS px. */
+export const ARM_PX = 84;
+/** Screen length of the Z arm, drawn on the down-left diagonal (toward the viewer), CSS px. */
+const Z_ARM_PX = 60;
+
+/**
+ * The gizmo as drawn: a fixed schematic in screen px (y down), the same wherever the pivot is,
+ * whatever the zoom, the camera or the object's rotation: X to the right, Y up, Z down-left.
+ * Each arc is spanned by the arms of the two axes after its own (cyclic).
+ */
+export const SCHEMATIC_ARMS = [
+  { x: ARM_PX, y: 0 },
+  { x: 0, y: -ARM_PX },
+  { x: -Z_ARM_PX * Math.SQRT1_2, y: Z_ARM_PX * Math.SQRT1_2 },
+] as const;
+
+/**
+ * World distance along comp axis `i` of a drag (gx, gy) screen px: the travel along its drawn arm
+ * over `k`, the screen px per world unit at the pivot. X and Y follow the cursor; Z (down-left =
+ * toward the viewer) moves at the same rate.
+ */
+export function armTravel(i: Channel, gx: number, gy: number, k: number): number {
+  const a = SCHEMATIC_ARMS[i];
+  return (gx * a.x + gy * a.y) / Math.hypot(a.x, a.y) / k;
+}
 
 /**
  * The move values giving world displacement `w`, for a target whose values move it `axes` (world

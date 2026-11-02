@@ -51,7 +51,7 @@ import { GlyphGizmo } from './viewport/GlyphGizmo';
 import { nudgeGlyphs, startGlyphMove, type TextLayer } from './viewport/glyphEdit';
 import { glyphGizmo, type GlyphGizmoGeom } from './viewport/glyphs';
 import { gradientTarget } from './viewport/gradientTarget';
-import { ARROW_PX, Handle, ROTATE_CURSOR, SNAP_PX } from './viewport/Handle';
+import { ARROW_PX, EXACT_HIT_R, Handle, HandleHitRadius, HIT_R, ROTATE_CURSOR, SNAP_PX } from './viewport/Handle';
 import { LightDial } from './viewport/LightDial';
 import { selectedMask } from './viewport/mask';
 import { MaskHandles } from './viewport/MaskHandles';
@@ -1081,7 +1081,12 @@ export function Viewport() {
                 </text>
               </g>
             ))}
-          {sourceHandles && <SourceHandles comp={comp} layer={sourceHandles} stage={stage} />}
+          {sourceHandles && (
+            // With the 3D gizmo on the canvas, the shape's handles (drawn above it) take presses on themselves only.
+            <HandleHitRadius value={gizmoLayer ? EXACT_HIT_R : HIT_R}>
+              <SourceHandles comp={comp} layer={sourceHandles} stage={stage} />
+            </HandleHitRadius>
+          )}
           {gradTarget && <GradientHandles comp={comp} target={gradTarget} selectedChars={selectedChars} stage={stage} />}
           {distortLayer && <DistortHandles comp={comp} layer={distortLayer} stage={stage} />}
           {genHandles && <GeneratorHandles comp={comp} layer={genHandles} stage={stage} />}

@@ -6,7 +6,7 @@ import { drag, press, type StageMap } from './drag';
 import { compCamera, glyphPivotZ, glyphPoint3, layerMatrix, type Pt } from './geometry';
 import { snap, writeGlyphs, type TextLayer } from './glyphEdit';
 import type { GlyphGizmoGeom } from './glyphs';
-import { arcPlane, compAxis, glyphRotation, layerRotation, moveValues, trackball, turnAbout, type Channel, type RotationModel, type Vec3 } from './rotation3d';
+import { ARM_PX, SCHEMATIC_ARMS, armTravel, compAxis, glyphRotation, layerRotation, moveValues, trackball, turnAbout, type Channel, type RotationModel, type Vec3 } from './rotation3d';
 
 // The shared 3D gizmo (Gizmo3D.tsx) of a 3D layer (Move tool) and of the picked glyphs of a 3D
 // text (Per-letter tool): the same handles and gestures, through a target that says what is
@@ -21,10 +21,10 @@ import { arcPlane, compAxis, glyphRotation, layerRotation, moveValues, trackball
 // object straight along its comp axis; an arc turns it about that axis through the pivot; both
 // are written back as the target's own values (a letter's through its layer), several at once.
 //
-// On screen every direction is drawn as its true projection at the pivot, plus, as it turns
-// toward the viewer and foreshortens, a growing share of its depth along the down-left diagonal
-// (the front-view convention: an axis seen head-on is drawn there). The blend is continuous, and
-// an axis at least half across the view is drawn exactly as it points.
+// The gizmo is drawn as a fixed schematic in screen space (rotation3d.ts SCHEMATIC_ARMS), the same
+// wherever it is and however anything is turned: X right, Y up, Z on the down-left diagonal. A
+// drag along an arm moves the object along that comp axis at the pivot's true px-per-unit (Z at
+// the same rate), so X / Y follow the cursor.
 
 export type Axis = Channel;
 export type { Vec3 };
@@ -33,17 +33,9 @@ export type { Vec3 };
 const ROT_PER_PX = 0.4;
 /** Shift snaps rotations to this many degrees. */
 const ROT_SNAP = 15;
-/** Screen length of a move arrow seen side-on, CSS px. */
-export const ARM_PX = 84;
-/** Radius of the rotation arcs seen face-on, CSS px (0.6 of the arm). */
+/** Radius of the rotation arcs along the X / Y arms, CSS px (0.6 of the arm). */
 export const ARC_PX = 50;
-/** Share of a head-on direction's depth (toward the viewer) drawn along the down-left diagonal. */
-const DEPTH_SHARE = 0.5;
-/** Projected length (share of the full arm) from which a direction is drawn as it truly points. */
-const TRUE_FROM = 0.5;
-const DIAG: Pt = { x: -Math.SQRT1_2, y: Math.SQRT1_2 };
-/** Floor of an arrow's / arc's on-screen rate in the drag mapping, so a foreshortened handle never races. */
-const MIN_ARM_PX = 24;
+/** Floor of an arc's on-screen rate in the drag mapping, so a short stretch of ring never races. */
 const MIN_ARC_RATE = 0.4 * ARC_PX;
 
 const DEG = Math.PI / 180;
@@ -196,7 +188,7 @@ function screenAxes(comp: Comp): { cam: THREE.PerspectiveCamera; right: THREE.Ve
   return { cam, right: new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion), up: new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion) };
 }
 
-/** Where the gizmo of `target` sits and points on screen, or null (pivot behind the camera). */
+/** Where the gizmo of `target` sits on screen (the schematic is fixed; only its centre and drag rates depend on the view), or null (pivot behind the camera). */
 export function gizmoView(comp: Comp, target: Gizmo3DTarget, stage: StageMap): GizmoView | null {
   const { cam, right, up } = screenAxes(comp);
   const hw = comp.width / 2;
@@ -208,7 +200,10 @@ export function gizmoView(comp: Comp, target: Gizmo3DTarget, stage: StageMap): G
   };
   const at = project(target.origin);
   if (!at) return null;
-  const c = stage.S(at);
+  // On the device pixel grid, so the schematic draws the same pixels wherever it sits.
+  const s = stage.S(at);
+  const dpr = window.devicePixelRatio || 1;
+  const c = { x: Math.round(s.x * dpr) / dpr, y: Math.round(s.y * dpr) / dpr };
   const q = new THREE.Vector3();
   /** Stage px per world unit along `dir` at the pivot (measured over about one world unit). */
   const rate = (dir: THREE.Vector3): Pt => {
@@ -216,28 +211,13 @@ export function gizmoView(comp: Comp, target: Gizmo3DTarget, stage: StageMap): G
     const p = project(q.copy(target.origin).addScaledVector(dir, h));
     return p ? { x: ((p.x - at.x) / h) * stage.d, y: (-(p.y - at.y) / h) * stage.d } : { x: 0, y: 0 };
   };
-  // Px per world unit across the view at the pivot: one scale for every direction, whatever the target's rotation.
+  // Px per world unit across the view at the pivot (its perspective scale): every arrow's drag rate.
   const ur = rate(right);
   const uu = rate(up);
   const k = Math.hypot(ur.x, ur.y) || 1e-9;
-  const toViewer = cam.position.clone().sub(target.origin).normalize();
-  /** The drawn arm of world unit direction `d`: its projection plus its depth share along the diagonal. */
-  const drawn = (d: THREE.Vector3): Pt => {
-    const p = rate(d);
-    const fade = Math.max(0, 1 - Math.hypot(p.x, p.y) / k / TRUE_FROM) ** 2;
-    const depth = DEPTH_SHARE * fade * d.dot(toViewer);
-    return { x: ARM_PX * (p.x / k + depth * DIAG.x), y: ARM_PX * (p.y / k + depth * DIAG.y) };
-  };
-  const arm = (i: Channel): GizmoArm => {
-    const a = drawn(compAxis(i));
-    const n2 = Math.max(a.x * a.x + a.y * a.y, MIN_ARM_PX * MIN_ARM_PX);
-    // Dragging the arrow's drawn length moves the target ARM_PX / k world units along the axis (exactly under the pointer for an axis across the view).
-    return { arm: a, dist: (gx, gy) => ((gx * a.x + gy * a.y) / n2) * (ARM_PX / k) };
-  };
-  const arc = (i: Channel): GizmoArc => {
-    const { a, b } = arcPlane(i);
-    return { a: drawn(a), b: drawn(b) };
-  };
+  const arm = (i: Channel): GizmoArm => ({ arm: SCHEMATIC_ARMS[i], dist: (gx, gy) => armTravel(i, gx, gy, k) });
+  // Each arc spanned by the arms of the two axes after its own (cyclic): turning A→B is positive about its axis.
+  const arc = (i: Channel): GizmoArc => ({ a: SCHEMATIC_ARMS[(i + 1) % 3], b: SCHEMATIC_ARMS[(i + 2) % 3] });
   const det = ur.x * uu.y - ur.y * uu.x;
   return {
     c,
@@ -308,7 +288,7 @@ export function startGizmoRotate(e: React.PointerEvent, target: Gizmo3DTarget, v
   const key = oneShot(`gizmo-rot:${target.id}`);
   const { c } = view;
   const arc = view.arcs[axis];
-  const { n } = arcPlane(axis);
+  const n = compAxis(axis);
   const w0 = target.rotation.orient(target.rot);
   let prev = target.rot;
   const r = ARC_PX / ARM_PX;

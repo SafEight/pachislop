@@ -2,18 +2,18 @@ import { useState } from 'react';
 import type { Comp } from '../../model/types';
 import { useT } from '../i18n';
 import type { StageMap } from './drag';
-import { ARM_PX, MOVE_ACTIONS, ROTATE_ACTIONS, arcPoint, gizmoView, startFreeRotate, startGizmoMove, startGizmoRotate, type Axis, type GizmoAction, type Gizmo3DTarget, type Vec3 } from './gizmoEdit';
+import { MOVE_ACTIONS, ROTATE_ACTIONS, arcPoint, gizmoView, startFreeRotate, startGizmoMove, startGizmoRotate, type Axis, type GizmoAction, type Gizmo3DTarget, type Vec3 } from './gizmoEdit';
+import { ARM_PX } from './rotation3d';
 import { Handle, ROTATE_CURSOR } from './Handle';
 
 // The 3D gizmo of a selected 3D layer (Move tool) and of the picked glyphs of a 3D text
-// (Per-letter tool), the same for both (gizmoEdit.ts holds the targets and gestures). Fixed
-// on-screen size, centred on the pivot, X red / Y green / Z blue:
-// - move arrows along the comp's X / Y / Z, the same frame for a layer and a letter (a
-//   foreshortened axis blends toward the down-left diagonal, see gizmoEdit.ts), and a centre
-//   square that moves in the screen plane;
-// - per comp axis, a quarter of the ring around it between the other two axes' arms: dragging
-//   along it turns the object about that axis as far as the hand sweeps, all the way round;
-//   nothing in the gizmo moves while the object turns;
+// (Per-letter tool), the same for both (gizmoEdit.ts holds the targets and gestures). A fixed
+// schematic, identical everywhere apart from its position, centred on the pivot, X red / Y green
+// / Z blue:
+// - move arrows along the comp's X (right) / Y (up) / Z (down-left, toward the viewer), the same
+//   for a layer and a letter, and a centre square that moves in the screen plane;
+// - per comp axis, a quarter ring between the other two axes' arms: dragging along it turns the
+//   object about that axis as far as the hand sweeps, all the way round;
 // - a thin ring around it all: free rotate, a trackball (like ⌥-drag on the object).
 // Hover names the action; a drag shows its axis and value. Every coloured stroke is drawn twice,
 // a wide dark halo then the colour, so the handles read on white chrome, black lacquer and rainbow.
@@ -170,7 +170,7 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
         );
       })}
       {arrows.map(({ axis, action, grab, from, base, head }) => (
-        // Shafts first: where arrows overlap on screen (two axes pointing alike), every head stays on top.
+        // Shafts first, then every head above the shafts and arcs.
         <g key={`shaft${axis}`} {...hovered(action)} className={`ax${axis} ${lit(action, active?.kind === 'move' && active.axis === axis)}`}>
           <Handle
             x={c.x}
@@ -186,8 +186,7 @@ export function Gizmo3D({ comp, target, stage }: { comp: Comp; target: Gizmo3DTa
           </Handle>
         </g>
       ))}
-      {/* Longer arrows' heads last: where heads overlap, each keeps its own point. */}
-      {arrows.toSorted((a, b) => Math.hypot(a.tip.x - c.x, a.tip.y - c.y) - Math.hypot(b.tip.x - c.x, b.tip.y - c.y)).map(({ axis, action, tip, head, label }) => (
+      {arrows.map(({ axis, action, tip, head, label }) => (
         <g key={`head${axis}`} {...hovered(action)} className={`ax${axis} ${lit(action, active?.kind === 'move' && active.axis === axis)}`}>
           <Handle
             x={tip.x}

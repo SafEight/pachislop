@@ -1,7 +1,15 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { createContext, useContext, type CSSProperties, type ReactNode } from 'react';
 
 /** Hit radius of every on-canvas handle, CSS px: a ≥ 24 px target whatever the drawn size. */
 export const HIT_R = 12;
+/** Hit radius of a handle that covers only its own drawn disc / diamond, CSS px. */
+export const EXACT_HIT_R = 8;
+/**
+ * Hit radius of the handles below it (default HIT_R). The Viewport sets EXACT_HIT_R on a shape's
+ * own handles while the 3D gizmo shares the canvas with them: drawn above the gizmo, they keep
+ * presses on themselves only, so the gizmo's arrows and arcs around them stay grabbable.
+ */
+export const HandleHitRadius = createContext(HIT_R);
 
 /** Screen px within which a dragged point handle snaps (Shift) to its centre, and a dragged layer's edges / centre snap. */
 export const SNAP_PX = 8;
@@ -40,6 +48,7 @@ export function Handle({
   hit?: ReactNode;
   children: ReactNode;
 }) {
+  const hitR = useContext(HandleHitRadius);
   return (
     <g
       className={`hh ${className ?? ''}`}
@@ -53,7 +62,7 @@ export function Handle({
       }}
     >
       <title>{title}</title>
-      {hit ?? <circle className="hit" cx={x} cy={y} r={HIT_R} />}
+      {hit ?? <circle className="hit" cx={x} cy={y} r={hitR} />}
       {children}
     </g>
   );

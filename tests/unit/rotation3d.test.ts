@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { arcPlane, glyphRotation, layerRotation, moveValues, trackball, turnAbout, type RotationModel, type Vec3 } from '../../src/ui/viewport/rotation3d';
+import { ARM_PX, SCHEMATIC_ARMS, armTravel, compAxis, glyphRotation, layerRotation, moveValues, trackball, turnAbout, type RotationModel, type Vec3 } from '../../src/ui/viewport/rotation3d';
 
 const close = (a: THREE.Matrix3, b: THREE.Matrix3) => a.elements.forEach((v, i) => expect(v).toBeCloseTo(b.elements[i], 6));
 const RIGHT = new THREE.Vector3(1, 0, 0);
@@ -45,7 +45,7 @@ describe.each(models)('rotation channels of a %s', (_, model) => {
   it('an arc turns the object about its comp axis, read back as channels', () => {
     for (const rot of poses)
       for (const i of [0, 1, 2] as const) {
-        const { n } = arcPlane(i);
+        const n = compAxis(i);
         const w0 = model.orient(rot);
         const w = turnAbout(w0, n, 70);
         close(model.orient(model.fromOrient(w, rot)), w);
@@ -59,7 +59,7 @@ describe.each(models)('rotation channels of a %s', (_, model) => {
     for (const i of [0, 1, 2] as const) {
       const rot0: Vec3 = [60, 40, 45];
       const w0 = model.orient(rot0);
-      const { n } = arcPlane(i);
+      const n = compAxis(i);
       let prev = rot0;
       for (let deg = 1; deg <= 360; deg++) {
         const next = model.fromOrient(turnAbout(w0, n, deg), prev);
@@ -71,21 +71,37 @@ describe.each(models)('rotation channels of a %s', (_, model) => {
   });
 });
 
-describe('the comp frame', () => {
-  it('each arc spans the other two comp axes, A→B turning positively about its own', () => {
+describe('the comp frame and the drawn schematic', () => {
+  it('the arms are a constant schematic: X right, Y up, Z on the down-left diagonal', () => {
+    expect(SCHEMATIC_ARMS[0]).toEqual({ x: ARM_PX, y: 0 });
+    expect(SCHEMATIC_ARMS[1]).toEqual({ x: 0, y: -ARM_PX });
+    expect(SCHEMATIC_ARMS[2].x).toBeCloseTo(-SCHEMATIC_ARMS[2].y, 9);
+    expect(SCHEMATIC_ARMS[2].x).toBeLessThan(0);
+  });
+
+  it('drag travel along an arm maps to world distance at the pivot rate, Z at the X rate', () => {
+    const k = 0.75; // screen px per world unit at the pivot
+    expect(armTravel(0, 30, 0, k)).toBeCloseTo(40, 9);
+    expect(armTravel(1, 0, -30, k)).toBeCloseTo(40, 9);
+    // 30 px down-left along the diagonal: toward the viewer, at the same rate as X.
+    expect(armTravel(2, -30 * Math.SQRT1_2, 30 * Math.SQRT1_2, k)).toBeCloseTo(40, 9);
+    // Travel across an arm moves nothing along it.
+    expect(armTravel(0, 0, 25, k)).toBeCloseTo(0, 9);
+  });
+
+  it('each arc runs from the next axis to the one after (cyclic), positively about its own', () => {
     for (const i of [0, 1, 2] as const) {
-      const { a, b, n } = arcPlane(i);
-      expect(a.dot(b)).toBeCloseTo(0, 6);
-      expect(n.getComponent(i)).toBe(1);
-      // A quarter turn about n carries A onto B: the object follows the pointer from A to B.
-      expect(a.clone().applyMatrix3(turnAbout(new THREE.Matrix3(), n, 90)).dot(b)).toBeCloseTo(1, 6);
+      const a = compAxis(((i + 1) % 3) as 0 | 1 | 2);
+      const b = compAxis(((i + 2) % 3) as 0 | 1 | 2);
+      // A quarter turn about the axis carries A onto B: the object follows the pointer along the drawn arc from A to B.
+      expect(a.applyMatrix3(turnAbout(new THREE.Matrix3(), compAxis(i), 90)).dot(b)).toBeCloseTo(1, 6);
     }
   });
 
   it('a letter on a turned, mirrored layer turns about the comp Y axis: its tilts become L⁻¹·R·L·G0', () => {
     const glyph = glyphRotation(mirrored);
     const rot0: Vec3 = [20, -35, 10];
-    const turned = glyph.fromOrient(turnAbout(glyph.orient(rot0), arcPlane(1).n, 50), rot0);
+    const turned = glyph.fromOrient(turnAbout(glyph.orient(rot0), compAxis(1), 50), rot0);
     // In world: exactly the comp-Y turn of the letter.
     const ry = new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationY((50 * Math.PI) / 180));
     close(glyph.orient(turned), ry.clone().multiply(glyph.orient(rot0)));
@@ -111,7 +127,7 @@ describe('the comp frame', () => {
   it('a layer and a letter on an unturned layer write the same rotation values for the same arc turn', () => {
     const glyph = glyphRotation(new THREE.Matrix3());
     for (const i of [0, 1, 2] as const) {
-      const w = turnAbout(new THREE.Matrix3(), arcPlane(i).n, 30);
+      const w = turnAbout(new THREE.Matrix3(), compAxis(i), 30);
       const want: Vec3 = [i === 0 ? 30 : 0, i === 1 ? 30 : 0, i === 2 ? -30 : 0]; // rotZ / rotate are clockwise-positive
       for (const model of [layerRotation, glyph]) model.fromOrient(w, [0, 0, 0]).forEach((v, k) => expect(v).toBeCloseTo(want[k], 6));
     }
