@@ -1,13 +1,13 @@
 import type { Fill, FillKind, Gradient, GradientSpan, ImageFill } from '../../../model/types';
 import { getRefs, isMultiRef, refKey, refList } from '../../../store/paths';
 import { useEditor, type Refs } from '../../../store/store';
-import { NumberField, RefCheck, RefNum, RefColor, Row, Seg } from '../../controls';
+import { Findable, NumberField, RefCheck, RefChoice, RefNum, RefColor, Row } from '../../controls';
 import { GradientEditor } from '../../GradientEditor';
 import { useT } from '../../i18n';
-import { oneShot, useMixed } from '../../util';
+import { oneShot, useMixed, useRefValue } from '../../util';
 import { FillKindIcon } from './icons';
 import { FILL_KINDS, fillCss, findHorizon, moveHorizon, pinchHorizon, sub, tOpts } from './shared';
-import { IconChoice, ImageAssetPicker } from './widgets';
+import { ImageAssetPicker } from './widgets';
 
 const KIND_OPTIONS = FILL_KINDS.map((k) => ({ ...k, icon: <FillKindIcon kind={k.value} /> }));
 
@@ -28,6 +28,44 @@ const USES_ANGLE: Partial<Record<FillKind, true>> = { linear: true, reflected: t
 const newImageFill = (assetId = ''): ImageFill => ({ assetId, scale: 1, offsetX: 0, offsetY: 0, rotate: 0, tile: false });
 
 /**
+ * Chrome horizon of the gradients at `gradRef`, read from the store: Pinch, and the position of
+ * the hard edge once there is one (several targets: each moves from where it was when the drag
+ * began).
+ */
+function HorizonRow(props: { gradRef: Refs }) {
+  const { gradRef } = props;
+  const t = useT();
+  const { setAt, setEachAt } = useEditor.getState();
+  const { value, mixed } = useRefValue(gradRef);
+  if (!value) return null;
+  const g = value as Gradient;
+  const horizon = findHorizon(g);
+  return (
+    <Findable type={HorizonRow} props={props}>
+      <Row label={t('Horizon')} title={t('Chrome horizon: a hard edge between two coincident stops (sky above, ground below)')}>
+        <button title={t('Pinch the two middle stops into a hard chrome horizon')} onClick={() => setEachAt(gradRef, (x) => pinchHorizon(x as Gradient), oneShot(refKey(gradRef)))}>
+          {t('Pinch horizon')}
+        </button>
+        {horizon !== null && (
+          <NumberField
+            id={`${refKey(gradRef)}:horizon`}
+            label={t('Horizon position')}
+            value={horizon}
+            mixed={mixed}
+            onChange={(v, c) => (isMultiRef(gradRef) ? setEachAt(gradRef, (x) => moveHorizon(x as Gradient, v), c) : setAt(gradRef, moveHorizon(g, v), c))}
+            min={0.02}
+            max={0.98}
+            clamp
+            display={100}
+            unit="%"
+          />
+        )}
+      </Row>
+    </Findable>
+  );
+}
+
+/**
  * Every fill kind (2D face & rims, background); span only for text titles. Over several targets
  * `fill` is the first one's; differing values show “—” and an edit sets every target.
  */
@@ -43,19 +81,16 @@ export function FillEditor({ refp, fill }: { refp: Refs; fill: Fill }) {
   );
   const gradRef = sub(refp, 'gradient');
   const imgRef = sub(refp, 'image');
-  const [fillMixed, kindMixed, spanMixed, gradMixed] = useMixed(refp, sub(refp, 'kind'), sub(refp, 'span'), gradRef);
-  const horizon = fill.kind === 'solid' || fill.kind === 'image' ? null : findHorizon(fill.gradient);
+  const [fillMixed, gradMixed] = useMixed(refp, gradRef);
   const pickKind = (v: FillKind) => {
     // An image fill needs its placement record; add it in the same undo step.
     if (v === 'image' && getRefs(useEditor.getState().project, refp).some((f) => !(f as Fill).image))
       setEachAt(refp, (f) => ({ ...(f as Fill), kind: v, image: (f as Fill).image ?? newImageFill() }));
     else setAt(sub(refp, 'kind'), v);
   };
-  // Several targets: each gradient's horizon moves from where it was when the drag began.
-  const setHorizon = (v: number, c: string) => (isMultiRef(gradRef) ? setEachAt(gradRef, (g) => moveHorizon(g as Gradient, v), c) : setAt(gradRef, moveHorizon(fill.gradient, v), c));
   return (
     <>
-      <IconChoice label={t('Type')} value={fill.kind} mixed={kindMixed} options={tOpts(t, KIND_OPTIONS)} onChange={pickKind} />
+      <RefChoice label={t('Type')} refp={sub(refp, 'kind')} options={tOpts(t, KIND_OPTIONS)} pick={pickKind} icons />
       <div className="sty-strip checker" title={t('Fill preview')}>
         <span className={fillMixed ? 'mixed-stripes' : undefined} style={{ background: fillCss(fill) }} />
       </div>
@@ -70,9 +105,7 @@ export function FillEditor({ refp, fill }: { refp: Refs; fill: Fill }) {
             onPick={(id) => setEachAt(imgRef, (img) => ({ ...((img as ImageFill | undefined) ?? newImageFill()), assetId: id }), oneShot(refKey(imgRef)))}
           />
           {isText && (
-            <Row label={t('Span')} title={t('What one image covers')}>
-              <Seg value={fill.span} mixed={spanMixed} options={tOpts(t, IMAGE_SPANS)} onChange={(v) => setAt(sub(refp, 'span'), v)} />
-            </Row>
+            <RefChoice label={t('Span')} title={t('What one image covers')} refp={sub(refp, 'span')} options={tOpts(t, IMAGE_SPANS)} />
           )}
           <RefNum label={t('Scale')} refp={sub(imgRef, 'scale')} min={0.1} max={4} unit="x" defaultValue={1} title={t('1× = the image just covers the span box')} />
           <RefNum label={t('Offset X →')} refp={sub(imgRef, 'offsetX')} min={-1} max={1} display={100} unit="%" defaultValue={0} title={t('Shift right, % of the span box width')} />
@@ -83,29 +116,9 @@ export function FillEditor({ refp, fill }: { refp: Refs; fill: Fill }) {
       ) : (
         <>
           <GradientEditor id={refKey(gradRef)} value={fill.gradient} mixed={gradMixed} onChange={(g, c) => setAt(gradRef, g, c)} />
-          <Row label={t('Horizon')} title={t('Chrome horizon: a hard edge between two coincident stops (sky above, ground below)')}>
-            <button title={t('Pinch the two middle stops into a hard chrome horizon')} onClick={() => setEachAt(gradRef, (g) => pinchHorizon(g as Gradient), oneShot(refKey(gradRef)))}>
-              {t('Pinch horizon')}
-            </button>
-            {horizon !== null && (
-              <NumberField
-                id={`${refKey(gradRef)}:horizon`}
-                label={t('Horizon position')}
-                value={horizon}
-                mixed={gradMixed}
-                onChange={setHorizon}
-                min={0.02}
-                max={0.98}
-                clamp
-                display={100}
-                unit="%"
-              />
-            )}
-          </Row>
+          <HorizonRow gradRef={gradRef} />
           {isText && fill.kind !== 'shapeBurst' && (
-            <Row label={t('Span')} title={t('What one full gradient covers')}>
-              <Seg value={fill.span} mixed={spanMixed} options={tOpts(t, SPANS)} onChange={(v) => setAt(sub(refp, 'span'), v)} />
-            </Row>
+            <RefChoice label={t('Span')} title={t('What one full gradient covers')} refp={sub(refp, 'span')} options={tOpts(t, SPANS)} />
           )}
           {USES_ANGLE[fill.kind] && (
             <RefNum

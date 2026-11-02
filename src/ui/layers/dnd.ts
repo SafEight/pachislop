@@ -13,7 +13,9 @@ export type DragPayload =
   /** Effect rows (one id) or an fx badge (every effect of the owner), in array order. */
   | { kind: 'fx'; owner: EffectOwner; ids: string[] }
   /** A mask chip: reordered among its layer's chips. */
-  | { kind: 'mask'; layerId: string; maskId: string };
+  | { kind: 'mask'; layerId: string; maskId: string }
+  /** A companion row: reordered among its layer's Effects, in front of or behind the layer (ui/companions.ts). */
+  | { kind: 'companion'; ownerId: string; id: string };
 
 export const drag: { current: DragPayload | null } = { current: null };
 

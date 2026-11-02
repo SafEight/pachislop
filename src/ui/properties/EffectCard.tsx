@@ -5,14 +5,19 @@ import type { EffectDef, EffectPreset } from '../../engine/contracts';
 import type { EffectInstance } from '../../model/types';
 import { effectsOf } from '../../store/effects';
 import { msg } from '../../store/msg';
+import { getRef, refKey, refList } from '../../store/paths';
 import { useEditor, type EffectOwner, type PropRef, type Refs } from '../../store/store';
-import { IconBtn, MixedCheckbox, RefNum, Row } from '../controls';
+import { Findable, IconBtn, MixedCheckbox, RefNum, Row } from '../controls';
 import { useT } from '../i18n';
 import { effectName, oneShot, useRefValue } from '../util';
 import { LightSphere } from '../LightSphere';
 import { FindProbe } from '../sectionMemory';
+import { useCompanionSides } from '../companions';
+import { erodeListed } from '../erode';
 import { glintListed } from '../glint';
 import { AddEffectButton } from './AddEffectMenu';
+import { CompanionCard } from './CompanionCard';
+import { ErodeCard } from './ErodeCard';
 import { GlintCard } from './GlintCard';
 import { InfoTip } from './InfoTip';
 import { ParamControl } from './ParamControl';
@@ -34,9 +39,9 @@ const effectRef = (owner: EffectOwner, index: number): PropRef => ({
   path: owner.part === null ? ['effects', index] : ['partEffects', owner.part, index],
 });
 
-/** Number param `k` of `fx` (stored, else the default). */
-const numParam = (def: EffectDef, fx: EffectInstance, k: string) => {
-  const v = fx.params[k];
+/** Number param `k` of `params` (stored, else the default). */
+const numParam = (def: EffectDef, params: EffectInstance['params'], k: string) => {
+  const v = params[k];
   const pd = def.params.find((p) => p.key === k);
   return typeof v === 'number' ? v : pd?.kind === 'number' ? pd.default : 0;
 };
@@ -44,83 +49,98 @@ const numParam = (def: EffectDef, fx: EffectInstance, k: string) => {
 const GLOBAL_ANGLE: PropRef = { layerId: null, path: ['comp', 'globalLight', 'angle'] };
 const GLOBAL_ALTITUDE: PropRef = { layerId: null, path: ['comp', 'globalLight', 'altitude'] };
 
-/** Light-direction sphere of an effect (or of the same effect on several layers, `fx` the first); with "Use global light" on it moves the comp's global light instead. */
-function EffectLight({ def, fx, base, global }: { def: EffectDef; fx: EffectInstance; base: Refs; global: boolean }) {
+/**
+ * Light-direction sphere of an effect (or of the same effect on several layers, showing the
+ * first's), read from the store; with "Use global light" on it moves the comp's global light
+ * instead.
+ */
+function EffectLight(props: { def: EffectDef; base: Refs }) {
+  const { def, base } = props;
   const t = useT();
   const setAt = useEditor((s) => s.setAt);
   const gl = useEditor((s) => s.project.comp.globalLight);
-  const light = def.light!;
-  if (global)
-    return (
-      <div className="row-block" data-fid="comp:globalLight" title={t('Use global light is on: this sphere moves the comp’s global light, shared by every bevel, shadow and effect that uses it')}>
-        <span className="label">{t('Global light (comp)')}</span>
-        <LightSphere
-          id="comp:globalLight"
-          label={t('Global light direction')}
-          angle={gl.angle}
-          altitude={gl.altitude}
-          convention="ccwFromRight"
-          onChange={(a, alt, c) => {
-            // Same coalesce key → one undo step per drag for both values.
-            setAt(GLOBAL_ANGLE, a, c);
-            setAt(GLOBAL_ALTITUDE, alt, c);
-          }}
-        />
-      </div>
-    );
+  const params = useEditor((s) => getRef(s.project, sub(refList(base)[0], 'params')) as EffectInstance['params'] | undefined);
+  const light = def.light;
+  if (!light || !params) return null;
+  const global = !!globalLightSpec(def.type) && followsGlobalLight(params);
   return (
-    <div className="row-block" data-fid="light">
-      <span className="label">{t('Light direction')}</span>
-      <LightSphere
-        id={`${fx.id}:light`}
-        label={t('Light direction')}
-        angle={numParam(def, fx, light.angle)}
-        altitude={numParam(def, fx, light.elevation)}
-        convention={light.convention}
-        onChange={(a, alt, c) => {
-          setAt(sub(base, 'params', light.angle), a, c);
-          setAt(sub(base, 'params', light.elevation), alt, c);
-        }}
-      />
-    </div>
+    <Findable type={EffectLight} props={props}>
+      {global ? (
+        <div className="row-block" data-fid="comp:globalLight" title={t('Use global light is on: this sphere moves the comp’s global light, shared by every bevel, shadow and effect that uses it')}>
+          <span className="label">{t('Global light (comp)')}</span>
+          <LightSphere
+            id="comp:globalLight"
+            label={t('Global light direction')}
+            angle={gl.angle}
+            altitude={gl.altitude}
+            convention="ccwFromRight"
+            onChange={(a, alt, c) => {
+              // Same coalesce key → one undo step per drag for both values.
+              setAt(GLOBAL_ANGLE, a, c);
+              setAt(GLOBAL_ALTITUDE, alt, c);
+            }}
+          />
+        </div>
+      ) : (
+        <div className="row-block" data-fid="light">
+          <span className="label">{t('Light direction')}</span>
+          <LightSphere
+            id={`${refKey(base)}:light`}
+            label={t('Light direction')}
+            angle={numParam(def, params, light.angle)}
+            altitude={numParam(def, params, light.elevation)}
+            convention={light.convention}
+            onChange={(a, alt, c) => {
+              setAt(sub(base, 'params', light.angle), a, c);
+              setAt(sub(base, 'params', light.elevation), alt, c);
+            }}
+          />
+        </div>
+      )}
+    </Findable>
   );
 }
 
 /**
- * The effect's presets as one dropdown row ("Custom" while the settings match none); picking one
- * sets its params (structured ones replaced whole) as one undo step, on every target of `base`.
+ * The effect's presets as one dropdown row ("Custom" while the settings match none), read from
+ * the store; picking one sets its params (structured ones replaced whole) as one undo step, on
+ * every target of `base`.
  */
-function EffectPresets({ def, fx, base }: { def: EffectDef; fx: EffectInstance; base: Refs }) {
+function EffectPresets(props: { def: EffectDef; base: Refs }) {
+  const { def, base } = props;
   const t = useT();
   const setAt = useEditor((s) => s.setAt);
+  const params = useEditor((s) => getRef(s.project, sub(refList(base)[0], 'params')) as EffectInstance['params'] | undefined);
   const presets = def.presets;
-  if (!presets?.length) return null;
+  if (!presets?.length || !params) return null;
   const apply = (preset: EffectPreset) => {
-    const k = oneShot(`${fx.id}:preset`);
+    const k = oneShot(`${refKey(base)}:preset`);
     const label = msg('Preset “{name}”', { name: msg(preset.label) });
     for (const [key, v] of Object.entries(preset.params)) if (v !== undefined) setAt(sub(base, 'params', key), structuredClone(v), k, label);
   };
-  const current = presets.find((p) => Object.entries(p.params).every(([key, v]) => JSON.stringify(fx.params[key]) === JSON.stringify(v)));
+  const current = presets.find((p) => Object.entries(p.params).every(([key, v]) => JSON.stringify(params[key]) === JSON.stringify(v)));
   const title = t('A preset replaces the settings it covers');
   return (
-    <Row label={t('Preset')} title={title}>
-      <select
-        value={current?.id ?? ''}
-        aria-label={t('Preset')}
-        title={title}
-        onChange={(e) => {
-          const p = presets.find((x) => x.id === e.target.value);
-          if (p) apply(p);
-        }}
-      >
-        {!current && <option value="">{t('Custom')}</option>}
-        {presets.map((p) => (
-          <option key={p.id} value={p.id}>
-            {t(p.label)}
-          </option>
-        ))}
-      </select>
-    </Row>
+    <Findable type={EffectPresets} props={props}>
+      <Row label={t('Preset')} title={title}>
+        <select
+          value={current?.id ?? ''}
+          aria-label={t('Preset')}
+          title={title}
+          onChange={(e) => {
+            const p = presets.find((x) => x.id === e.target.value);
+            if (p) apply(p);
+          }}
+        >
+          {!current && <option value="">{t('Custom')}</option>}
+          {presets.map((p) => (
+            <option key={p.id} value={p.id}>
+              {t(p.label)}
+            </option>
+          ))}
+        </select>
+      </Row>
+    </Findable>
   );
 }
 
@@ -241,8 +261,8 @@ export function EffectCard({ owner, fx, index, count, full }: { owner: EffectOwn
       </div>
       {shown && def && (
         <div className="effect-body">
-          <EffectPresets def={def} fx={fx} base={base} />
-          {def.light && <EffectLight def={def} fx={fx} base={base} global={global} />}
+          <EffectPresets def={def} base={base} />
+          {def.light && <EffectLight def={def} base={base} />}
           {def.params
             .filter((pd) => !lightKeys.includes(pd.key) && paramShown(def.params, fx.params, pd))
             .map((pd) =>
@@ -305,8 +325,8 @@ export function MultiEffectCard({ targets }: { targets: readonly EffectTarget[] 
       </div>
       {open && def && (
         <div className="effect-body">
-          <EffectPresets def={def} fx={fx} base={base} />
-          {def.light && <EffectLight def={def} fx={fx} base={base} global={global} />}
+          <EffectPresets def={def} base={base} />
+          {def.light && <EffectLight def={def} base={base} />}
           {def.params
             .filter((pd) => !lightKeys.includes(pd.key) && paramShown(def.params, fx.params, pd))
             .map((pd) =>
@@ -331,7 +351,11 @@ export function MultiEffectCard({ targets }: { targets: readonly EffectTarget[] 
   );
 }
 
-/** Every effect of `owner` as cards (last applied on top) with “+ Add effect” (the count is the section title's); a 3D title's listed glint is pinned first. */
+/**
+ * Every effect of `owner` as cards with “+ Add effect” (the count is the section title's), top of
+ * the stack first: a layer's companions in front of it (ui/companions.ts), its listed 3D glint or
+ * 2D かすれ (pinned), its effects (last applied on top), then its companions behind it.
+ */
 export function EffectStack({ owner }: { owner: EffectOwner }) {
   const t = useT();
   // Select the project, not effectsOf's result: a part without effects may yield a fresh [] per call.
@@ -339,26 +363,32 @@ export function EffectStack({ owner }: { owner: EffectOwner }) {
   const effects = effectsOf(project, owner);
   const layer = owner.part === null ? project.layers.find((l) => l.id === owner.layerId) : undefined;
   const glint = glintListed(layer) ? layer : null;
+  const erode = erodeListed(layer) ? layer : null;
+  const { front, back } = useCompanionSides(layer?.id ?? '');
   // The search index renders every effect on its own (its node page), not inside its owner's list.
   const probe = useContext(FindProbe);
   if (probe) return null;
   const n = effects.length;
+  const total = n + front.length + back.length + (glint || erode ? 1 : 0);
   return (
     <div className="effects-stack">
       <div className="fx-toolbar">
         <AddEffectButton owner={owner} />
       </div>
-      {glint && <GlintCard layers={[glint]} />}
-      {n === 0 && !glint && <div className="empty">{t('No effects yet. Open “+ Add effect” and hover an entry to preview it on this layer.')}</div>}
-      {n > 1 && (
+      {total === 0 && <div className="empty">{t('No effects yet. Open “+ Add effect” and hover an entry to preview it on this layer.')}</div>}
+      {total > 1 && (
         <div className="fx-stack-hint" title={t('Effects apply bottom to top: each one works on the result of those below it, so the top one is drawn last, over everything else')}>
           {t('↑ drawn on top (applied last)')}
         </div>
       )}
+      {layer && front.map((c) => <CompanionCard key={c.id} owner={layer} gen={c} behind={false} />)}
+      {glint && <GlintCard layers={[glint]} />}
+      {erode && <ErodeCard layers={[erode]} />}
       {effects
         .map((fx, i) => <EffectCard key={fx.id} owner={owner} fx={fx} index={i} count={n} />)
         .reverse()}
-      {n > 1 && (
+      {layer && back.map((c) => <CompanionCard key={c.id} owner={layer} gen={c} behind />)}
+      {total > 1 && (
         <div className="fx-stack-hint" title={t("The bottom effect applies first, directly to the layer's own pixels")}>
           {t('↓ applied first, closest to the layer')}
         </div>

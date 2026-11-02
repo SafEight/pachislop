@@ -1,7 +1,7 @@
 import type { Engine } from '../../src/engine/Engine';
 import { createGeneratorLayer } from '../../src/generators/registry';
 import { encodePng, renderStill } from '../../src/io/export';
-import { createAdjustmentLayer, createTitle2DLayer, defaultComp } from '../../src/model/defaults';
+import { classicTitleStyle2D, createAdjustmentLayer, createTitle2DLayer, defaultComp } from '../../src/model/defaults';
 import type { Layer, Project } from '../../src/model/types';
 import { TEMPLATES } from '../../src/presets/templates';
 import { makeEffect } from '../../src/store/effects';
@@ -27,6 +27,9 @@ export interface PerfCase {
 const HEAVY_3D = 't-bigbonus-3d-groups';
 
 const comp = (name: string, layers: Layer[]): Project => ({ version: 11, name, comp: defaultComp(), layers });
+
+/** A 2D 確定 in the classic gold outline look, the title the budgets were measured on. */
+const classicTitle = () => ({ ...createTitle2DLayer('確定'), style: classicTitleStyle2D() });
 
 function withEffect(type: string, params: Record<string, number>) {
   const fx = makeEffect(type);
@@ -65,9 +68,9 @@ export function perfCases(engine: Engine): PerfCase[] {
 
   const blurAdj = createAdjustmentLayer('effectsOnly');
   blurAdj.effects = [withEffect('gaussianBlur', { radius: 200 })];
-  const blur = comp('blur 200', [generator('patternFill', 'zebra'), createTitle2DLayer('確定'), blurAdj]);
+  const blur = comp('blur 200', [generator('patternFill', 'zebra'), classicTitle(), blurAdj]);
 
-  const glowTitle = createTitle2DLayer('確定');
+  const glowTitle = classicTitle();
   glowTitle.effects = [withEffect('deepGlow', { radius: 1000 })];
   const deepGlow = comp('deep glow 1000', [glowTitle]);
 

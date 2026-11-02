@@ -1,9 +1,7 @@
 import { Euler, Vector3 } from 'three';
-import { ao3D, bevel3D, createGroupLayer, createTitle2DLayer, createTitle3DLayer, erode2D, glint3D, material2D, material3D, shadow3D, solidFill } from '../model/defaults';
+import { bevel3D, createGroupLayer, createTitle2DLayer, createTitle3DLayer, erode2D, material2D, plainTitle3D, solidFill } from '../model/defaults';
 import { isTitleLayer, type TitleLayer } from '../model/parts';
 import type { BevelShape3D, Fill, Layer, Material2D, Material3D, Pattern, PlateShape, SvgSource, Title2DLayer, Title3DProps, TitleStyle2D, Transform } from '../model/types';
-import { applyPreset } from '../presets/apply';
-import { orbLook } from '../presets/factory';
 import { sourceBounds, toComp } from '../ui/viewport/geometry';
 import { isNumberedName, textName, uniqueName } from './arrange';
 import type { Slice } from './core';
@@ -13,10 +11,7 @@ import { msg } from './msg';
 import { layerNode, selection } from './selection';
 import { withParent } from './tree';
 
-// A title's source and kind: default looks (plain image, orb), SVG swap, 2D ⇄ 3D, Split image.
-
-/** Default look of a new 3D orb: the 保留 candy finish in the blue colourway (one of a matched set). */
-export const DEFAULT_ORB = orbLook('candy', 'blue');
+// A title's source and kind: the plain image look, SVG swap, 2D ⇄ 3D, Split image.
 
 /**
  * The plain 2D image look: the picture exactly as it is. The face is an image fill of the
@@ -28,36 +23,21 @@ export function plainImageStyle2D(assetId: string): TitleStyle2D {
   return { face: material2D(fill), rims: [], knockout: false, erode: erode2D() };
 }
 
-/** Neutral plastic that lets an image's colours read true (plain image 3D look). */
-const plainMaterial3D = (): Material3D => ({ ...material3D('custom'), color: '#ffffff', metalness: 0, roughness: 0.35, clearcoat: 0.3, reflectivity: 0.5 });
-
 /**
  * The plain 3D image look: the picture on the face and around the edges (faceImage / edgeImage
- * 1) over neutral plastic, a shallow extrusion with one small round bevel inside the picture's
- * silhouette (`size` is the image's long side, so thin spikes stay thin), no bands or glint,
- * light AO; the comp's environment and lights stay.
+ * 1) over the plain material, a shallow extrusion with one small round bevel inside the picture's
+ * silhouette (`size` is the image's long side, so thin spikes stay thin); otherwise plainTitle3D:
+ * no bands, glint, AO or shadow catcher, the comp's environment and lights.
  */
 export function plainImageStyle3D(): Title3DProps {
-  return {
-    ...createTitle3DLayer().style3d,
-    depth: 5,
-    bevel: bevel3D(0.5, 0.5),
-    bevelPosition: 'inside',
-    face: plainMaterial3D(),
-    faceImage: 1,
-    edgeImage: 1,
-    bands: [],
-    shadow: shadow3D({ softness: 0.8 }),
-    glint: glint3D(),
-    ao: ao3D({ enabled: true, intensity: 0.5 }),
-  };
+  return { ...plainTitle3D(), depth: 5, bevel: bevel3D(0.5, 0.5), bevelPosition: 'inside', edgeImage: 1 };
 }
 
 /**
  * A new 2D (layer style) or 3D (extruded) title named `name` around `source`, in that kind's
- * default look: the factory style; a 3D orb in the 保留 candy finish (DEFAULT_ORB); an image in
- * the plain image look (plainImageStyle2D / plainImageStyle3D), so a pasted or dropped picture
- * arrives as it is. New layers and convertLayerKind share it; Library looks apply on top.
+ * plain look (createTitle2DLayer / createTitle3DLayer; an image in the plain image look,
+ * plainImageStyle2D / plainImageStyle3D, so a pasted or dropped picture arrives as it is). New
+ * layers and convertLayerKind share it; Library looks apply on top.
  */
 export function titleLayerFor(dim: '2d' | '3d', source: Title2DLayer['source'], name: string): TitleLayer {
   const blank = dim === '2d' ? createTitle2DLayer(name) : createTitle3DLayer(name);
@@ -66,12 +46,8 @@ export function titleLayerFor(dim: '2d' | '3d', source: Title2DLayer['source'], 
   if (source.kind === 'image') {
     if (blank.kind === 'title2d') blank.style = plainImageStyle2D(source.assetId);
     else blank.style3d = plainImageStyle3D();
-    return blank;
   }
-  if (blank.kind !== 'title3d' || source.kind !== 'shape' || source.shape !== 'orb') return blank;
-  const orb = applyPreset(blank, DEFAULT_ORB, { applyFont: false });
-  if (!isTitleLayer(orb)) throw new Error('unreachable: a 3D look keeps a title layer');
-  return orb;
+  return blank;
 }
 
 /**

@@ -1,8 +1,10 @@
+import type { ReactElement } from 'react';
 import { listEffects } from '../../effects/registry';
 import type { EffectDef } from '../../engine/contracts';
 import type { PartKey } from '../../model/types';
 import { useEditor } from '../../store/store';
 import { selectTab } from '../dock/layout';
+import { addErode, ERODE_NAME } from '../erode';
 import { addGlint, GLINT_ADD_LABEL } from '../glint';
 import { englishOf, jaOf, tr, type Lang } from '../i18n';
 import { useSectionsOpen } from '../sectionMemory';
@@ -16,7 +18,10 @@ import { useSectionsOpen } from '../sectionMemory';
 // - `[data-fid]`: a labelled control (Row and the Ref* controls, a material feature toggle, a
 //   gradient / light block); `data-fid` is its stable id (the ref key of a store control, else the
 //   label), its `.label` child or own text the label; its options and choice buttons are values;
-// - `div.sub-head`: a heading inside a section, a crumb of the rows after it.
+// - `div.sub-head`: a heading inside a section, a crumb of the rows after it;
+// - `[data-fcap]`: a store-bound control (controls.tsx `Findable`) around its field, the first
+//   `[data-fid]` inside; `data-fcap` names the element, registered in the render's FindCapture,
+//   that the results show as the control.
 // A hit is found again in the live panel by its section chain, its field id and its place among
 // the fields with that id in the same section.
 
@@ -28,7 +33,10 @@ export type FindTarget =
   | { kind: 'part'; layerId: string; part: PartKey }
   | { kind: 'effect'; layerId: string; part: PartKey | null; effectId: string }
   | { kind: 'mask'; layerId: string; maskId: string }
-  | { kind: 'glint'; layerId: string };
+  | { kind: 'glint'; layerId: string }
+  | { kind: 'erode'; layerId: string }
+  /** A companion generator's card (ui/companions.ts): its layer node. */
+  | { kind: 'companion'; layerId: string };
 
 /** One page of the index: a node's view as the panel shows it. */
 export interface Slot {
@@ -56,6 +64,8 @@ export interface Hit {
   nth: number;
   /** Choices of the control (options, segmented / ramp buttons), as shown. */
   values: readonly string[];
+  /** The control bound to the store, rendered live in the results (controls.tsx `Findable`); null: the hit links to its place. */
+  live: ReactElement | null;
   /** A Document 3D-lighting control: not offered while a 2D (or other non-3D) layer is selected. */
   doc3d: boolean;
   labelN: readonly string[];
@@ -71,8 +81,8 @@ export interface FindIndex {
   addTo: string | null;
   /** Effect types the layer already has (shown as hits, not offered again). */
   hasTypes: ReadonlySet<string>;
-  /** Whether the layer is a 3D title whose glint isn't listed: “Glint (3D highlights)” is offered to add. */
-  addGlint: boolean;
+  /** The layer's pinned style effect offered to add while not listed: a 3D title's glint (“Glint (3D highlights)”), a 2D title's かすれ. */
+  addPinned: 'glint' | 'erode' | null;
 }
 
 export interface HitMatch {
@@ -83,8 +93,10 @@ export interface HitMatch {
 }
 
 export interface AddMatch {
-  /** The effect to add; null for the 3D glint (switched on, ui/glint.ts). */
+  /** The effect to add; null for a pinned style effect (`pinned`). */
   def: EffectDef | null;
+  /** With `def` null: the 3D glint or 2D かすれ, switched on (ui/glint.ts, ui/erode.ts). */
+  pinned: 'glint' | 'erode' | null;
   name: string;
   layerId: string;
   rank: number;
@@ -107,6 +119,8 @@ const SYNONYMS: readonly (readonly string[])[] = [
   ['glow', 'emissive', '光彩', 'グロー'],
   ['shine', 'gloss', 'specular', 'spec', '光沢', '艶'],
   ['glint', 'shine', 'shines', 'sparkle', 'sparkles', 'star', 'stars', 'streak', 'streaks', 'glare', 'bloom', 'きらきら', 'キラ', '輝き', 'グリント'],
+  ['erode', 'erosion', 'dry brush', 'drybrush', 'distress', 'distressed', 'かすれ', '掠れ', 'ドライブラシ'],
+  ['knockout', 'knock out', 'hollow', 'hollow letters', 'cut out', 'cutout', 'punch', 'punch through', 'ノックアウト', '中抜き', '抜き'],
   ['reflection', 'reflections', 'environment', 'env', 'mirror', '反射', '環境'],
   ['opacity', 'transparency', 'alpha', '不透明度'],
   ['shadow', '影', 'シャドウ'],
@@ -194,31 +208,34 @@ function fieldsOf(owner: Element, root: Element, fid: string): Element[] {
 /**
  * Read the hits out of the hidden render: `container` holds one `[data-find-slot=i]` element per
  * slot. Every labelled control and every section is a hit; an effect, mask or part slot is one
- * too, under its own name.
+ * too, under its own name. `captured`: the live controls registered in the render (FindCapture).
  */
-export function collectHits(container: Element, slots: readonly Slot[], lang: Lang): Hit[] {
+export function collectHits(container: Element, slots: readonly Slot[], lang: Lang, captured: ReadonlyMap<string, ReactElement>): Hit[] {
   const hits: Hit[] = [];
   let order = 0;
-  const add = (slot: Slot, label: string, crumbs: string[], sections: string[], fid: string | null, nth: number, values: string[]) => {
+  const add = (slot: Slot, label: string, crumbs: string[], sections: string[], fid: string | null, nth: number, values: string[], live: ReactElement | null) => {
     if (!label) return;
     const labelN = [...new Set(variants(label, lang).map(norm))];
     const pathN = crumbs.flatMap((c) => variants(c, lang)).map(norm).join(' / ');
-    hits.push({ slot, order: order++, label, crumbs, sections, fid, nth, values, doc3d: sections.includes('doc/doc-lighting3d'), labelN, pathN, valuesN: values.map(norm) });
+    hits.push({ slot, order: order++, label, crumbs, sections, fid, nth, values, live, doc3d: sections.includes('doc/doc-lighting3d'), labelN, pathN, valuesN: values.map(norm) });
   };
   slots.forEach((slot, i) => {
     const root = container.querySelector(`[data-find-slot="${i}"]`);
     if (!root) return;
-    if (slot.target.kind === 'effect' || slot.target.kind === 'glint' || slot.target.kind === 'mask' || slot.target.kind === 'part') add(slot, slot.prefix.at(-1) ?? '', slot.prefix.slice(0, -1), [], null, 0, []);
+    if (slot.target.kind === 'effect' || slot.target.kind === 'glint' || slot.target.kind === 'erode' || slot.target.kind === 'companion' || slot.target.kind === 'mask' || slot.target.kind === 'part') add(slot, slot.prefix.at(-1) ?? '', slot.prefix.slice(0, -1), [], null, 0, [], null);
     for (const el of root.querySelectorAll(`${SECTION}, [data-fid]`)) {
       const chain = sectionsOf(el, root);
       const titles = chain.map((s) => nameOf(s.querySelector(':scope > header > .title')));
       if (el.matches(SECTION)) {
-        add(slot, titles.at(-1) ?? '', [...slot.prefix, ...titles.slice(0, -1)], chain.map((s) => s.getAttribute('data-sk')!), null, 0, []);
+        add(slot, titles.at(-1) ?? '', [...slot.prefix, ...titles.slice(0, -1)], chain.map((s) => s.getAttribute('data-sk')!), null, 0, [], null);
         continue;
       }
       const fid = el.getAttribute('data-fid')!;
       const owner = ownerOf(el, root);
       const sub = subHeadOf(el, owner);
+      // The control's capture: the nearest Findable wrapper, when this is the field it wraps (its first).
+      const capEl = el.parentElement?.closest('[data-fcap]');
+      const cap = capEl?.querySelector('[data-fid]') === el ? capEl.getAttribute('data-fcap') : null;
       add(
         slot,
         nameOf(el.querySelector(':scope > .label') ?? el),
@@ -227,6 +244,7 @@ export function collectHits(container: Element, slots: readonly Slot[], lang: La
         fid,
         fieldsOf(owner, root, fid).indexOf(el),
         valueEls(el).map(valueText),
+        (cap && captured.get(cap)) || null,
       );
     }
   });
@@ -262,6 +280,8 @@ interface Query {
   words: string[];
   /** Per word: the word and its synonyms. */
   alts: string[][];
+  /** Synonyms of the whole query when it is a phrase of a synonym group (“cut out”, “dry brush”). */
+  phrase: string[];
 }
 
 function parseQuery(q: string): Query | null {
@@ -269,7 +289,8 @@ function parseQuery(q: string): Query | null {
   if (!text) return null;
   const words = text.split(' ');
   const alts = words.map((w) => [...new Set([w, ...SYNONYMS.filter((g) => g.includes(w)).flat()])]);
-  return { text, words, alts };
+  const phrase = words.length > 1 ? SYNONYMS.filter((g) => g.includes(text)).flat() : [];
+  return { text, words, alts, phrase };
 }
 
 const minOf = (xs: readonly number[]) => Math.min(...xs.filter((x) => x >= 0));
@@ -278,7 +299,8 @@ const minOf = (xs: readonly number[]) => Math.min(...xs.filter((x) => x >= 0));
  * Rank of `h` for the query (lower = better), or null: the whole query in the label (equal,
  * prefix, word, inside), then every word in the label, then every word in the label or its
  * location with at least one in the label ("rim width": Rim 1 › Geometry › Width), then the same
- * through synonyms ("blur": Soften), then a choice of the control ("金": Ramp · 金ランプ).
+ * through synonyms ("blur": Soften) or a phrase's synonyms ("cut out": Hollow letters), then a
+ * choice of the control ("金": Ramp · 金ランプ).
  */
 function rankHit(h: Hit, q: Query): { rank: number; pick: number } | null {
   const whole = best(h.labelN, [q.text]);
@@ -289,6 +311,8 @@ function rankHit(h: Hit, q: Query): { rank: number; pick: number } | null {
   if (direct.some((x) => x >= 0) && q.words.every((w, i) => direct[i] >= 0 || inPath([w]))) return { rank: 5 + minOf(direct) / 10, pick: -1 };
   const syn = q.alts.map((ws) => best(h.labelN, ws));
   if (syn.some((x) => x >= 0) && q.alts.every((ws, i) => syn[i] >= 0 || inPath(ws))) return { rank: 6 + minOf(syn) / 10, pick: -1 };
+  const phrase = best(h.labelN, q.phrase);
+  if (phrase >= 0) return { rank: 6 + phrase / 10, pick: -1 };
   for (let v = 0; v < h.valuesN.length; v++) {
     const inValue = q.alts.map((ws) => best([h.valuesN[v]], ws));
     if (inValue.some((x) => x >= 0) && q.alts.every((ws, i) => inValue[i] >= 0 || syn[i] >= 0 || inPath(ws))) return { rank: 8 + minOf(inValue) / 10, pick: v };
@@ -296,12 +320,10 @@ function rankHit(h: Hit, q: Query): { rank: number; pick: number } | null {
   return null;
 }
 
-/** Most results listed. */
-const MAX_RESULTS = 60;
-
 /**
  * The hits of `index` for `query`, best first (ties in panel order), then the effects that could
- * be added whose name matches (not those the layer has: they are hits), the 3D glint first.
+ * be added whose name (or a synonym of the query) matches (not those the layer has: they are
+ * hits), the pinned glint / かすれ first.
  */
 export function search(index: FindIndex, query: string): Match[] {
   const q = parseQuery(query);
@@ -316,16 +338,19 @@ export function search(index: FindIndex, query: string): Match[] {
   const adds: AddMatch[] = [];
   const layerId = index.addTo;
   if (layerId) {
-    const offer = (def: EffectDef | null, label: string) => {
+    // The whole query, its phrase synonyms, and a one-word query's synonyms (“distress”: かすれ).
+    const terms = [q.text, ...q.phrase, ...(q.words.length === 1 ? q.alts[0] : [])];
+    const offer = (def: EffectDef | null, pinned: AddMatch['pinned'], label: string) => {
       const names = (['en', 'ja'] as const).map((lang) => norm(tr(label, undefined, { lang })));
-      const rank = best(names, [q.text]);
-      if (rank >= 0 && rank <= 2) adds.push({ def, name: tr(label), layerId, rank });
+      const rank = best(names, terms);
+      if (rank >= 0 && rank <= 2) adds.push({ def, pinned, name: tr(label), layerId, rank });
     };
-    if (index.addGlint) offer(null, GLINT_ADD_LABEL);
-    for (const def of listEffects()) if (!index.hasTypes.has(def.type)) offer(def, def.label);
+    if (index.addPinned === 'glint') offer(null, 'glint', GLINT_ADD_LABEL);
+    if (index.addPinned === 'erode') offer(null, 'erode', ERODE_NAME);
+    for (const def of listEffects()) if (!index.hasTypes.has(def.type)) offer(def, null, def.label);
   }
   adds.sort((a, b) => a.rank - b.rank);
-  return [...found.slice(0, MAX_RESULTS), ...adds];
+  return [...found, ...adds];
 }
 
 // ---------- landing ----------
@@ -375,11 +400,18 @@ async function reveal(hit: Hit | null, pick: number) {
   await frame();
   await frame();
   el.scrollIntoView({ block: 'center' });
+  focusField(el, pick);
+  flash(el);
+}
+
+/**
+ * Focus the control of field element `el`: the choice `pick` of it when there is one, else a
+ * number's value field (focused, its value selected: type to change it), else its first control.
+ */
+export function focusField(el: HTMLElement, pick: number) {
   const choice = pick >= 0 ? valueEls(el)[pick] : undefined;
-  // A number's value field first (focused, its value selected: type to change it), else the first control.
   const focus = choice instanceof HTMLOptionElement ? choice.parentElement : (choice ?? el.querySelector<HTMLElement>('input[type="text"]:not(:disabled)') ?? el.querySelector<HTMLElement>(FOCUSABLE) ?? (el.matches(FOCUSABLE) ? el : null));
   focus?.focus({ preventScroll: true });
-  flash(el);
 }
 
 /**
@@ -392,7 +424,8 @@ export function landOn(m: Match) {
   const st = useEditor.getState();
   if (isAdd(m)) {
     if (!m.def) {
-      addGlint(m.layerId);
+      if (m.pinned === 'erode') addErode(m.layerId);
+      else addGlint(m.layerId);
       void reveal(null, -1);
     } else if (st.addEffect({ layerId: m.layerId, part: null }, m.def.type)) void reveal(null, -1);
     return;
@@ -423,7 +456,11 @@ export function landOn(m: Match) {
       st.selectNode({ kind: 'mask', layerId: target.layerId, maskId: target.maskId });
       break;
     case 'glint':
-      st.selectNode({ kind: 'glint', layerId: target.layerId });
+    case 'erode':
+      st.selectNode({ kind: target.kind, layerId: target.layerId });
+      break;
+    case 'companion':
+      st.selectNode({ kind: 'layer', layerId: target.layerId });
       break;
   }
   const open = [...hit.slot.open, ...hit.sections];

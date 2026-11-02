@@ -1,3 +1,4 @@
+import { companionOwner, isFoldedWrapper } from '../../model/companions';
 import { isTitleLayer, type TitleLayer } from '../../model/parts';
 import type { Comp, GeneratorLayer, Layer } from '../../model/types';
 import { ancestorsOf, clipBaseOf, unionCompBounds } from '../../store/tree';
@@ -58,7 +59,14 @@ export function hitLeaf(comp: Comp, layers: readonly Layer[], p: Pt, only?: (l: 
   return drawsAt ? full.find((l) => shows(l) && drawsAt(l, p)) : undefined;
 }
 
-/** The layer Auto-Select picks for a hit leaf: the leaf itself, or its top-level group ('group'). */
+/**
+ * The layer Auto-Select picks for a hit leaf: the leaf itself, or its top-level group ('group'),
+ * never a folded companion group (it has no row: its layer stands for it). A companion generator
+ * (listed as an effect of the layer it follows) picks that layer, as an effect's pixels pick their
+ * layer — while that layer is shown and unlocked (else the companion).
+ */
 export function autoSelectTarget(layers: readonly Layer[], leaf: PickLayer, mode: 'layer' | 'group'): Layer {
-  return mode === 'group' ? (ancestorsOf(layers, leaf.id).at(-1) ?? leaf) : leaf;
+  const owner = companionOwner(layers, leaf);
+  const l = owner?.visible && !owner.locked ? owner : leaf;
+  return mode === 'group' ? (ancestorsOf(layers, l.id).filter((g) => !isFoldedWrapper(layers, g)).at(-1) ?? l) : l;
 }

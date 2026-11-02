@@ -24,14 +24,14 @@ export function MaskView({ layer, mask }: { layer: Layer; mask: LayerMask }) {
   return (
     <>
       <Section id="mask" title={kind}>
-        <CheckRow label={t('Enabled')} value={mask.enabled} title={t('⇧-click the mask chip in the Layers panel to switch it too')} onChange={(v) => setMaskEnabled(layer.id, mask.id, v)} />
+        <RefCheck label={t('Enabled')} refp={r('enabled')} title={t('⇧-click the mask chip in the Layers panel to switch it too')} pick={(v) => setMaskEnabled(layer.id, mask.id, v)} />
         <RefCheck label={t('Invert')} refp={r('invert')} title={t('Swap the shown and hidden areas')} />
         {mask.kind !== 'layer' && (
-          <CheckRow
+          <RefCheck
             label={t('Linked')}
-            value={mask.linked}
+            refp={r('linked')}
             title={t('Linked: the mask moves, turns and scales with the layer. Unlinked: it stays put on the canvas')}
-            onChange={(linked) => updateMask(layer.id, mask.id, { linked })}
+            pick={(linked) => updateMask(layer.id, mask.id, { linked })}
           />
         )}
         <RefNum label={t('Feather', undefined, { ctx: 'mask' })} refp={r('feather')} min={0} max={500} step={0.5} unit="px" clamp defaultValue={0} title={t('Edge softness: Gaussian blur of the mask, comp px')} />

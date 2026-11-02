@@ -5,7 +5,7 @@ import { msg } from '../../store/msg';
 import { useEditor } from '../../store/store';
 import { NumRow, Row, Section } from '../controls';
 import { useT } from '../i18n';
-import { FindProbe, useOpenSection } from '../sectionMemory';
+import { FindCapture, FindProbe, useOpenSection } from '../sectionMemory';
 import { oneShot } from '../util';
 import { mapAdjusts, NO_ADJUST } from '../viewport/glyphs';
 import { InfoTip } from './InfoTip';
@@ -133,7 +133,10 @@ export function LettersSection({ layer, src }: { layer: SourceLayer; src: TextSo
             <NumRow label={t('Scale')} id={`${id}:s`} value={adj.scale} min={0.2} max={3} step={0.01} display={100} unit="%" defaultValue={1} onChange={(v, c) => setAdj({ scale: Math.max(0.01, v) }, c, 'Character scale')} />
             <NumRow label={t('Width 長体')} id={`${id}:hs`} value={adj.hScale ?? 1} min={0.3} max={2} step={0.01} display={100} unit="%" defaultValue={1} onChange={(v, c) => setAdj({ hScale: Math.max(0.05, v) }, c, 'Character width (長体/平体)')} title={t("Horizontal glyph scale on top of the text's; < 100% = 長体 (condensed). The line reflows. Also: the side bars of the canvas gizmo")} />
             <NumRow label={t('Height 平体')} id={`${id}:vs`} value={adj.vScale ?? 1} min={0.3} max={2} step={0.01} display={100} unit="%" defaultValue={1} onChange={(v, c) => setAdj({ vScale: Math.max(0.05, v) }, c, 'Character height (長体/平体)')} title={t("Vertical glyph scale on top of the text's; < 100% = 平体 (flattened). Also: the top / bottom bars of the canvas gizmo")} />
-            <LetterMaterials key={layer.id} layer={layer} src={src} selected={selected} />
+            {/* Its materials edit the picked letters (the probe's: the first one): search results link to them rather than editing them in place. */}
+            <FindCapture value={null}>
+              <LetterMaterials key={layer.id} layer={layer} src={src} selected={selected} />
+            </FindCapture>
             <Row label="">
               <button
                 className="small"

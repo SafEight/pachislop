@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { migrateProject } from '../../src/io/project';
-import { createProject, createTitle3DLayer, defaultComp, material3D, plateShape } from '../../src/model/defaults';
+import { classicTitle3D, createProject, createTitle3DLayer, defaultComp, material3D, plateShape } from '../../src/model/defaults';
 import { effectiveLighting, lightingSource, noLighting, resolveEnvironment, withEnvValue, withoutEnvValue } from '../../src/model/lighting';
 import type { Environment3D, Lighting3D, Material3D, Project, Title3DLayer } from '../../src/model/types';
 
@@ -46,7 +46,7 @@ describe('effectiveLighting', () => {
  * side wall on the letter.
  */
 function v7(layerLighting: Lighting3D | null, partEnv: Environment3D | null, docBlur = 0): { json: Json; layer: Title3DLayer } {
-  const layer = createTitle3DLayer('A');
+  const layer: Title3DLayer = { ...createTitle3DLayer('A'), style3d: classicTitle3D() };
   const p: Project = { ...createProject(), comp: { ...defaultComp(), environment: env({ blur: docBlur }) }, layers: [layer] };
   const j: Json = structuredClone(p);
   j.version = 7;

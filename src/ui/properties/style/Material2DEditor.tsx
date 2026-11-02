@@ -3,7 +3,7 @@ import { GRADIENTS } from '../../../model/defaults';
 import type { Bevel2D, BevelProfile2D, Curve, GlossContour, Material2D, Pattern, PatternKind, ReflectionMap2D, Satin2D, Texture2D } from '../../../model/types';
 import { getRefs, refKey } from '../../../store/paths';
 import { useEditor, type PropRef, type Refs } from '../../../store/store';
-import { IconBtn, NumberField, RefCheck, RefColor, RefNum, RefSelect, Row, Section, Seg } from '../../controls';
+import { IconBtn, NumberField, RefCheck, RefChoice, RefColor, RefNum, RefSelect, Row, Section } from '../../controls';
 import { GradientEditor } from '../../GradientEditor';
 import { useT } from '../../i18n';
 import { LightSphere } from '../../LightSphere';
@@ -12,7 +12,7 @@ import { CurveEditor } from './CurveEditor';
 import { FillEditor } from './FillEditor';
 import { ContourIcon, Profile2DIcon } from './icons';
 import { patternLabel, PATTERNS, sub, tOpts } from './shared';
-import { ColorAmountRow, FeatureToggle, GroupTitle, IconChoice, ImageAssetPicker } from './widgets';
+import { ColorAmountRow, FeatureToggle, GroupTitle, ImageAssetPicker } from './widgets';
 
 const PROFILES: readonly { value: BevelProfile2D; label: string }[] = [
   { value: 'smooth', label: 'Smooth' },
@@ -158,14 +158,10 @@ export function Material2DEditor({ id, refp, mat, fill = true }: { id: string; r
   const globalLight = useEditor((s) => s.project.comp.globalLight);
   const r = (...path: (string | number)[]) => sub(refp, ...path);
   const { bevel, reflection, finish, pattern, satin, texture, innerGlow, gloss, glass, sheen } = mat;
-  const [profileMixed, profileCurveMixed, glossMixed, glossCurveMixed, sizeModeMixed, finishGradMixed, targetMixed, seedMixed, satinContourMixed] = useMixed(
-    r('bevel', 'profile'),
+  const [profileCurveMixed, glossCurveMixed, finishGradMixed, seedMixed, satinContourMixed] = useMixed(
     r('bevel', 'profileCurve'),
-    r('bevel', 'gloss'),
     r('bevel', 'glossCurve'),
-    r('bevel', 'sizeMode'),
     r('finish', 'gradient'),
-    r('texture', 'target'),
     r('texture', 'seed'),
     r('satin', 'contour'),
   );
@@ -213,11 +209,14 @@ export function Material2DEditor({ id, refp, mat, fill = true }: { id: string; r
       <FeatureToggle label={t('Bevel & emboss')} refp={r('bevel', 'enabled')} />
       {bevel.enabled && (
         <>
-          <IconChoice label={t('Profile')} value={bevel.profile} mixed={profileMixed} options={profileOptions} onChange={pickProfile} />
+          <RefChoice label={t('Profile')} refp={r('bevel', 'profile')} options={profileOptions} pick={pickProfile} icons />
           {bevel.profile === 'custom' && curveEditor(r('bevel', 'profileCurve'), bevel.profileCurve, profileCurveMixed, 'Bevel profile', presets().profile, 'Edge → in', 'Height')}
-          <Row label={t('Scaling', undefined, { ctx: 'bevel' })} title={t('Fixed: the bevel reaches the same distance in everywhere. Fit (Eye Candy): a share of each stroke’s own half-thickness, so thin and thick strokes alike dome to their centre (rims become tubes)')}>
-            <Seg value={bevel.sizeMode} mixed={sizeModeMixed} options={tOpts(t, BEVEL_SCALING)} onChange={(v) => setAt(r('bevel', 'sizeMode'), v)} />
-          </Row>
+          <RefChoice
+            label={t('Scaling', undefined, { ctx: 'bevel' })}
+            title={t('Fixed: the bevel reaches the same distance in everywhere. Fit (Eye Candy): a share of each stroke’s own half-thickness, so thin and thick strokes alike dome to their centre (rims become tubes)')}
+            refp={r('bevel', 'sizeMode')}
+            options={tOpts(t, BEVEL_SCALING)}
+          />
           {bevel.sizeMode === 'fit' ? (
             <RefNum label={t('Bevel width')} refp={r('bevel', 'fit')} min={5} max={100} step={0.1} clamp unit="%" title={t('Share of the local half-thickness the bevel covers (100 % = to the centre line)')} />
           ) : (
@@ -253,10 +252,10 @@ export function Material2DEditor({ id, refp, mat, fill = true }: { id: string; r
           <RefCheck label={t('Use global light')} refp={r('bevel', 'useGlobalLight')} title={t("Take the angle and altitude from the comp's global light (one light for every layer style)")} />
           <Section id={`${id}.bevel-shading`} title={t('Bevel shading')} defaultOpen={false}>
             <RefNum label={t('Soften')} refp={r('bevel', 'soften')} min={0} max={5} step={0.05} unit="%" />
-            <IconChoice label={t('Gloss contour')} value={bevel.gloss} mixed={glossMixed} options={contourOptions} onChange={pickGloss} />
+            <RefChoice label={t('Gloss contour')} refp={r('bevel', 'gloss')} options={contourOptions} pick={pickGloss} icons />
             {bevel.gloss === 'custom' && curveEditor(r('bevel', 'glossCurve'), bevel.glossCurve, glossCurveMixed, 'Gloss contour', presets().contour)}
-            <ColorAmountRow label={t('Highlight', undefined, { ctx: 'bevel' })} colorRef={r('bevel', 'highlightColor')} color={bevel.highlightColor} amountRef={r('bevel', 'highlightOpacity')} amount={bevel.highlightOpacity} />
-            <ColorAmountRow label={t('Shadow', undefined, { ctx: 'bevel' })} colorRef={r('bevel', 'shadowColor')} color={bevel.shadowColor} amountRef={r('bevel', 'shadowOpacity')} amount={bevel.shadowOpacity} />
+            <ColorAmountRow label={t('Highlight', undefined, { ctx: 'bevel' })} colorRef={r('bevel', 'highlightColor')} amountRef={r('bevel', 'highlightOpacity')} />
+            <ColorAmountRow label={t('Shadow', undefined, { ctx: 'bevel' })} colorRef={r('bevel', 'shadowColor')} amountRef={r('bevel', 'shadowOpacity')} />
           </Section>
         </>
       )}
@@ -306,7 +305,7 @@ export function Material2DEditor({ id, refp, mat, fill = true }: { id: string; r
         <FeatureToggle label={t('Coloured glass')} refp={r('glass', 'enabled')} title={t('A tinted, translucent glass body with dark edges and caustic light')} />
         {glass.enabled && (
           <>
-            <ColorAmountRow label={t('Colour')} colorRef={r('glass', 'color')} color={glass.color} amountRef={r('glass', 'tint')} amount={glass.tint} />
+            <ColorAmountRow label={t('Colour')} colorRef={r('glass', 'color')} amountRef={r('glass', 'tint')} />
             <RefNum label={t('Glass opacity')} refp={r('glass', 'opacity')} min={0} max={1} clamp display={100} unit="%" title={t('Opacity of the glass body; edges, caustics and highlights stay more opaque')} />
             <RefNum label={t('Edge darkening')} refp={r('glass', 'edge')} min={0} max={1} clamp display={100} unit="%" title={t('Dark Fresnel rim on the steep bevel slopes')} />
             <RefNum label={t('Caustic')} refp={r('glass', 'caustic')} min={0} max={2} clamp display={100} unit="%" title={t('Light focused into a glowing band inside the far edge, and the inner body glow (needs the bevel)')} />
@@ -341,9 +340,7 @@ export function Material2DEditor({ id, refp, mat, fill = true }: { id: string; r
         <RefSelect label={t('Texture')} refp={r('texture', 'kind')} options={tOpts(t, TEXTURES)} />
         {texture.kind !== 'none' && (
           <>
-            <Row label={t('Applies to')} title={t('Colour blend, or a bumped surface that bends the lighting and metal bands')}>
-              <Seg value={texture.target} mixed={targetMixed} options={tOpts(t, TEXTURE_TARGETS)} onChange={(v) => setAt(r('texture', 'target'), v)} />
-            </Row>
+            <RefChoice label={t('Applies to')} title={t('Colour blend, or a bumped surface that bends the lighting and metal bands')} refp={r('texture', 'target')} options={tOpts(t, TEXTURE_TARGETS)} />
             <RefNum
               label={t('Amount')}
               refp={r('texture', 'amount')}
@@ -369,7 +366,7 @@ export function Material2DEditor({ id, refp, mat, fill = true }: { id: string; r
         <FeatureToggle label={t('Satin')} refp={r('satin', 'enabled')} />
         {satin.enabled && (
           <>
-            <ColorAmountRow label={t('Colour')} colorRef={r('satin', 'color')} color={satin.color} amountRef={r('satin', 'opacity')} amount={satin.opacity} />
+            <ColorAmountRow label={t('Colour')} colorRef={r('satin', 'color')} amountRef={r('satin', 'opacity')} />
             <RefSelect label={t('Blend')} refp={r('satin', 'blend')} options={tOpts(t, SATIN_BLENDS)} />
             <RefNum
               label={t('Angle')}
@@ -398,7 +395,7 @@ export function Material2DEditor({ id, refp, mat, fill = true }: { id: string; r
         <FeatureToggle label={t('Sheen')} refp={r('sheen', 'enabled')} title={t('Runs across the texture’s grain direction; spun and flake textures shape it their own way.')} />
         {sheen.enabled && (
           <>
-            <ColorAmountRow label={t('Colour')} colorRef={r('sheen', 'color')} color={sheen.color} amountRef={r('sheen', 'amount')} amount={sheen.amount} max={3} />
+            <ColorAmountRow label={t('Colour')} colorRef={r('sheen', 'color')} amountRef={r('sheen', 'amount')} max={3} />
             <RefNum
               label={t('Position')}
               refp={r('sheen', 'position')}

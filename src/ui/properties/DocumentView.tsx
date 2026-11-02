@@ -2,12 +2,12 @@ import { defaultComp } from '../../model/defaults';
 import { lightingKeysSet } from '../../model/lighting';
 import type { Comp } from '../../model/types';
 import { useEditor, type PropRef } from '../../store/store';
-import { RefColor, RefNum, Row, Section, Seg, type Option } from '../controls';
+import { Findable, RefChoice, RefColor, RefNum, Row, Section, type Option } from '../controls';
 import { useT } from '../i18n';
 import { LightSphere } from '../LightSphere';
 import { oneShot } from '../util';
 import { InfoTip } from './InfoTip';
-import { CompEnvironment, CompTone, LightsEditor } from './style/Lighting3D';
+import { DOCUMENT_LIGHTING, EnvironmentRows, LightsEditor, ToneRows } from './style/Lighting3D';
 import { tOpts } from './style/shared';
 
 const SIZES: [number, number, string][] = [
@@ -27,6 +27,50 @@ const SUPERSAMPLE: Option<'1' | '2' | '3'>[] = [
   { value: '3', label: '3×', title: '3D layers render at 3× and downsample: cleanest edges, slowest' },
 ];
 
+/** The composition size as one of SIZES (Custom otherwise), read from the store. */
+function SizePreset() {
+  const t = useT();
+  const size = useEditor((s) => `${s.project.comp.width}x${s.project.comp.height}`);
+  const edit = useEditor((s) => s.edit);
+  const preset = SIZES.find(([w, h]) => `${w}x${h}` === size);
+  return (
+    <Findable type={SizePreset} props={{}}>
+      <Row label={t('Size')}>
+        <select
+          aria-label={t('Size')}
+          title={t('Composition size preset')}
+          value={preset ? size : 'custom'}
+          onChange={(e) => {
+            const s = SIZES.find(([w, h]) => `${w}x${h}` === e.target.value);
+            if (s) edit((p) => ({ ...p, comp: { ...p.comp, width: s[0], height: s[1] } }));
+          }}
+        >
+          {SIZES.map(([w, h, label]) => (
+            <option key={label} value={`${w}x${h}`}>
+              {t(label)}
+            </option>
+          ))}
+          <option value="custom">{t('Custom')}</option>
+        </select>
+      </Row>
+    </Findable>
+  );
+}
+
+/** The comp's global light as a direction sphere, read from the store (one undo step per drag). */
+function GlobalLightRow() {
+  const t = useT();
+  const gl = useEditor((s) => s.project.comp.globalLight);
+  const setAt = useEditor((s) => s.setAt);
+  return (
+    <Findable type={GlobalLightRow} props={{}}>
+      <Row label={t('Light')} title={t('Photoshop Global Light: shared by every bevel, satin and shadow that has “Use global light” on')}>
+        <LightSphere id="comp-global-light" label={t('Global light direction')} angle={gl.angle} altitude={gl.altitude} onChange={(angle, altitude, key) => setAt(c('globalLight'), { angle, altitude }, key)} />
+      </Row>
+    </Findable>
+  );
+}
+
 /**
  * Document node (nothing selected): the composition settings, edited live like any layer: frame,
  * output (export background, 3D supersampling), the 3D lighting rig (environment, tone, lights,
@@ -43,30 +87,12 @@ export function DocumentView() {
     .split('/')
     .map(Number);
   const { edit, setAt } = useEditor.getState();
-  const preset = SIZES.find(([w, h]) => w === comp.width && h === comp.height);
   const setComp = (patch: Partial<Comp>, key?: string) => edit((p) => ({ ...p, comp: { ...p.comp, ...patch } }), key);
 
   return (
     <div className="doc-view">
       <Section id="doc-frame" title={t('Frame')}>
-        <Row label={t('Size')}>
-          <select
-            aria-label={t('Size')}
-            title={t('Composition size preset')}
-            value={preset ? `${preset[0]}x${preset[1]}` : 'custom'}
-            onChange={(e) => {
-              const s = SIZES.find(([w, h]) => `${w}x${h}` === e.target.value);
-              if (s) setComp({ width: s[0], height: s[1] });
-            }}
-          >
-            {SIZES.map(([w, h, label]) => (
-              <option key={label} value={`${w}x${h}`}>
-                {t(label)}
-              </option>
-            ))}
-            <option value="custom">{t('Custom')}</option>
-          </select>
-        </Row>
+        <SizePreset />
         <RefNum label={t('Width')} refp={c('width')} min={16} max={4096} integer clamp unit="px" />
         <RefNum label={t('Height')} refp={c('height')} min={16} max={4096} integer clamp unit="px" />
         <RefNum
@@ -94,22 +120,26 @@ export function DocumentView() {
           </>
         }
       >
-        <Row label={t('Background')}>
-          <Seg
-            value={comp.background.transparent ? 't' : 'c'}
-            options={[
-              { value: 't', label: t('Transparent') },
-              { value: 'c', label: t('Colour') },
-            ]}
-            onChange={(v) => setAt(c('background', 'transparent'), v === 't')}
-          />
-        </Row>
+        <RefChoice
+          label={t('Background')}
+          refp={c('background', 'transparent')}
+          options={[
+            { value: 't', label: t('Transparent') },
+            { value: 'c', label: t('Colour') },
+          ]}
+          read={(v) => (v ? 't' : 'c')}
+          pick={(v) => setAt(c('background', 'transparent'), v === 't')}
+        />
         {!comp.background.transparent && <RefColor label={t('Colour')} refp={c('background', 'color')} />}
-        <Row label={t('Supersample')} title={t('Applies to 3D layers: they render at this multiple of the output size and downsample, for smoother bevel edges and specular highlights (slower)')}>
-          <span role="group" aria-label={t('3D supersampling')}>
-            <Seg value={String(comp.supersample) as '1' | '2' | '3'} options={tOpts(t, SUPERSAMPLE)} onChange={(v) => setAt(c('supersample'), Number(v))} />
-          </span>
-        </Row>
+        <RefChoice
+          label={t('Supersample')}
+          title={t('Applies to 3D layers: they render at this multiple of the output size and downsample, for smoother bevel edges and specular highlights (slower)')}
+          group={t('3D supersampling')}
+          refp={c('supersample')}
+          options={tOpts(t, SUPERSAMPLE)}
+          read={(v) => String(v) as '1' | '2' | '3'}
+          pick={(v) => setAt(c('supersample'), Number(v))}
+        />
       </Section>
       <Section
         id="doc-lighting3d"
@@ -122,13 +152,13 @@ export function DocumentView() {
       >
         {overriding > 0 && <div className="hint-line">{t('{n} of {m} 3D layers set some of these values themselves.', { n: overriding, m: layers3D })}</div>}
         <Section id="doc-environment" title={t('Environment (3D reflections)')}>
-          <CompEnvironment comp={comp} />
+          <EnvironmentRows scope={DOCUMENT_LIGHTING} />
         </Section>
         <Section id="doc-tone" title={t('Tone')}>
-          <CompTone comp={comp} />
+          <ToneRows scope={DOCUMENT_LIGHTING} />
         </Section>
         <Section id="doc-lights" title={t('Lights ({n})', { n: comp.lights.length })}>
-          <LightsEditor refp={c('lights')} lights={comp.lights} />
+          <LightsEditor refp={c('lights')} />
         </Section>
         <Section id="doc-camera" title={t('Camera')} defaultOpen={false}>
           <RefNum label={t('FOV')} refp={c('camera', 'fov')} min={5} max={120} step={0.5} unit="deg" title={t('Vertical field of view; low = flatter, high = more perspective')} />
@@ -147,15 +177,7 @@ export function DocumentView() {
       </Section>
       <Section id="doc-light2d" title={t('2D light')}>
         <div className="hint-line">{t('Global light: drives the 2D bevels, satin and shadows that use global light.')}</div>
-        <Row label={t('Light')} title={t('Photoshop Global Light: shared by every bevel, satin and shadow that has “Use global light” on')}>
-          <LightSphere
-            id="comp-global-light"
-            label={t('Global light direction')}
-            angle={comp.globalLight.angle}
-            altitude={comp.globalLight.altitude}
-            onChange={(angle, altitude, key) => setComp({ globalLight: { angle, altitude } }, key)}
-          />
-        </Row>
+        <GlobalLightRow />
         <RefNum
           label={t('Angle')}
           refp={c('globalLight', 'angle')}

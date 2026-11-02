@@ -40,6 +40,7 @@ import type {
   TextSource,
   Title2DLayer,
   Title3DLayer,
+  Title3DProps,
   TitleStyle2D,
   Transform,
   Warp,
@@ -221,8 +222,17 @@ export function erode2D(overrides: Partial<Erode2D> = {}): Erode2D {
   return { enabled: false, amount: 0.5, edge: 6, scale: 12, angle: 0, seed: 1, ...overrides };
 }
 
-/** The classic gold outline look: gradient-mapped bevelled gold face, black / white / red rims. */
-export function defaultTitleStyle2D(): TitleStyle2D {
+/** The plain look every new 2D layer starts with: one flat `color` face; no rims, bevel, gloss, glow, texture, pattern or finish. */
+export function plainTitleStyle2D(color = '#ffffff'): TitleStyle2D {
+  return { face: material2D(solidFill(color)), rims: [], knockout: false, erode: erode2D() };
+}
+
+/**
+ * The classic gold outline look (new 2D layers' old default): gradient-mapped bevelled gold face,
+ * black / white / red rims. The golden / perf fixtures, the tests and the Library's colourway
+ * sample keep it, so what they render stays as it was.
+ */
+export function classicTitleStyle2D(): TitleStyle2D {
   return {
     face: material2D(linearFill(GRADIENTS.goldFill), {
       bevel: bevel2D({ size: 3, depth: 3, gloss: 'ring' }),
@@ -452,6 +462,15 @@ export function material3D(preset: MaterialPreset = 'gold'): Material3D {
   return preset === 'custom' ? base : { ...base, ...PRESET_VALUES[preset], preset };
 }
 
+/**
+ * Neutral light-grey plastic with a modest gloss: no metal, gradient banding, flakes or clear coat
+ * (new 3D layers, the plain 3D image look). Light grey, not white: under the default lighting a
+ * white letter's face and side walls both tone-map to white and the extrusion reads flat.
+ */
+export function plainMaterial3D(): Material3D {
+  return { ...material3D('custom'), color: '#c0c0c0', roughness: 0.4, reflectivity: 0.5 };
+}
+
 /** A bevel cross-section (width 0 = none). */
 export function bevel3D(width: number, depth: number, profile: BevelProfile3D = 'round'): BevelShape3D {
   return { width, depth, profile, segments: 6, curve: 0 };
@@ -523,7 +542,7 @@ export const layerBase = (name: string) => ({
 });
 
 export function createTitle2DLayer(text = 'BIG BONUS'): Title2DLayer {
-  return { ...layerBase(text.split('\n')[0] || 'Title'), kind: 'title2d', source: textSource(text), ...outlineOps(), style: defaultTitleStyle2D(), partEffects: {} };
+  return { ...layerBase(text.split('\n')[0] || 'Title'), kind: 'title2d', source: textSource(text), ...outlineOps(), style: plainTitleStyle2D(), partEffects: {} };
 }
 
 export function noWarp(): Warp {
@@ -588,32 +607,41 @@ export function shapeSource(shape: ShapeKind, size = 300): ShapeSource {
   }
 }
 
-export function createTitle3DLayer(text = '確定'): Title3DLayer {
+/** Letter geometry and parts every 3D style starts from: straight extrusion, nothing behind or around the letter, every lighting value the document's. */
+function title3DBase(): Omit<Title3DProps, 'depth' | 'bevel' | 'face'> {
   return {
-    ...layerBase(text.split('\n')[0] || '3D Title'),
-    kind: 'title3d',
-    source: textSource(text),
-    ...outlineOps(),
-    partEffects: {},
-    style3d: {
-      mode: 'extrude',
-      inflate: { height: 12, profile: curve([0, 0], [0.35, 0.8], [1, 1]), smoothness: 0, detail: 1 },
-      depth: 14,
-      curveSegments: 8,
-      bevel: bevel3D(2.5, 2.5),
-      bevelPosition: 'outside',
-      envLock: false,
-      skew: { x: 0, y: 0 },
-      face: material3D('gold'),
-      faceImage: 1,
-      edgeImage: 0,
-      lighting: noLighting(),
-      bands: [],
-      shadow: shadow3D(),
-      glint: glint3D(),
-      ao: ao3D(),
-    },
+    mode: 'extrude',
+    inflate: { height: 12, profile: curve([0, 0], [0.35, 0.8], [1, 1]), smoothness: 0, detail: 1 },
+    curveSegments: 8,
+    bevelPosition: 'outside',
+    envLock: false,
+    skew: { x: 0, y: 0 },
+    faceImage: 1,
+    edgeImage: 0,
+    lighting: noLighting(),
+    bands: [],
+    shadow: shadow3D(),
+    glint: glint3D(),
+    ao: ao3D(),
   };
+}
+
+/** The plain look every new 3D layer starts with: one solid letter in plainMaterial3D, no bevel, bands, glint, AO or shadow catcher, no lighting of its own. */
+export function plainTitle3D(): Title3DProps {
+  return { ...title3DBase(), depth: 14, bevel: bevel3D(0, 0), face: plainMaterial3D() };
+}
+
+/**
+ * The classic polished-gold extrusion (new 3D layers' old default) with a round bevel. The
+ * golden fixtures, the tests and the factory looks' geometry defaults keep it, so what they
+ * render stays as it was.
+ */
+export function classicTitle3D(): Title3DProps {
+  return { ...title3DBase(), depth: 14, bevel: bevel3D(2.5, 2.5), face: material3D('gold') };
+}
+
+export function createTitle3DLayer(text = '確定'): Title3DLayer {
+  return { ...layerBase(text.split('\n')[0] || '3D Title'), kind: 'title3d', source: textSource(text), ...outlineOps(), partEffects: {}, style3d: plainTitle3D() };
 }
 
 export function createBackgroundLayer(): BackgroundLayer {

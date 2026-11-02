@@ -1,8 +1,12 @@
-/* Properties search: the field at the top of the panel, its result list over the body, and the
-   flash on the control a result lands on. */
+/* Properties search: the field at the top of the panel, its results over the panel below it
+   (live controls under their location, and links), and the flash on the control a result lands
+   on. */
 
-.props-find {
+/* The results' containing block: they cover the panel from below the field (top set by PropertySearch). */
+.panel.properties {
   position: relative;
+}
+.props-find {
   flex-shrink: 0;
   padding: 6px 8px 2px;
 }
@@ -12,28 +16,34 @@
 .props-find-list {
   position: absolute;
   z-index: 40;
-  top: 100%;
-  left: 8px;
-  right: 8px;
-  max-height: min(60vh, 520px);
+  left: 0;
+  right: 0;
+  bottom: 0;
   overflow-y: auto;
-  margin-top: 2px;
-  padding: 3px;
-  background: var(--bg2);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  box-shadow: 0 10px 30px #000a;
+  padding: 4px 8px 12px;
+  background: var(--bg1);
+  border-top: 1px solid var(--line);
 }
 .props-find-item {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 1px;
+  width: 100%;
   padding: 4px 6px;
   border-radius: 3px;
+  font: inherit;
+  text-align: left;
+}
+button.props-find-item {
+  border: 0;
+  background: none;
+  color: inherit;
   cursor: pointer;
 }
-.props-find-item[aria-selected='true'] {
-  background: var(--bg3);
+.props-find-item:hover,
+.props-find-item[data-active] {
+  background: var(--bg2);
 }
 .props-find-item .pf-label {
   color: var(--text);
@@ -45,12 +55,31 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A live result's location: a link to the control in its page. */
+.props-find-item button.pf-path {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.props-find-item button.pf-path:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
 .props-find-item.add .pf-label {
   color: var(--accent2);
 }
 .props-find-note {
   padding: 6px;
   color: var(--muted);
+}
+.props-find-more {
+  margin: 6px 6px 0;
 }
 
 @keyframes find-flash {

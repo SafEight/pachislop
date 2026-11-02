@@ -2,9 +2,9 @@ import type { ReactNode } from 'react';
 import { material3D } from '../../../model/defaults';
 import { envKeysSet } from '../../../model/lighting';
 import type { GradientSpan, Material3D, MaterialPreset, Surface3D } from '../../../model/types';
-import { getRefs, isMultiRef, refKey } from '../../../store/paths';
+import { getRefs, refKey } from '../../../store/paths';
 import { useEditor, type Refs } from '../../../store/store';
-import { RefColor, RefNum, Row, Section, Seg, SelectRow, type Option } from '../../controls';
+import { RefChoice, RefColor, RefNum, RefSelect, Section, type Option } from '../../controls';
 import { GradientEditor } from '../../GradientEditor';
 import { useT } from '../../i18n';
 import { oneShot, useMixed } from '../../util';
@@ -13,7 +13,7 @@ import { PatternFields } from './Material2DEditor';
 import { material3DClipboard, material3DCss, patternLabel, PRESET_LABELS, presetLabel, sub, tOpts } from './shared';
 import { PartReflections } from './Lighting3D';
 import { MaterialLink } from './MaterialLink';
-import { ColorAmountRow, ClipActions, GroupTitle, IconChoice, SwatchTitle } from './widgets';
+import { ClipActions, ColorAmountRow, GroupTitle, SwatchTitle } from './widgets';
 
 const PRESETS = Object.keys(PRESET_LABELS) as MaterialPreset[];
 
@@ -60,10 +60,7 @@ function Material3DFields({ id, refp, mat }: { id: string; refp: Refs; mat: Mate
   const setAt = useEditor((s) => s.setAt);
   const setEachAt = useEditor((s) => s.setEachAt);
   const r = (key: keyof Material3D) => sub(refp, key);
-  const colourType = colourTypeOf(mat);
-  const [presetMixed, gradMixed, axisMixed, spanMixed, surfaceMixed] = useMixed(r('preset'), r('gradient'), r('gradientAxis'), r('gradientSpan'), sub(refp, 'surface', 'kind'));
-  /** Whether the targets differ in colour type. */
-  const typeMixed = useEditor((s) => isMultiRef(refp) && new Set((getRefs(s.project, refp) as Material3D[]).map(colourTypeOf)).size > 1);
+  const [gradMixed] = useMixed(r('gradient'));
   const ownEnv = envKeysSet(mat.environment).length;
   // Solid drops the gradient; a gradient type adds one (white → the colour) where there is none, in one undo step.
   const pickColourType = (v: ColourType) => {
@@ -90,25 +87,23 @@ function Material3DFields({ id, refp, mat }: { id: string; refp: Refs; mat: Mate
   ];
   return (
     <>
-      <SelectRow label={t('Preset')} value={mat.preset} mixed={presetMixed} options={PRESETS.map((value) => ({ value, label: presetLabel(t, value) }))} onChange={(p) => setAt(refp, material3D(p))} />
-      <IconChoice label={t('Type')} value={colourType} mixed={typeMixed} options={tOpts(t, COLOUR_TYPE_OPTIONS)} onChange={pickColourType} />
+      <RefSelect label={t('Preset')} refp={r('preset')} options={PRESETS.map((value) => ({ value, label: presetLabel(t, value) }))} pick={(p) => setAt(refp, material3D(p))} />
+      <RefChoice label={t('Type')} refp={refp} options={tOpts(t, COLOUR_TYPE_OPTIONS)} read={(m) => colourTypeOf(m as Material3D)} pick={pickColourType} icons />
       {!mat.gradient ? (
         <RefColor label={t('Colour')} refp={r('color')} />
       ) : (
         <>
           <GradientEditor id={refKey(r('gradient'))} value={mat.gradient} mixed={gradMixed} onChange={(g, c) => setAt(r('gradient'), g, c)} />
-          <Row label={t('Axis')} title={t('Which way the ramp runs: across the letters, or front → back along the extrusion')}>
-            <span role="group" aria-label={t('Gradient axis')}>
-              <Seg value={mat.gradientAxis} mixed={axisMixed} options={tOpts(t, GRAD_AXES)} onChange={(v) => setAt(r('gradientAxis'), v)} />
-            </span>
-          </Row>
+          <RefChoice label={t('Axis')} title={t('Which way the ramp runs: across the letters, or front → back along the extrusion')} group={t('Gradient axis')} refp={r('gradientAxis')} options={tOpts(t, GRAD_AXES)} />
           {mat.gradientAxis === 'xy' && (
             <>
-              <Row label={t('Span')} title={t('What one full ramp covers (Photoshop “Align with Layer”, Element 3D “Use Layer as UV”)')}>
-                <span role="group" aria-label={t('Gradient span')}>
-                  <Seg value={mat.gradientSpan} mixed={spanMixed} options={tOpts(t, GRAD_SPANS)} onChange={(v) => setAt(r('gradientSpan'), v)} />
-                </span>
-              </Row>
+              <RefChoice
+                label={t('Span')}
+                title={t('What one full ramp covers (Photoshop “Align with Layer”, Element 3D “Use Layer as UV”)')}
+                group={t('Gradient span')}
+                refp={r('gradientSpan')}
+                options={tOpts(t, GRAD_SPANS)}
+              />
               {mat.gradientKind !== 'radial' && (
                 <RefNum label={t('Angle')} refp={r('gradientAngle')} min={0} max={360} step={1} unit="deg" defaultValue={90} title={t('Direction of the ramp: 90° = top → bottom on screen, 0° = left → right')} />
               )}
@@ -198,11 +193,14 @@ function Material3DFields({ id, refp, mat }: { id: string; refp: Refs; mat: Mate
       </Section>
 
       <Section id={`${id}.finish`} title={<GroupTitle name={t('Finish')} on={finishOn} />} defaultOpen={finishOn.length > 0}>
-        <Row label={t('Surface')} title={t('Bend the surface so reflections warp: crumpled foil, hammered metal or liquid gold (projected front-on, like the pattern)')}>
-          <span role="group" aria-label={t('Surface relief')}>
-            <Seg value={mat.surface.kind} mixed={surfaceMixed} options={tOpts(t, SURFACES, 'surface')} onChange={(v) => setEachAt(r('surface'), (s) => ({ ...(s as Surface3D), kind: v }))} />
-          </span>
-        </Row>
+        <RefChoice
+          label={t('Surface')}
+          title={t('Bend the surface so reflections warp: crumpled foil, hammered metal or liquid gold (projected front-on, like the pattern)')}
+          group={t('Surface relief')}
+          refp={sub(refp, 'surface', 'kind')}
+          options={tOpts(t, SURFACES, 'surface')}
+          pick={(v) => setEachAt(r('surface'), (s) => ({ ...(s as Surface3D), kind: v }))}
+        />
         {mat.surface.kind !== 'none' && (
           <>
             <RefNum label={t('Strength')} refp={sub(refp, 'surface', 'amount')} min={0} max={1} clamp display={100} unit="%" title={t('How far the surface bends: low = subtle shimmer, high = wild reflections')} />
@@ -217,7 +215,7 @@ function Material3DFields({ id, refp, mat }: { id: string; refp: Refs; mat: Mate
       </Section>
 
       <Section id={`${id}.glow`} title={<GroupTitle name={t('Glow')} on={mat.emissiveIntensity > 0 ? [t('Emissive')] : []} />} defaultOpen={mat.emissiveIntensity > 0}>
-        <ColorAmountRow label={t('Emissive')} colorRef={r('emissive')} color={mat.emissive} amountRef={r('emissiveIntensity')} amount={mat.emissiveIntensity} max={10} display={1} unit="x" />
+        <ColorAmountRow label={t('Emissive')} colorRef={r('emissive')} amountRef={r('emissiveIntensity')} max={10} display={1} unit="x" />
       </Section>
     </>
   );

@@ -3,18 +3,22 @@ import type { GeneratorDef, ParamDef } from '../../engine/contracts';
 import { generatorFromPreset, generatorParams, getGenerator } from '../../generators/registry';
 import type { GeneratorLayer, ParamValue } from '../../model/types';
 import { useEditor, type PropRef } from '../../store/store';
-import { Row, Section } from '../controls';
+import { RefNum, RefSelect, Row, Section } from '../controls';
 import { GeneratorIcon } from '../generatorIcons';
 import { useT } from '../i18n';
+import { BLENDS } from '../layers/commands';
 import { EffectStack } from './EffectCard';
 import { InfoTip } from './InfoTip';
 import { ParamControl } from './ParamControl';
 import { paramShown } from './params';
+import { tOpts } from './style/shared';
 import { TransformSection } from './TransformSection';
 
 // Generator layer node (particles, speed lines, rings…): the layer it follows, the generator's
 // presets and params (its description is the title's ⓘ), then the effects that run on its pixels and its transform. Blend and
-// opacity are the Layers panel header's.
+// opacity are the Layers panel header's. A companion (ui/companions.ts, shown in its CompanionCard
+// under the layer it follows) has no follow picker, and its blend and opacity are here, as an
+// effect card has its own.
 
 /** Whether the layer's params are preset `presetId`'s as applied (picked source layers aside): its chip shows as current. */
 function isCurrentPreset(def: GeneratorDef, layer: GeneratorLayer, presetId: string): boolean {
@@ -25,7 +29,7 @@ function isCurrentPreset(def: GeneratorDef, layer: GeneratorLayer, presetId: str
 }
 
 /** One chip per preset; a click replaces the params and the previous preset's effects with the preset's as one undo step (transform, the user's own effects and picked layers stay). */
-function PresetChips({ def, layer }: { def: GeneratorDef; layer: GeneratorLayer }) {
+export function PresetChips({ def, layer }: { def: GeneratorDef; layer: GeneratorLayer }) {
   const t = useT();
   const apply = useEditor((s) => s.applyGeneratorPreset);
   if (!def.presets.length) return null;
@@ -66,7 +70,7 @@ function ReRoll({ pd, refp, current }: { pd: Extract<ParamDef, { kind: 'number' 
 }
 
 /** The generator's params with the effect cards' controls; `when` rules hide the ones that don't apply. */
-function GeneratorParams({ def, layer }: { def: GeneratorDef; layer: GeneratorLayer }) {
+export function GeneratorParams({ def, layer }: { def: GeneratorDef; layer: GeneratorLayer }) {
   const values = layer.generator.params;
   return (
     <>
@@ -99,7 +103,7 @@ function FollowRow({ def, layer }: { def: GeneratorDef; layer: GeneratorLayer })
   );
 }
 
-export function GeneratorView({ layer }: { layer: GeneratorLayer }) {
+export function GeneratorView({ layer, companion = false }: { layer: GeneratorLayer; companion?: boolean }) {
   const t = useT();
   const def = getGenerator(layer.generator.type);
   const fx = layer.effects.length;
@@ -117,8 +121,14 @@ export function GeneratorView({ layer }: { layer: GeneratorLayer }) {
       >
         {def ? (
           <>
-            <FollowRow def={def} layer={layer} />
+            {!companion && <FollowRow def={def} layer={layer} />}
             <PresetChips def={def} layer={layer} />
+            {companion && (
+              <>
+                <RefSelect label={t('Blend')} refp={{ layerId: layer.id, path: ['blend'] }} options={tOpts(t, BLENDS)} />
+                <RefNum label={t('Opacity')} refp={{ layerId: layer.id, path: ['transform', 'opacity'] }} min={0} max={1} display={100} unit="%" clamp />
+              </>
+            )}
             <GeneratorParams def={def} layer={layer} />
           </>
         ) : (

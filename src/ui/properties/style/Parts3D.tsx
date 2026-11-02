@@ -3,7 +3,7 @@ import { bandSide, sideMaterial } from '../../../model/bands';
 import type { Band3D, BevelProfile3D, Material3D, PlateShape, Title3DLayer, Title3DProps } from '../../../model/types';
 import { refKey } from '../../../store/paths';
 import { useEditor, type PropRef, type Refs } from '../../../store/store';
-import { RefCheck, RefColor, RefNum, Row, Section, Seg } from '../../controls';
+import { RefCheck, RefChoice, RefColor, RefNum, Row, Section } from '../../controls';
 import { useOpenSection } from '../../sectionMemory';
 import { useT } from '../../i18n';
 import { oneShot, useGesture, useMixed, useRefValue } from '../../util';
@@ -13,7 +13,7 @@ import { PlateIcon, Profile3DIcon } from './icons';
 import { Material3DSection } from './Material3DEditor';
 import { ownBandSides, ownSides, refsOf } from '../parts';
 import { material3DCss, sub, tOpts } from './shared';
-import { IconChoice, SwatchTitle } from './widgets';
+import { SwatchTitle } from './widgets';
 
 // Element 3D replacement split by part (model/bands.ts): the letter's face (its material covers
 // the face, bevel and side walls), its side walls while they have a material of their own, and
@@ -357,15 +357,12 @@ export function SideEditor({ layers, id = 'part' }: { layers: readonly Title3DLa
  */
 export function BandEditor({ bands, id = 'part' }: { bands: readonly Stack3DTarget[]; id?: string }) {
   const t = useT();
-  const setAt = useEditor((s) => s.setAt);
   const { layer, index } = bands[0];
   const st = layer.style3d;
   const band = st.bands[index];
   const refp = refsOf(bands.map((b) => styleRef(b.layer, 'bands', b.index)));
   const shapeRef = sub(refp, 'shape');
   const shape = useRefValue(sub(shapeRef, 'kind'));
-  const join = useRefValue(sub(refp, 'join'));
-  const profile = useRefValue(sub(refp, 'bevel', 'profile'));
   const kind = shape.mixed ? null : (shape.value as PlateShape['kind']);
   const hidden = bands.length === 1 ? bandHidden(band) : null;
   const inheritedSides = bands.filter((b) => !b.layer.style3d.bands[b.index].side);
@@ -403,7 +400,7 @@ export function BandEditor({ bands, id = 'part' }: { bands: readonly Stack3DTarg
           defaultValue={0}
           title={t("Gap behind the previous solid's back (Element 3D Z-Offset); negative slides the band forward, at most to where the previous solid's bevel ends")}
         />
-        <IconChoice label={t('Shape')} value={band.shape.kind} mixed={shape.mixed} options={tOpts(t, SHAPE_OPTIONS)} onChange={(v) => setAt(sub(shapeRef, 'kind'), v)} />
+        <RefChoice label={t('Shape')} refp={sub(shapeRef, 'kind')} options={tOpts(t, SHAPE_OPTIONS)} icons />
         {kind === 'contour' && (
           <RefNum label={t('Close', undefined, { ctx: 'plate' })} refp={sub(shapeRef, 'close')} min={0} max={10} step={0.05} unit="%" defaultValue={0} title={t('Bridge gaps and notches narrower than about twice this (% of size), so the band runs as one piece behind the letters')} />
         )}
@@ -413,14 +410,12 @@ export function BandEditor({ bands, id = 'part' }: { bands: readonly Stack3DTarg
             <RefNum label={t('Slant')} refp={sub(shapeRef, 'slant')} min={-45} max={45} step={0.5} unit="deg" defaultValue={0} title={t("Lean of the box sides (positive leans right); the text's italic shear is added")} />
           </>
         )}
-        <Row label={t('Joins')} title={t('How the band turns the corners of the letters')}>
-          <Seg value={band.join} mixed={join.mixed} options={tOpts(t, JOINS)} onChange={(v) => setAt(sub(refp, 'join'), v)} />
-        </Row>
+        <RefChoice label={t('Joins')} title={t('How the band turns the corners of the letters')} refp={sub(refp, 'join')} options={tOpts(t, JOINS)} />
         <RefCheck label={t('Fill counters')} refp={sub(refp, 'fillCounters')} title={t('Fill the holes of 口, B, O… so the band is solid')} />
         <div className="sub-head">{t('Bevel')}</div>
         <RefNum label={t('Bevel width')} refp={sub(refp, 'bevel', 'width')} min={0} max={10} step={0.05} unit="%" title={t("Inward from the band's edge; 0 = no bevel")} />
         <RefNum label={t('Bevel depth')} refp={sub(refp, 'bevel', 'depth')} min={0} max={10} step={0.05} unit="%" title={t('Extent in z')} />
-        <IconChoice label={t('Profile')} value={band.bevel.profile} mixed={profile.mixed} options={tOpts(t, PROFILE_OPTIONS)} onChange={(v) => setAt(sub(refp, 'bevel', 'profile'), v)} />
+        <RefChoice label={t('Profile')} refp={sub(refp, 'bevel', 'profile')} options={tOpts(t, PROFILE_OPTIONS)} icons />
         <RefNum label={t('Segments')} refp={sub(refp, 'bevel', 'segments')} min={1} max={24} integer clamp defaultValue={6} title={t(SEGMENTS_TIP)} />
         <RefNum label={t('Curve')} refp={sub(refp, 'bevel', 'curve')} min={-1} max={1} step={0.01} clamp defaultValue={0} title={t(CURVE_TIP)} />
       </Section>
@@ -443,13 +438,11 @@ export function Shape3DSection({ layers }: { layers: readonly Title3DLayer[] }) 
   const base = styleRefs(layers);
   const profileRef = sub(base, 'inflate', 'profile');
   const inflate = st.mode === 'inflate';
-  const [modeMixed, profileMixed, positionMixed, bevelMixed] = useMixed(sub(base, 'mode'), profileRef, sub(base, 'bevelPosition'), sub(base, 'bevel', 'profile'));
+  const [profileMixed] = useMixed(profileRef);
   const title = layers.every((l) => l.source.kind === 'shape') ? t('3D shape') : t('Shape', undefined, { ctx: '3d' });
   return (
     <Section id="shape3d" title={single ? title : `${title} · ${t('{n} layers', { n: layers.length })}`}>
-      <Row label={t('Mode')} title={t('How the front is built')}>
-        <Seg value={st.mode} mixed={modeMixed} options={tOpts(t, MODES)} onChange={(v) => setAt(sub(base, 'mode'), v)} />
-      </Row>
+      <RefChoice label={t('Mode')} title={t('How the front is built')} refp={sub(base, 'mode')} options={tOpts(t, MODES)} />
       <RefNum label={t('Depth')} refp={sub(base, 'depth')} min={0} max={100} step={0.1} unit="%" title={t("Extrusion depth: the letter's straight side wall behind its bevel, % of size")} />
       {inflate && (
         <>
@@ -497,12 +490,15 @@ export function Shape3DSection({ layers }: { layers: readonly Title3DLayer[] }) 
       {inflate && <div className="hint-line">{t('Inflate mode: the puffy front replaces the letter’s bevel (it applies again in Extrude); the bands still apply.')}</div>}
       <RefNum label={t('Bevel width')} refp={sub(base, 'bevel', 'width')} min={0} max={10} step={0.05} unit="%" title={t("The letter's bevel across the outline plane (% of size); 0 = a sharp edge. Position sets where it sits.")} />
       <RefNum label={t('Bevel depth')} refp={sub(base, 'bevel', 'depth')} min={0} max={10} step={0.05} unit="%" title={t('Extent in z')} />
-      <IconChoice label={t('Profile')} value={st.bevel.profile} mixed={bevelMixed} options={tOpts(t, PROFILE_OPTIONS)} onChange={(v) => setAt(sub(base, 'bevel', 'profile'), v)} />
+      <RefChoice label={t('Profile')} refp={sub(base, 'bevel', 'profile')} options={tOpts(t, PROFILE_OPTIONS)} icons />
       <RefNum label={t('Segments')} refp={sub(base, 'bevel', 'segments')} min={1} max={24} integer clamp defaultValue={6} title={t(SEGMENTS_TIP)} />
       <RefNum label={t('Curve')} refp={sub(base, 'bevel', 'curve')} min={-1} max={1} step={0.01} clamp defaultValue={0} title={t(CURVE_TIP)} />
-      <Row label={t('Position')} title={t("Where the letter's bevel sits on the glyph outline, like the Position of a Photoshop stroke. The bands grow from the letter's silhouette.")}>
-        <Seg value={st.bevelPosition} mixed={positionMixed} options={tOpts(t, BEVEL_POSITIONS)} onChange={(v) => setAt(sub(base, 'bevelPosition'), v)} />
-      </Row>
+      <RefChoice
+        label={t('Position')}
+        title={t("Where the letter's bevel sits on the glyph outline, like the Position of a Photoshop stroke. The bands grow from the letter's silhouette.")}
+        refp={sub(base, 'bevelPosition')}
+        options={tOpts(t, BEVEL_POSITIONS)}
+      />
       {single && <BevelPreview st={st} />}
     </Section>
   );

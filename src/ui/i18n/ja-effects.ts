@@ -10,7 +10,7 @@ export const JA_EFFECTS: Readonly<Record<string, string>> = {
   'Material (bevel, chrome, glass, metal grain), keyline strokes and 2D extrusion': 'マテリアル（ベベル、クローム、ガラス、金属の目）、キーラインの境界線、2D 押し出し',
   'Adjustments (levels, curves, hue/saturation, gradient map…), gradient overlay (rainbow, glint sweep), halftone, film grain':
     '色調補正（レベル補正、トーンカーブ、色相・彩度、グラデーションマップ…）、グラデーションオーバーレイ（虹、グリントのスイープ）、ハーフトーン、フィルムグレイン',
-  'Wave, chromatic aberration, glitch, shatter and motion trail': '波形、色収差、グリッチ、ガラス割れ、モーショントレイル',
+  'Wave, chromatic aberration, glitch, shatter, motion trail and かすれ dry brush': '波形、色収差、グリッチ、ガラス割れ、モーショントレイル、かすれ（ドライブラシ）',
 
   // ── Effect names
   'Outer Glow': '光彩（外側）',

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { BUILTIN_FONTS } from '../../assets/registry';
-import { createTitle2DLayer, createTitle3DLayer } from '../../model/defaults';
+import { classicTitleStyle2D, createTitle2DLayer, createTitle3DLayer } from '../../model/defaults';
 import { isTitleLayer } from '../../model/parts';
 import type { Layer, Project } from '../../model/types';
 import { applyPresetToProject, canApplyPreset, presetFromLayer } from '../../presets/apply';
@@ -34,9 +34,9 @@ const USER_GROUP = 'My Styles';
 const COLOURWAYS_GROUP = 'Colourways 配色';
 /** The looks and colourways applied last; shown while no search or filter is on. */
 const RECENT_GROUP = 'Recent';
-/** Thumbnails show this when no title layer is selected; clicking a style then adds a new title. */
+/** Thumbnails show this when no title layer is selected (in the classic gold look, so colourways show on rims and bevels); clicking a style then adds a new title. */
 const SAMPLE_TEXT = '確定';
-const SAMPLE_LAYER = createTitle2DLayer(SAMPLE_TEXT);
+const SAMPLE_LAYER = { ...createTitle2DLayer(SAMPLE_TEXT), style: classicTitleStyle2D() };
 
 const FACTORY_GROUPS = [...new Set(FACTORY_STYLES.map((p) => p.group))];
 /** Kind of each factory section: 3D when all its looks are 3D, else 2D. */

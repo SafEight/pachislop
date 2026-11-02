@@ -8,9 +8,9 @@ import {
   bevel2D,
   bevel3D,
   CHROME_RAMP,
+  classicTitle3D,
   curve,
   createTitle2DLayer,
-  createTitle3DLayer,
   erode2D,
   glint3D,
   GRADIENTS,
@@ -198,7 +198,7 @@ interface Look3D {
   group: string;
   /**
    * `skew` / `ao` default to straight extrusion and AO off; `bevelPosition` to 'outside' (the
-   * letter's bevel grows outward from the outline); `mode` / `inflate` / `envLock` to the factory layer's.
+   * letter's bevel grows outward from the outline); `mode` / `inflate` / `envLock` to classicTitle3D()'s.
    */
   style3d: Omit<Title3DProps, 'skew' | 'ao' | 'mode' | 'inflate' | 'envLock' | 'bevelPosition' | 'faceImage' | 'edgeImage' | 'lighting'> &
     Partial<Pick<Title3DProps, 'skew' | 'ao' | 'mode' | 'inflate' | 'envLock' | 'bevelPosition' | 'faceImage' | 'edgeImage'>>;
@@ -209,7 +209,7 @@ interface Look3D {
 }
 
 export const p3 = (l: Look3D): StylePreset => {
-  const { mode, inflate, envLock } = createTitle3DLayer().style3d;
+  const { mode, inflate, envLock } = classicTitle3D();
   return {
     id: l.id,
     name: l.name,
@@ -1917,7 +1917,7 @@ export function orbLook(finish: OrbFinish, colourway: Colourway): StylePreset {
   });
 }
 
-/** The candy family first (the default look of Shape ▸ Orb), then the glass and metal finishes. */
+/** The candy family first, then the glass and metal finishes. */
 const ORB_PRESETS = [
   ...(['blue', 'green', 'red', 'gold', 'rainbow', 'white', 'purple'] as const).map((t) => orbLook('candy', t)),
   orbLook('glass', 'green'),

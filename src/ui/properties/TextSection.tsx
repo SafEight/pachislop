@@ -5,12 +5,12 @@ import type { Distort, ImageTrace, Layer, LineAdjust, ShapeSource, TextSource, W
 import { isTitleLayer, type TitleLayer } from '../../model/parts';
 import { msg, type Translate } from '../../store/msg';
 import { swapImageAsset } from '../../store/imageOps';
-import { refKey } from '../../store/paths';
-import { useEditor, type PropRef } from '../../store/store';
-import { CheckRow, NumberField, NumRow, RefNum, Row, Section, Seg, SelectRow, type Option } from '../controls';
+import { getRef, refKey, refList } from '../../store/paths';
+import { useEditor, type PropRef, type Refs } from '../../store/store';
+import { Findable, NumberField, NumRow, RefCheck, RefChoice, RefNum, RefSelect, Row, Section, type Option } from '../controls';
 import { FontBrowser } from '../FontBrowser';
 import { useT } from '../i18n';
-import { oneShot, pickFile, SHAPES, useGesture } from '../util';
+import { oneShot, pickFile, SHAPES, useGesture, useRefValue } from '../util';
 import { SHAPE_FIELDS } from '../viewport/shapeHandles';
 import { tOpts } from './style/shared';
 
@@ -29,9 +29,38 @@ function typographyTitle(t: Translate, src: TextSource): string {
   return on.length ? `${t('Typography')} · ${on.join(', ')}` : t('Typography');
 }
 
+/**
+ * The font of the text layers whose `source.fontId` is at `refp`, read from the store (“—” while
+ * they differ; a pick sets it on all). Over one layer, hovering a font previews it there.
+ */
+export function FontField(props: { refp: Refs }) {
+  const { refp } = props;
+  const t = useT();
+  const { value, mixed } = useRefValue(refp);
+  const { setAt, setPreviewOverride } = useEditor.getState();
+  const one = refList(refp).length === 1 ? refList(refp)[0] : null;
+  const preview = (id: string | null) => {
+    const layer = one && useEditor.getState().project.layers.find((l) => l.id === one.layerId);
+    if (!layer || !isTitleLayer(layer) || layer.source.kind !== 'text') return;
+    setPreviewOverride(id ? ({ ...layer, source: { ...layer.source, fontId: id } } as Layer) : null);
+  };
+  return (
+    <Findable type={FontField} props={props}>
+      <Row label={t('Font')} fid={refKey(refp)}>
+        <FontBrowser value={typeof value === 'string' ? value : ''} onChange={(id) => setAt(refp, id)} onHover={one ? preview : undefined} />
+        {mixed && (
+          <span className="muted" title={t('The layers use different fonts; picking one sets it on all of them')}>
+            —
+          </span>
+        )}
+      </Row>
+    </Findable>
+  );
+}
+
 function TextSourceEditor({ layer, src }: { layer: SourceLayer; src: TextSource }) {
   const t = useT();
-  const { setAt, setText, setPreviewOverride } = useEditor.getState();
+  const { setAt, setText } = useEditor.getState();
   const g = useGesture(`text:${layer.id}`);
   const r = (k: keyof TextSource) => ({ layerId: layer.id, path: ['source', k] });
   return (
@@ -48,45 +77,37 @@ function TextSourceEditor({ layer, src }: { layer: SourceLayer; src: TextSource 
         }}
         onKeyDown={(e) => e.stopPropagation()}
       />
-      <Row label={t('Font')}>
-        <FontBrowser
-          value={src.fontId}
-          onChange={(id) => setAt(r('fontId'), id)}
-          onHover={(id) => setPreviewOverride(id ? ({ ...layer, source: { ...src, fontId: id } } as Layer) : null)}
-        />
-      </Row>
+      <FontField refp={r('fontId')} />
       <RefNum label={t('Size')} refp={r('size')} min={8} max={800} step={1} unit="px" title={t('Em size in comp px — the whole style scales with it')} />
       <RefNum label={t('Line height')} refp={r('lineHeight')} min={0.5} max={3} step={0.01} unit="×" />
       <RefNum label={t('Tracking')} refp={r('tracking')} min={-300} max={1000} step={1} unit="‰" title={t('Thousandths of an em between characters')} />
-      <Row label={t('Direction')}>
-        <Seg
-          value={src.vertical ? 'v' : 'h'}
-          options={[
-            { value: 'h', label: t('横 Horizontal') },
-            { value: 'v', label: t('縦 Vertical') },
-          ]}
-          onChange={(v) => setAt(r('vertical'), v === 'v')}
-        />
-      </Row>
-      <Row label={t('Align')}>
-        <Seg
-          value={src.align}
-          options={
-            src.vertical
-              ? [
-                  { value: 'start', label: '⤒', title: t('Top') },
-                  { value: 'center', label: '↕', title: t('Middle') },
-                  { value: 'end', label: '⤓', title: t('Bottom') },
-                ]
-              : [
-                  { value: 'start', label: '⇤', title: t('Left') },
-                  { value: 'center', label: '↔', title: t('Centre') },
-                  { value: 'end', label: '⇥', title: t('Right') },
-                ]
-          }
-          onChange={(v) => setAt(r('align'), v)}
-        />
-      </Row>
+      <RefChoice
+        label={t('Direction')}
+        refp={r('vertical')}
+        options={[
+          { value: 'h', label: t('横 Horizontal') },
+          { value: 'v', label: t('縦 Vertical') },
+        ]}
+        read={(v) => (v ? 'v' : 'h')}
+        pick={(v) => setAt(r('vertical'), v === 'v')}
+      />
+      <RefChoice
+        label={t('Align')}
+        refp={r('align')}
+        options={
+          src.vertical
+            ? [
+                { value: 'start', label: '⤒', title: t('Top') },
+                { value: 'center', label: '↕', title: t('Middle') },
+                { value: 'end', label: '⤓', title: t('Bottom') },
+              ]
+            : [
+                { value: 'start', label: '⇤', title: t('Left') },
+                { value: 'center', label: '↔', title: t('Centre') },
+                { value: 'end', label: '⇥', title: t('Right') },
+              ]
+        }
+      />
       <Section id="text-typography" defaultOpen={false} title={typographyTitle(t, src)}>
         <RefNum label={t('Italic')} refp={r('shear')} min={-30} max={30} step={0.5} unit="deg" title={t('Faux italic shear; 10–15° is the usual pachislot lean')} />
         <RefNum
@@ -114,7 +135,7 @@ function TextSourceEditor({ layer, src }: { layer: SourceLayer; src: TextSource 
           title={t("Proportional spacing for kana, CJK punctuation and symbols: 0 = full-width, 100% = fully proportional (the font's palt / vpal when present)")}
         />
         {src.vertical && (
-          <CheckRow label="縦中横" value={src.tateChuYoko} onChange={(v) => setAt(r('tateChuYoko'), v, undefined, '縦中横')} title={t('Tate-chu-yoko: runs of 1–3 half-width characters (×3, !!, 50) set upright across the column')} />
+          <RefCheck label="縦中横" refp={r('tateChuYoko')} pick={(v) => setAt(r('tateChuYoko'), v, undefined, '縦中横')} title={t('Tate-chu-yoko: runs of 1–3 half-width characters (×3, !!, 50) set upright across the column')} />
         )}
       </Section>
       <LinesEditor layer={layer} src={src} />
@@ -126,6 +147,60 @@ function TextSourceEditor({ layer, src }: { layer: SourceLayer; src: TextSource 
 
 const NO_LINE: LineAdjust = { scale: 1, dx: 0, dy: 0 };
 
+/** The per-line values: labels and titles are i18n keys, `undo` names the edit, `floor` is the smallest value kept. */
+const LINE_FIELDS = {
+  scale: { label: 'Scale', undo: 'Scale', min: 0.2, max: 3, step: 0.01, display: 100, unit: '%', def: 1, floor: 0.05, title: "Size of this line's glyphs; the spacing follows" },
+  hScale: { label: 'Width 長体', undo: 'Width', min: 0.3, max: 2, step: 0.01, display: 100, unit: '%', def: 1, floor: 0.05, title: "Horizontal glyph scale of this line on top of the text's (< 100% = 長体)" },
+  vScale: { label: 'Height 平体', undo: 'Height', min: 0.3, max: 2, step: 0.01, display: 100, unit: '%', def: 1, floor: 0.05, title: "Vertical glyph scale of this line on top of the text's (< 100% = 平体)" },
+  dx: { label: 'Offset X', undo: 'Offset X', min: -100, max: 100, step: 0.5, display: 1, unit: '%', def: 0, floor: undefined, title: '% of font size' },
+  dy: { label: 'Offset Y', undo: 'Offset Y', min: -100, max: 100, step: 0.5, display: 1, unit: '%', def: 0, floor: undefined, title: '% of font size, + = up' },
+} as const;
+const LINE_KEYS = Object.keys(LINE_FIELDS) as (keyof typeof LINE_FIELDS)[];
+
+/**
+ * One per-line value of line (column) `line` of text layer `layerId`, read from the store; an
+ * adjustment back at the defaults is dropped. `named`: the label says which line (the search
+ * results, away from the line picker).
+ */
+function LineField(props: { layerId: string; line: number; field: keyof typeof LINE_FIELDS; named?: boolean }) {
+  const { layerId, line, field, named } = props;
+  const t = useT();
+  const setAt = useEditor((s) => s.setAt);
+  const src = useEditor((s) => {
+    const l = s.project.layers.find((x) => x.id === layerId);
+    return l && isTitleLayer(l) && l.source.kind === 'text' ? l.source : null;
+  });
+  if (!src) return null;
+  const spec = LINE_FIELDS[field];
+  const adj = src.lines[line] ?? NO_LINE;
+  const col = src.vertical;
+  const set = (v: number, c: string) => {
+    const a = { ...adj, [field]: spec.floor === undefined ? v : Math.max(spec.floor, v) };
+    const next = { ...src.lines };
+    if (a.scale === 1 && a.dx === 0 && a.dy === 0 && (a.hScale ?? 1) === 1 && (a.vScale ?? 1) === 1) delete next[line];
+    else next[line] = a;
+    setAt({ layerId, path: ['source', 'lines'] }, next, c, msg(col ? '{edit} (column {n})' : '{edit} (line {n})', { edit: msg(spec.undo), n: line + 1 }));
+  };
+  const label = named ? t(col ? '{edit} (column {n})' : '{edit} (line {n})', { edit: t(spec.label), n: line + 1 }) : t(spec.label);
+  return (
+    <Findable type={LineField} props={named ? props : { ...props, named: true }}>
+      <NumRow
+        label={label}
+        id={`${layerId}:line:${line}:${field}`}
+        value={adj[field] ?? spec.def}
+        min={spec.min}
+        max={spec.max}
+        step={spec.step}
+        display={spec.display}
+        unit={spec.unit}
+        defaultValue={spec.def}
+        onChange={set}
+        title={t(spec.title)}
+      />
+    </Findable>
+  );
+}
+
 /** Per-line size and offset (a small 超 over a big 激アツ); columns when the text is vertical. */
 function LinesEditor({ layer, src }: { layer: SourceLayer; src: TextSource }) {
   const t = useT();
@@ -134,16 +209,8 @@ function LinesEditor({ layer, src }: { layer: SourceLayer; src: TextSource }) {
   const lines = src.text.split('\n');
   if (lines.length < 2) return null;
   const li = Math.min(picked, lines.length - 1);
-  const adj = src.lines[li] ?? NO_LINE;
   const col = src.vertical;
   const ref = { layerId: layer.id, path: ['source', 'lines'] };
-  const set = (patch: Partial<LineAdjust>, c: string, label: string) => {
-    const a = { ...adj, ...patch };
-    const next = { ...src.lines };
-    if (a.scale === 1 && a.dx === 0 && a.dy === 0 && (a.hScale ?? 1) === 1 && (a.vScale ?? 1) === 1) delete next[li];
-    else next[li] = a;
-    setAt(ref, next, c, msg(col ? '{edit} (column {n})' : '{edit} (line {n})', { edit: msg(label), n: li + 1 }));
-  };
   const id = `${layer.id}:line:${li}`;
   const adjusted = Object.keys(src.lines).length;
   return (
@@ -174,11 +241,9 @@ function LinesEditor({ layer, src }: { layer: SourceLayer; src: TextSource }) {
           </button>
         ))}
       </div>
-      <NumRow label={t('Scale')} id={`${id}:s`} value={adj.scale} min={0.2} max={3} step={0.01} display={100} unit="%" defaultValue={1} onChange={(v, c) => set({ scale: Math.max(0.05, v) }, c, 'Scale')} title={t("Size of this line's glyphs; the spacing follows")} />
-      <NumRow label={t('Width 長体')} id={`${id}:hs`} value={adj.hScale ?? 1} min={0.3} max={2} step={0.01} display={100} unit="%" defaultValue={1} onChange={(v, c) => set({ hScale: Math.max(0.05, v) }, c, 'Width')} title={t("Horizontal glyph scale of this line on top of the text's (< 100% = 長体)")} />
-      <NumRow label={t('Height 平体')} id={`${id}:vs`} value={adj.vScale ?? 1} min={0.3} max={2} step={0.01} display={100} unit="%" defaultValue={1} onChange={(v, c) => set({ vScale: Math.max(0.05, v) }, c, 'Height')} title={t("Vertical glyph scale of this line on top of the text's (< 100% = 平体)")} />
-      <NumRow label={t('Offset X')} id={`${id}:dx`} value={adj.dx} min={-100} max={100} step={0.5} unit="%" defaultValue={0} onChange={(v, c) => set({ dx: v }, c, 'Offset X')} title={t('% of font size')} />
-      <NumRow label={t('Offset Y')} id={`${id}:dy`} value={adj.dy} min={-100} max={100} step={0.5} unit="%" defaultValue={0} onChange={(v, c) => set({ dy: v }, c, 'Offset Y')} title={t('% of font size, + = up')} />
+      {LINE_KEYS.map((field) => (
+        <LineField key={field} layerId={layer.id} line={li} field={field} />
+      ))}
     </Section>
   );
 }
@@ -222,12 +287,15 @@ function WarpEditor({ layer }: { layer: SourceLayer }) {
         )
       }
     >
-      <SelectRow
+      <RefSelect
         label={t('Style')}
-        value={w.style}
+        refp={r('style')}
         options={tOpts(t, WARP_STYLES, 'warp')}
         // Like Photoshop, picking a style from None starts at Bend +50%.
-        onChange={(style) => setAt({ layerId: layer.id, path: ['warp'] }, { ...w, style, bend: w.style === 'none' && w.bend === 0 ? 50 : w.bend }, undefined, 'Warp style')}
+        pick={(style) => {
+          const was = getRef(useEditor.getState().project, { layerId: layer.id, path: ['warp'] }) as SourceLayer['warp'];
+          setAt({ layerId: layer.id, path: ['warp'] }, { ...was, style, bend: was.style === 'none' && was.bend === 0 ? 50 : was.bend }, undefined, 'Warp style');
+        }}
       />
       {w.style !== 'none' && <RefNum label={t('Bend')} refp={r('bend')} min={-100} max={100} step={1} unit="%" clamp />}
       <RefNum label={t('Horizontal')} refp={r('horizontal')} min={-100} max={100} step={1} unit="%" clamp title={t('Horizontal distortion (パース taper)')} />
@@ -268,13 +336,13 @@ function DistortEditor({ layer }: { layer: SourceLayer }) {
         )
       }
     >
-      <Row label={t('Mode')} title={t('Free distort of the outline over its frame')}>
-        <Seg
-          value={d.mode}
-          options={tOpts(t, DISTORT_MODES)}
-          onChange={(mode) => setAt({ layerId: layer.id, path: ['distort', 'mode'] }, mode, undefined, msg('Distort {mode}', { mode: { en: DISTORT_MODES.find((o) => o.value === mode)?.label ?? mode, lower: true } }))}
-        />
-      </Row>
+      <RefChoice
+        label={t('Mode')}
+        title={t('Free distort of the outline over its frame')}
+        refp={{ layerId: layer.id, path: ['distort', 'mode'] }}
+        options={tOpts(t, DISTORT_MODES)}
+        pick={(mode) => setAt({ layerId: layer.id, path: ['distort', 'mode'] }, mode, undefined, msg('Distort {mode}', { mode: { en: DISTORT_MODES.find((o) => o.value === mode)?.label ?? mode, lower: true } }))}
+      />
       <Row label="" title={t('Show the distort handles on the canvas (Distort tool, D)')}>
         <button className={`small ${tool ? 'active' : ''}`} aria-pressed={tool} onClick={() => setTool(tool ? 'move' : 'distort')}>
           ⌗ {t('Edit on canvas')}
@@ -299,6 +367,24 @@ function DistortEditor({ layer }: { layer: SourceLayer }) {
   );
 }
 
+/** The random seed of a shape at `refp` (spikes, burst), read from the store, with Reroll. */
+function SeedRow(props: { refp: PropRef }) {
+  const { refp } = props;
+  const t = useT();
+  const setAt = useEditor((s) => s.setAt);
+  const { value } = useRefValue(refp);
+  return (
+    <Findable type={SeedRow} props={props}>
+      <Row label={t('Seed')}>
+        <NumberField id={refKey(refp)} value={typeof value === 'number' ? value : 1} min={1} max={999} integer slider={false} onChange={(v, c) => setAt(refp, v, c, 'Shape seed')} />
+        <button className="small" title={t('Another random spike pattern')} onClick={() => setAt(refp, 1 + Math.floor(Math.random() * 999), oneShot('seed'), 'Reroll shape')}>
+          🎲 {t('Reroll')}
+        </button>
+      </Row>
+    </Findable>
+  );
+}
+
 /**
  * The parametric fields of the ShapeSource stored at `base`: kind, height, aspect and the kind's
  * own fields. Shared by shape layers (their source) and shape masks (MaskView).
@@ -310,12 +396,12 @@ export function ShapeFields({ src, base }: { src: ShapeSource; base: PropRef }) 
   const f = SHAPE_FIELDS[src.shape];
   return (
     <>
-      <SelectRow
+      <RefSelect
         label={t('Kind')}
-        value={src.shape}
+        refp={r('shape')}
         options={SHAPES.map((s) => ({ value: s.kind, label: t(s.label), title: t(s.hint) }))}
         // Each kind has its own sensible starting parameters; the height carries over.
-        onChange={(kind) => setAt(base, shapeSource(kind, src.size), undefined, 'Shape kind')}
+        pick={(kind) => setAt(base, shapeSource(kind, (getRef(useEditor.getState().project, base) as ShapeSource).size), undefined, 'Shape kind')}
       />
       <RefNum label={t('Height')} refp={r('size')} min={8} max={1200} step={1} unit="px" title={t('Shape height in comp px — the whole style scales with it')} />
       <RefNum label={t('Aspect')} refp={r('aspect')} min={0.2} max={8} step={0.01} unit="x" defaultValue={src.shape === 'orb' ? 1 : undefined} title={t('Width ÷ height')} />
@@ -352,24 +438,7 @@ export function ShapeFields({ src, base }: { src: ShapeSource; base: PropRef }) 
       {f.jitter && (
         <>
           <RefNum label={t('Jitter')} refp={r('jitter')} min={0} max={1} display={100} unit="%" clamp title={t('Random spike variation')} />
-          <Row label={t('Seed')}>
-            <NumberField
-              id={`${refKey(base)}:seed`}
-              value={src.seed}
-              min={1}
-              max={999}
-              integer
-              slider={false}
-              onChange={(v, c) => setAt(r('seed'), v, c, 'Shape seed')}
-            />
-            <button
-              className="small"
-              title={t('Another random spike pattern')}
-              onClick={() => setAt(r('seed'), 1 + Math.floor(Math.random() * 999), oneShot('seed'), 'Reroll shape')}
-            >
-              🎲 {t('Reroll')}
-            </button>
-          </Row>
+          <SeedRow refp={r('seed')} />
         </>
       )}
       {f.tail === 'bubble' && (

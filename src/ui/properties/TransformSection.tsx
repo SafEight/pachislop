@@ -6,7 +6,7 @@ import { isTitleLayer, type TitleLayer } from '../../model/parts';
 import { useEditor, type AlignMode, type Refs } from '../../store/store';
 import { flipTargets } from '../../store/transformOps';
 import { unionCompBounds } from '../../store/tree';
-import { NumRow, RefNum, Section } from '../controls';
+import { Findable, NumRow, RefNum, Section } from '../controls';
 import { useT } from '../i18n';
 import { oneShot } from '../util';
 import { InfoTip } from './InfoTip';
@@ -196,24 +196,6 @@ export function TransformSection({ layers }: { layers: readonly (TitleLayer | Ge
  */
 export function GroupTransformSection({ layer }: { layer: GroupLayer }) {
   const t = useT();
-  const layers = useEditor((s) => s.project.layers);
-  const { nudgeLayers, transformLayers } = useEditor.getState();
-  const box = useMemo(() => unionCompBounds(layers, [layer.id]), [layers, layer.id]);
-  /** Rotation / Scale applied from here, valid while the layers are still the ones they produced. */
-  const [acc, setAcc] = useState<{ rot: number; scale: number; after: readonly Layer[] | null }>({ rot: 0, scale: 1, after: null });
-  /** The gesture in progress: its coalesce key, the layers at its start and the values shown then. */
-  const gesture = useRef<{ key: string; base: readonly Layer[]; rot: number; scale: number } | null>(null);
-  const fresh = acc.after === layers;
-  const rot = fresh ? acc.rot : 0;
-  const scale = fresh ? acc.scale : 1;
-  const done = (next: { rot: number; scale: number }) => setAcc({ ...next, after: useEditor.getState().project.layers });
-  const begin = (key: string) => {
-    if (gesture.current?.key !== key) gesture.current = { key, base: useEditor.getState().project.layers, rot, scale };
-    return gesture.current;
-  };
-  const cx = box ? Math.round(((box.x0 + box.x1) / 2) * 100) / 100 : 0;
-  const cy = box ? Math.round(((box.y0 + box.y1) / 2) * 100) / 100 : 0;
-  const id = `group-xf:${layer.id}`;
   return (
     <Section
       id="group-transform"
@@ -225,79 +207,126 @@ export function GroupTransformSection({ layer }: { layer: GroupLayer }) {
       }
     >
       <AlignBar />
-      {box ? (
-        <>
-          <div className="xf-grid">
-            <NumRow
-              label="X"
-              id={`${id}:x`}
-              value={cx}
-              min={-1500}
-              max={1500}
-              step={1}
-              unit="px"
-              slider={false}
-              title={t('Centre of the members, from comp centre, + = right')}
-              onChange={(v, c) => {
-                nudgeLayers([layer.id], v - cx, 0, c);
-                done({ rot, scale });
-              }}
-            />
-            <NumRow
-              label="Y"
-              id={`${id}:y`}
-              value={cy}
-              min={-1000}
-              max={1000}
-              step={1}
-              unit="px"
-              slider={false}
-              title={t('Centre of the members, from comp centre, + = up')}
-              onChange={(v, c) => {
-                nudgeLayers([layer.id], 0, v - cy, c);
-                done({ rot, scale });
-              }}
-            />
-          </div>
-          <div className="xf-grid">
-            <NumRow
-              label={t('Rotation')}
-              id={`${id}:r`}
-              value={rot}
-              min={-180}
-              max={180}
-              step={0.5}
-              unit="deg"
-              slider={false}
-              title={t('Clockwise on screen')}
-              onChange={(v, c) => {
-                const g = begin(c);
-                transformLayers([layer.id], { rotate: v - g.rot }, c, 'Rotate group', g.base);
-                done({ rot: v, scale });
-              }}
-            />
-            <NumRow
-              label={t('Scale')}
-              id={`${id}:s`}
-              value={scale}
-              min={0.05}
-              max={4}
-              step={0.01}
-              display={100}
-              unit="%"
-              slider={false}
-              onChange={(v, c) => {
-                const g = begin(c);
-                const s = Math.max(0.05, v);
-                transformLayers([layer.id], { scale: s / g.scale }, c, 'Scale group', g.base);
-                done({ rot, scale: s });
-              }}
-            />
-          </div>
-        </>
-      ) : (
-        <div className="hint-line">{t('No member has a box to transform.')}</div>
-      )}
+      <GroupTransformRows groupId={layer.id} />
     </Section>
+  );
+}
+
+type GroupField = 'x' | 'y' | 'rotation' | 'scale';
+
+/**
+ * The X / Y / Rotation / Scale rows of group `groupId` (or just `only`, as the search results show
+ * one), read from the store. Rotation and Scale count from where these rows last left the members.
+ */
+function GroupTransformRows({ groupId, only }: { groupId: string; only?: GroupField }) {
+  const t = useT();
+  const layers = useEditor((s) => s.project.layers);
+  const { nudgeLayers, transformLayers } = useEditor.getState();
+  const box = useMemo(() => unionCompBounds(layers, [groupId]), [layers, groupId]);
+  /** Rotation / Scale applied from here, valid while the layers are still the ones they produced. */
+  const [acc, setAcc] = useState<{ rot: number; scale: number; after: readonly Layer[] | null }>({ rot: 0, scale: 1, after: null });
+  /** The gesture in progress: its coalesce key, the layers at its start and the values shown then. */
+  const gesture = useRef<{ key: string; base: readonly Layer[]; rot: number; scale: number } | null>(null);
+  if (!box) return only ? null : <div className="hint-line">{t('No member has a box to transform.')}</div>;
+  const fresh = acc.after === layers;
+  const rot = fresh ? acc.rot : 0;
+  const scale = fresh ? acc.scale : 1;
+  const done = (next: { rot: number; scale: number }) => setAcc({ ...next, after: useEditor.getState().project.layers });
+  const begin = (key: string) => {
+    if (gesture.current?.key !== key) gesture.current = { key, base: useEditor.getState().project.layers, rot, scale };
+    return gesture.current;
+  };
+  const cx = Math.round(((box.x0 + box.x1) / 2) * 100) / 100;
+  const cy = Math.round(((box.y0 + box.y1) / 2) * 100) / 100;
+  const id = `group-xf:${groupId}`;
+  const row = (field: GroupField) => {
+    if (only && only !== field) return null;
+    const control =
+      field === 'x' ? (
+        <NumRow
+          label="X"
+          id={`${id}:x`}
+          value={cx}
+          min={-1500}
+          max={1500}
+          step={1}
+          unit="px"
+          slider={false}
+          title={t('Centre of the members, from comp centre, + = right')}
+          onChange={(v, c) => {
+            nudgeLayers([groupId], v - cx, 0, c);
+            done({ rot, scale });
+          }}
+        />
+      ) : field === 'y' ? (
+        <NumRow
+          label="Y"
+          id={`${id}:y`}
+          value={cy}
+          min={-1000}
+          max={1000}
+          step={1}
+          unit="px"
+          slider={false}
+          title={t('Centre of the members, from comp centre, + = up')}
+          onChange={(v, c) => {
+            nudgeLayers([groupId], 0, v - cy, c);
+            done({ rot, scale });
+          }}
+        />
+      ) : field === 'rotation' ? (
+        <NumRow
+          label={t('Rotation')}
+          id={`${id}:r`}
+          value={rot}
+          min={-180}
+          max={180}
+          step={0.5}
+          unit="deg"
+          slider={false}
+          title={t('Clockwise on screen')}
+          onChange={(v, c) => {
+            const g = begin(c);
+            transformLayers([groupId], { rotate: v - g.rot }, c, 'Rotate group', g.base);
+            done({ rot: v, scale });
+          }}
+        />
+      ) : (
+        <NumRow
+          label={t('Scale')}
+          id={`${id}:s`}
+          value={scale}
+          min={0.05}
+          max={4}
+          step={0.01}
+          display={100}
+          unit="%"
+          slider={false}
+          onChange={(v, c) => {
+            const g = begin(c);
+            const s = Math.max(0.05, v);
+            transformLayers([groupId], { scale: s / g.scale }, c, 'Scale group', g.base);
+            done({ rot, scale: s });
+          }}
+        />
+      );
+    return (
+      <Findable type={GroupTransformRows} props={{ groupId, only: field }}>
+        {control}
+      </Findable>
+    );
+  };
+  if (only) return row(only);
+  return (
+    <>
+      <div className="xf-grid">
+        {row('x')}
+        {row('y')}
+      </div>
+      <div className="xf-grid">
+        {row('rotation')}
+        {row('scale')}
+      </div>
+    </>
   );
 }

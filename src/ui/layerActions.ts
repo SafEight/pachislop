@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { addAsset, getAsset, listAssets, removeAsset } from '../assets/registry';
 import { decodeImage, getBitmap } from '../engine/layer2d/images';
 import { cutParts, encodePng, type ImagePart, type IslandMap } from '../io/imageSplit';
-import { createGroupLayer, createTitle2DLayer, createTitle3DLayer, imageSource, material3D, shapeSource } from '../model/defaults';
+import { createGroupLayer, createTitle2DLayer, createTitle3DLayer, imageSource, material3D, shapeSource, solidFill } from '../model/defaults';
 import { isTitleLayer, type TitleLayer } from '../model/parts';
 import type { Comp, ShapeKind } from '../model/types';
 import { numberedName } from '../store/arrange';
@@ -22,17 +22,17 @@ import type { Pt } from './viewport/geometry';
 // parent (group), unless a Layers-panel drop names the slot.
 
 /**
- * Add a 2D (layer style) or 3D (extruded) text layer and open it for typing on the canvas. It
- * takes the Text tool's defaults (view.textDefaults) and is placed at `at` (comp px, +y up)
- * when given, else at the comp centre.
+ * Add a 2D (layer style) or 3D (extruded) text layer in the plain look and open it for typing on
+ * the canvas. It takes the Text tool's defaults (view.textDefaults: font, size, tracking and face
+ * colour) and is placed at `at` (comp px, +y up) when given, else at the comp centre.
  */
 export function addTextLayer(dim: '2d' | '3d', at?: { x: number; y: number }) {
   const st = useEditor.getState();
   const { fontId, size, tracking, fill } = st.view.textDefaults;
   const l = dim === '2d' ? createTitle2DLayer('BIG BONUS') : createTitle3DLayer('激アツ');
   if (l.source.kind === 'text') l.source = { ...l.source, fontId, size, tracking };
-  if (fill && l.kind === 'title2d') l.style.face = { ...l.style.face, fill: { ...l.style.face.fill, kind: 'solid', color: fill } };
-  if (fill && l.kind === 'title3d') l.style3d.face = { ...l.style3d.face, color: fill, gradient: undefined };
+  if (fill && l.kind === 'title2d') l.style.face.fill = solidFill(fill);
+  if (fill && l.kind === 'title3d') l.style3d.face.color = fill;
   if (at) l.transform = { ...l.transform, x: round2(at.x), y: round2(at.y) };
   st.addLayer(l);
   st.beginTextEdit(l.id);
@@ -49,8 +49,7 @@ export function addGroupLayer() {
  * the Shape tool's drag) it fills that box: height = box height, aspect = its width / height,
  * centred in it. Without, it starts at its default size at the comp centre, and with a text layer
  * selected it becomes a backing shape: inserted just below the text and fitted around it (a plate
- * / burst / bubble behind a title). A 3D orb starts as a 保留 candy orb (titleLayerFor), lit by
- * its own softbox lighting (the studio strips streak arcs across a sphere).
+ * / burst / bubble behind a title). It starts in the plain look (titleLayerFor).
  */
 export function addShapeLayer(kind: ShapeKind, dim: '2d' | '3d', box?: Bounds) {
   const label = SHAPES.find((s) => s.kind === kind)?.label ?? kind;

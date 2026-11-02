@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { noDistort } from '../model/defaults';
+import { noDistort, plainMaterial3D, plainTitleStyle2D } from '../model/defaults';
 import { isTitleLayer, type TitleLayer } from '../model/parts';
 import type { Distort, Layer, TextSource } from '../model/types';
 import { maskLabel } from '../store/labels';
@@ -110,6 +110,9 @@ function selectedText(s: Parameters<typeof selectedLayer>[0]): (TitleLayer & { s
   return isTitleLayer(l) && l.source.kind === 'text' ? (l as TitleLayer & { source: TextSource }) : null;
 }
 
+/** Face colour of the plain look new text starts in, by kind (TextDefaults.fill null). */
+const PLAIN_FACE: Record<'2d' | '3d', string> = { '2d': plainTitleStyle2D().face.fill.color, '3d': plainMaterial3D().color };
+
 /** Face colour of a title layer when it is one flat colour, else null (gradient / image face). */
 function solidFace(l: TitleLayer): string | null {
   if (l.kind === 'title2d') return l.style.face.fill.kind === 'solid' ? l.style.face.fill.color : null;
@@ -137,12 +140,13 @@ function setFaceColor(l: TitleLayer, c: string, coalesce: string) {
 function TextOptions() {
   const layer = useEditor(selectedText);
   const defaults = useEditor((s) => s.view.textDefaults);
+  const textKind = useEditor((s) => s.view.textKind);
   const { setAt, setView, setPreviewOverride } = useEditor.getState();
   const t = useT();
   const src = layer?.source;
   const setDefaults = (patch: Partial<typeof defaults>) => setView({ textDefaults: { ...useEditor.getState().view.textDefaults, ...patch } });
   const ref = (k: keyof TextSource) => ({ layerId: layer!.id, path: ['source', k] });
-  const face = layer ? solidFace(layer) : defaults.fill;
+  const face = layer ? solidFace(layer) : (defaults.fill ?? PLAIN_FACE[textKind]);
   const target = layer ? t('Editing “{name}”', { name: layer.name }) : t('Defaults for the next new text');
   return (
     <>
@@ -191,12 +195,7 @@ function TextOptions() {
           value={face ?? '#ffffff'}
           onChange={(c, k) => (layer ? setFaceColor(layer, c, k) : setDefaults({ fill: c }))}
         />
-        {face === null && <span className="muted">{layer ? t('Gradient') : t('Preset look')}</span>}
-        {!layer && defaults.fill !== null && (
-          <button className="small" title={t('New text keeps the preset look (gold face)')} aria-label={t('Back to the preset look')} onClick={() => setDefaults({ fill: null })}>
-            ✕
-          </button>
-        )}
+        {face === null && <span className="muted">{t('Gradient')}</span>}
       </span>
       <span className="muted ob-note ellipsis">{target}</span>
     </>

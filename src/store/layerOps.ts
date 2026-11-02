@@ -1,10 +1,10 @@
 import { getEffect } from '../effects/registry';
 import type { ParamDef } from '../engine/contracts';
 import { createGeneratorLayer, generatorFromPreset, getGenerator, presetEffects } from '../generators/registry';
-import { addCompanion } from '../model/companions';
+import { addCompanion, addCompanionsOf, companionOwner, companionUnit, dissolveCompanionGroups, foldedUnit } from '../model/companions';
 import { ADJUSTMENT_NAMES, createAdjustmentLayer, createGroupLayer, uid } from '../model/defaults';
 import { bandKey, isTitleLayer, rimKey, type TitleLayer } from '../model/parts';
-import type { Layer, ParamValue, PartEffects, PartKey } from '../model/types';
+import type { GeneratorLayer, Layer, ParamValue, PartEffects, PartKey, Project } from '../model/types';
 import { applyPresetToProject, presetFromLayer } from '../presets/apply';
 import { tr } from '../ui/i18n';
 import { arrange, isNumberedName, numberedName, uniqueName } from './arrange';
@@ -13,7 +13,7 @@ import { commit, editLayer } from './history';
 import { msg, type Text } from './msg';
 import { layerNode, selection } from './selection';
 import type { LayerDest } from './store';
-import { childrenOf, clipBaseOf, clippedTo, isGroup, normalizeTree, rootIds, subtreeIds, withDescendants, withParent } from './tree';
+import { ancestorsOf, childrenOf, clipBaseOf, clippedTo, isGroup, normalizeTree, rootIds, subtreeIds, withDescendants, withParent } from './tree';
 
 // Layer stack actions: add, delete, duplicate, move / arrange, group / ungroup, clip, rename, copy / paste style.
 
@@ -43,8 +43,9 @@ export function cloneLayerFresh<L extends Layer>(layer: L): L {
 
 /**
  * Re-point a fresh copy's layer pickers ('layer' kind generator and effect params, layer-source
- * masks) at the copies of the layers they name (`fresh`: original id → copy id), so a duplicated
- * group's particles keep emitting from its own copied title. Mutates `copy` (a fresh clone).
+ * masks) and companion marks (`companionOf`, `companionGroupOf`) at the copies of the layers they
+ * name (`fresh`: original id → copy id), so a duplicated group's particles keep emitting from its
+ * own copied title and a copied title's glints stay its own. Mutates `copy` (a fresh clone).
  */
 function repointCopy(copy: Layer, fresh: ReadonlyMap<string, string>): void {
   const repoint = (defs: readonly ParamDef[] | undefined, params: Record<string, ParamValue>) => {
@@ -57,6 +58,8 @@ function repointCopy(copy: Layer, fresh: ReadonlyMap<string, string>): void {
   const stacks = [copy.effects, ...(isTitleLayer(copy) ? Object.values(copy.partEffects) : [])];
   for (const list of stacks) for (const fx of list ?? []) repoint(getEffect(fx.type)?.params, fx.params);
   copy.masks = copy.masks.map((m) => (m.kind === 'layer' && fresh.has(m.layerId) ? { ...m, layerId: fresh.get(m.layerId)! } : m));
+  if (copy.kind === 'generator' && copy.companionOf !== undefined && fresh.has(copy.companionOf)) copy.companionOf = fresh.get(copy.companionOf);
+  if (copy.kind === 'group' && copy.companionGroupOf !== undefined && fresh.has(copy.companionGroupOf)) copy.companionGroupOf = fresh.get(copy.companionGroupOf);
 }
 
 /**
@@ -104,7 +107,8 @@ export const what = (layers: readonly Layer[]) => (layers.length === 1 ? msg('�
 function insertNew(core: Core, layer: Layer, label: Text, at?: LayerDest, clip = false): void {
   const { project, selectedLayerId } = core.get();
   const L = project.layers;
-  const sel = L.find((l) => l.id === selectedLayerId);
+  // A layer in a folded companion group stands for that group: the new layer goes above the group, not into it.
+  const sel = selectedLayerId ? L.find((l) => l.id === foldedUnit(L, selectedLayerId)) : undefined;
   const slot = at && slotOf(L, at);
   const parent = slot ? slot.parent : (sel?.parentId ?? null);
   const under = slot ? slot.under : (sel ?? childrenOf(L, parent).at(-1) ?? null);
@@ -129,6 +133,36 @@ function carryRoots(layers: readonly Layer[], ids: readonly string[]): string[] 
   return rootIds(layers, [...roots, ...roots.flatMap((id) => clippedTo(layers, id).map((c) => c.id))]);
 }
 
+/**
+ * The roots that move, group or arrange as `ids` with their companions (stack order): a layer in a
+ * companion group of its own stands for that group (unless `keepIn`, the destination group, lies
+ * inside it: then it moves within it), and companions of theirs outside it come along.
+ */
+function companionUnits(layers: readonly Layer[], ids: readonly string[], keepIn: string | null = null): string[] {
+  const lifted = ids.map((id) => {
+    const unit = companionUnit(layers, id);
+    const within = keepIn !== null && (keepIn === unit || ancestorsOf(layers, keepIn).some((g) => g.id === unit));
+    return within ? id : unit;
+  });
+  return rootIds(layers, [...addCompanionsOf(layers, new Set(withDescendants(layers, lifted)))]);
+}
+
+/**
+ * `project` with a new generator of `type` from `presetId` (default: the first preset) added as a
+ * companion of layer `targetId` (“+ Add effect”): following it, in a group with it, above or below
+ * it as the preset's `place` says, named after the preset in the UI language. Null for an unknown
+ * type, one that can't follow, or a missing layer.
+ */
+export function withCompanion(project: Project, type: string, presetId: string | undefined, targetId: string): { project: Project; layer: GeneratorLayer; target: Layer } | null {
+  const def = getGenerator(type);
+  const made = createGeneratorLayer(type, presetId);
+  const target = project.layers.find((l) => l.id === targetId);
+  if (!def?.follow || !made || !target) return null;
+  const preset = def.presets.find((p) => p.id === presetId) ?? def.presets[0];
+  const layer: GeneratorLayer = { ...made, name: tr(preset?.label ?? def.label), generator: { ...made.generator, params: { ...made.generator.params, follow: target.id } } };
+  return { project: { ...project, layers: addCompanion(project.layers, target.id, layer, preset?.place ?? 'above') }, layer, target };
+}
+
 export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' | 'duplicateAsGhost' | 'copyStyle' | 'pasteStyle' | 'moveLayers' | 'arrangeLayers' | 'groupLayers' | 'ungroupLayers' | 'toggleClip' | 'addAdjustment' | 'addGenerator' | 'applyGeneratorPreset' | 'renameLayer' | 'patchLayer' | 'replaceLayer'> = (core) => {
   const { get, set } = core;
   return {
@@ -139,17 +173,35 @@ export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' |
     removeLayers(ids) {
       const { project } = get();
       const L = project.layers;
-      const gone = new Set(withDescendants(L, ids));
+      const asked = new Set(rootIds(L, ids));
+      // A layer's companions go with it, and so do the companion groups left holding nothing.
+      const gone = addCompanionsOf(L, new Set(withDescendants(L, [...asked])));
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const g of L)
+          if (g.kind === 'group' && !gone.has(g.id) && g.companionGroupOf !== undefined && gone.has(g.companionGroupOf) && L.some((c) => c.parentId === g.id) && L.every((c) => c.parentId !== g.id || gone.has(c.id))) {
+            gone.add(g.id);
+            grew = true;
+          }
+      }
       const roots = new Set(rootIds(L, [...gone]));
       const removed = L.filter((l) => roots.has(l.id));
       if (!removed.length) return;
-      const layers = L.filter((l) => !gone.has(l.id));
-      commit(core, { ...project, layers }, undefined, msg('Delete {what}', { what: what(removed) }));
+      // Companions deleted as effects of a layer that stays: its companion group goes once it holds only the layer.
+      const owners = [...new Set([...asked].flatMap((id) => companionOwner(L, L.find((l) => l.id === id))?.id ?? []))].filter((id) => !gone.has(id));
+      const layers = owners.reduce((out, id) => dissolveCompanionGroups(out, id), L.filter((l) => !gone.has(l.id)));
+      commit(core, { ...project, layers }, undefined, msg('Delete {what}', { what: what(L.filter((l) => asked.has(l.id))) }));
+      if (owners.length && [...asked].every((id) => companionOwner(L, L.find((l) => l.id === id)))) {
+        // As deleting an effect: its layer stays selected.
+        core.anchor = owners.at(-1)!;
+        return set(selection(core, [], core.anchor, layerNode(core.anchor)));
+      }
       // Like PS: the sibling that slid into the lowest deleted slot, else the one below it, else
-      // the parent group; at top level with nothing left, the new top layer.
+      // the parent group; at top level with nothing left, the new top layer. Companions (listed as
+      // their layer's effects) are passed over.
       const low = removed[0];
       const parent = low.parentId ?? null;
-      const sibs = childrenOf(layers, parent);
+      const sibs = childrenOf(layers, parent).filter((s) => !companionOwner(layers, s));
       const lowAt = L.indexOf(low);
       const next = sibs.find((s) => L.indexOf(s) > lowAt) ?? sibs.at(-1) ?? (parent !== null ? layers.find((l) => l.id === parent) : layers.at(-1));
       core.anchor = next?.id ?? null;
@@ -158,15 +210,23 @@ export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' |
     duplicateLayers(ids) {
       const { project, selectedLayerId } = get();
       const L = project.layers;
-      const roots = rootIds(L, ids).map((id) => L.find((l) => l.id === id)!);
-      if (!roots.length) return;
+      const asked = rootIds(L, ids);
+      if (!asked.length) return;
+      // A layer is copied with its companions: as the companion group it sits in on its own, else
+      // with them alongside; a picked companion of a copied layer goes with it.
+      const units = rootIds(L, asked.map((id) => companionUnit(L, id)));
+      const all = addCompanionsOf(L, new Set(withDescendants(L, units)));
+      const roots = units.map((id) => L.find((l) => l.id === id)!).filter((l) => !(l.kind === 'generator' && l.companionOf !== undefined && l.companionOf !== l.id && all.has(l.companionOf)));
       const taken = new Set(L.map((l) => l.name));
-      /** Copy blocks (subtree then the root, stack order) to insert after each anchor layer. */
+      /** Copy blocks (stack order) to insert after each anchor layer. */
       const after = new Map<Layer, Layer[]>();
-      const rootCopies = new Map<string, Layer>();
+      const copied = new Map<string, string>();
       for (const root of roots) {
         const fresh = new Map<string, string>();
-        const block = [...subtreeIds(L, root.id).map((id) => L.find((l) => l.id === id)!), root].map((l) => {
+        const subtree = new Set(withDescendants(L, [root.id]));
+        const own = addCompanionsOf(L, new Set(subtree));
+        const sources = L.filter((l) => own.has(l.id));
+        const block = sources.map((l) => {
           const copy = cloneLayerFresh(l);
           fresh.set(l.id, copy.id);
           // Numbered copies (“確定 2”); a text copy so named still follows its text (see setText).
@@ -175,32 +235,43 @@ export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' |
           return copy;
         });
         for (const c of block) repointCopy(c, fresh);
-        // Re-point the copied children at the copied groups; the root copy keeps the original's parent.
-        const copies = block.map((c) => (c.parentId !== undefined && fresh.has(c.parentId) ? withParent(c, fresh.get(c.parentId)) : c));
-        rootCopies.set(root.id, copies.at(-1)!);
+        // Re-point the copied children at the copied groups; the root copy and the companions brought along sit in the original's parent.
+        const copies = block.map((c, i) => (c.parentId !== undefined && fresh.has(c.parentId) ? withParent(c, fresh.get(c.parentId)) : subtree.has(sources[i].id) ? c : withParent(c, root.parentId)));
+        for (const [from, to] of fresh) copied.set(from, to);
         const at = copyAnchor(L, root);
         after.set(at, [...(after.get(at) ?? []), ...copies]);
       }
       const layers = L.flatMap((l) => [l, ...(after.get(l) ?? [])]);
-      commit(core, { ...project, layers }, undefined, msg('Duplicate {what}', { what: what(roots) }));
-      const tops = [...rootCopies.values()];
-      const primary = rootCopies.get(selectedLayerId ?? '') ?? tops.at(-1)!;
-      core.anchor = primary.id;
-      set(selection(core, tops.map((c) => c.id), primary.id, layerNode(primary.id)));
+      commit(core, { ...project, layers }, undefined, msg('Duplicate {what}', { what: what(L.filter((l) => asked.includes(l.id))) }));
+      const tops = asked.flatMap((id) => copied.get(id) ?? []);
+      const primary = copied.get(selectedLayerId ?? '') ?? tops.at(-1)!;
+      core.anchor = primary;
+      set(selection(core, tops, primary, layerNode(primary)));
     },
     duplicateAsGhost(id) {
       const { project } = get();
-      const src = project.layers.find((l) => l.id === id);
+      const L = project.layers;
+      const src = L.find((l) => l.id === id);
       if (!isTitleLayer(src)) return;
-      const ghost = cloneLayerFresh(src);
-      ghost.name = `${src.name} ghost`;
-      ghost.guide = true;
-      ghost.locked = true;
-      ghost.solo = false;
-      ghost.transform = { ...ghost.transform, opacity: 0.3 };
+      // A title in a folded companion group is ghosted with the group, its companions included,
+      // so the ghost looks like the title: the group copy carries the guide flags and opacity.
+      const unit = L.find((l) => l.id === foldedUnit(L, id))!;
+      const inUnit = new Set(withDescendants(L, [unit.id]));
+      const fresh = new Map<string, string>();
+      const copies = L.filter((l) => inUnit.has(l.id)).map((l) => {
+        const copy = cloneLayerFresh(l);
+        fresh.set(l.id, copy.id);
+        return copy;
+      });
+      for (const c of copies) repointCopy(c, fresh);
+      const block = copies.map((c): Layer => {
+        const placed = c.parentId !== undefined && fresh.has(c.parentId) ? withParent(c, fresh.get(c.parentId)) : c;
+        if (c.id === fresh.get(unit.id)) return { ...placed, name: `${src.name} ghost`, guide: true, locked: true, solo: false, transform: { ...placed.transform, opacity: 0.3 } } as Layer;
+        return c.id === fresh.get(src.id) ? ({ ...placed, name: `${src.name} ghost` } as Layer) : placed;
+      });
       // Same parent and clip state as the source (a clone keeps both), just above it.
-      const i = project.layers.indexOf(copyAnchor(project.layers, src));
-      commit(core, { ...project, layers: [...project.layers.slice(0, i + 1), ghost, ...project.layers.slice(i + 1)] }, undefined, msg('Ghost guide of “{name}”', { name: src.name }));
+      const i = L.indexOf(copyAnchor(L, unit));
+      commit(core, { ...project, layers: [...L.slice(0, i + 1), ...block, ...L.slice(i + 1)] }, undefined, msg('Ghost guide of “{name}”', { name: src.name }));
     },
     copyStyle(id) {
       const { project, notify } = get();
@@ -231,11 +302,13 @@ export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' |
     moveLayers(ids, to) {
       const { project, notify } = get();
       const L = project.layers;
-      const roots = carryRoots(L, ids);
+      const destId = 'into' in to ? to.into : 'aboveId' in to ? to.aboveId : to.belowId;
+      // A layer moves with its companions, unless it moves within its own companion group.
+      const destParent = 'into' in to ? to.into : (L.find((l) => l.id === destId)?.parentId ?? null);
+      const roots = carryRoots(L, companionUnits(L, ids, destParent));
       if (!roots.length) return;
       const moving = new Set(withDescendants(L, roots));
       const rest = L.filter((l) => !moving.has(l.id));
-      const destId = 'into' in to ? to.into : 'aboveId' in to ? to.aboveId : to.belowId;
       // Dropping next to a moved layer itself changes nothing; into or next to one inside a moved group would nest it in itself.
       if (destId !== null && moving.has(destId)) return !('into' in to) && roots.includes(destId) ? undefined : notify('A group can’t be moved into itself', 'error');
       const slot = slotOf(rest, to);
@@ -257,7 +330,7 @@ export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' |
     },
     arrangeLayers(ids, op) {
       const { project } = get();
-      const layers = arrange(project.layers, new Set(ids), op);
+      const layers = arrange(project.layers, new Set(companionUnits(project.layers, ids)), op);
       if (layers.every((l, i) => l === project.layers[i])) return;
       const label = { forward: 'Bring forward', backward: 'Send backward', front: 'Bring to front', back: 'Send to back' }[op];
       commit(core, { ...project, layers }, undefined, label);
@@ -265,7 +338,7 @@ export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' |
     groupLayers(ids) {
       const { project } = get();
       const L = project.layers;
-      const roots = carryRoots(L, ids);
+      const roots = carryRoots(L, companionUnits(L, ids));
       if (!roots.length) return null;
       const picked = L.filter((l) => roots.includes(l.id));
       const top = picked.at(-1)!;
@@ -279,7 +352,8 @@ export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' |
       const name = numberedName(tr('Group'), L.map((l) => l.name));
       const group = withParent({ ...createGroupLayer(name), clip: gapInClip(rest, parent, under) }, parent ?? undefined);
       const block = [...L.filter((l) => moving.has(l.id)).map((l) => (roots.includes(l.id) ? withParent(l, group.id) : l)), group];
-      commit(core, { ...project, layers: insertBlock(L, block, parent, under) }, undefined, msg('Group {what}', { what: what(picked) }));
+      const asked = rootIds(L, ids);
+      commit(core, { ...project, layers: insertBlock(L, block, parent, under) }, undefined, msg('Group {what}', { what: what(L.filter((l) => asked.includes(l.id))) }));
       core.anchor = group.id;
       set(selection(core, [], group.id, layerNode(group.id)));
       return group.id;
@@ -291,7 +365,9 @@ export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' |
       const gone = new Set(
         ids.flatMap((id) => {
           const l = byId.get(id);
-          return isGroup(l) ? [l.id] : l?.parentId !== undefined ? [l.parentId] : [];
+          // A layer in a folded companion group ungroups the group around that group.
+          const unit = byId.get(foldedUnit(L, id));
+          return isGroup(l) ? [l.id] : unit?.parentId !== undefined ? [unit.parentId] : [];
         }),
       );
       if (!gone.size) return notify('Select a group (or a layer in one) to ungroup', 'error');
@@ -313,7 +389,8 @@ export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' |
     toggleClip(ids) {
       const { project, selectedLayerIds, notify } = get();
       const L = project.layers;
-      const list = new Set(ids ?? selectedLayerIds);
+      // A layer in a folded companion group clips (or releases) the group: that is what its row shows.
+      const list = new Set((ids ?? selectedLayerIds).map((id) => foldedUnit(L, id)));
       const picked = L.filter((l) => list.has(l.id));
       if (!picked.length) return;
       // All clipped: release them, and (PS) the clipped layers above each in its clip group.
@@ -336,24 +413,22 @@ export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' |
       return layer.id;
     },
     addGenerator(type, presetId, on) {
+      const { project } = get();
+      // On a layer (“+ Add effect”): a companion following it, in a group with it, above or below as its preset says.
+      const added = on ? withCompanion(project, type, presetId, on) : null;
+      if (added) {
+        commit(core, added.project, undefined, msg('Add “{name}” on “{layer}”', { name: added.layer.name, layer: added.target.name }));
+        core.anchor = added.layer.id;
+        core.set(selection(core, [], added.layer.id, layerNode(added.layer.id)));
+        return added.layer.id;
+      }
       const layer = createGeneratorLayer(type, presetId);
       const def = getGenerator(type);
       if (!layer || !def) return null;
       const preset = def.presets.find((p) => p.id === presetId) ?? def.presets[0];
-      const { project } = get();
       // Named in the UI language like an adjustment (“Gold dust 1” / “金粉 1”); from here on the name is data.
       layer.name = numberedName(tr(preset?.label ?? def.label), project.layers.map((l) => l.name));
-      const target = on && def.follow ? project.layers.find((l) => l.id === on) : undefined;
-      if (!target) {
-        insertNew(core, layer, msg('Add “{name}”', { name: layer.name }));
-        return layer.id;
-      }
-      // On a layer: a companion following it, in a group with it, above or below as its preset says.
-      const companion = { ...layer, generator: { ...layer.generator, params: { ...layer.generator.params, follow: target.id } } };
-      const layers = addCompanion(project.layers, target.id, companion, preset?.place ?? 'above');
-      commit(core, { ...project, layers }, undefined, msg('Add “{name}” on “{layer}”', { name: layer.name, layer: target.name }));
-      core.anchor = layer.id;
-      core.set(selection(core, [], layer.id, layerNode(layer.id)));
+      insertNew(core, layer, msg('Add “{name}”', { name: layer.name }));
       return layer.id;
     },
     applyGeneratorPreset(layerId, presetId) {
@@ -368,7 +443,8 @@ export const layerSlice: Slice<'addLayer' | 'removeLayers' | 'duplicateLayers' |
       const label = tr(preset.label);
       const autoNamed = def.presets.some((p) => isNumberedName(l.name, tr(p.label)));
       const others = project.layers.filter((x) => x.id !== layerId).map((x) => x.name);
-      const name = autoNamed && !isNumberedName(l.name, label) ? numberedName(label, others) : l.name;
+      // A companion is named like an effect: the preset alone.
+      const name = autoNamed && !isNumberedName(l.name, label) ? (l.companionOf !== undefined ? label : numberedName(label, others)) : l.name;
       // The previous preset's effects (glow, vignette…) give way to this one's, under the user's own.
       const effects = [...presetEffects(preset), ...l.effects.filter((fx) => !fx.fromPreset)];
       editLayer(core, layerId, (x) => ({ ...x, name, generator: next, blend: preset.blend ?? x.blend, effects }) as Layer, undefined, msg('Preset “{name}”', { name: msg(preset.label) }));

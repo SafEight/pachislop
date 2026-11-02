@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import { createProject, createTitle2DLayer } from '../../src/model/defaults';
+import { createProject, createTitle2DLayer, material2D, rim2D, solidFill } from '../../src/model/defaults';
 import { rimKey } from '../../src/model/parts';
 import type { PartKey, Project, Title2DLayer } from '../../src/model/types';
 import type { Core } from '../../src/store/core';
@@ -22,8 +22,8 @@ function twoTitles(): Project {
     [b, 3],
   ] as const) {
     l.style.rims = [
-      { ...l.style.rims[0], id: `${l.id}-r1`, width: w },
-      { ...l.style.rims[0], id: `${l.id}-r2`, width: 4 },
+      { ...rim2D(w, material2D(solidFill('#000000'))), id: `${l.id}-r1` },
+      { ...rim2D(4, material2D(solidFill('#000000'))), id: `${l.id}-r2` },
     ];
   }
   return { ...p, layers: [...p.layers, a, b] };

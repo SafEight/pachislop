@@ -32,7 +32,7 @@
   color: var(--muted);
   font-size: 10px;
 }
-/* The 3D glint's pin: it can't be dragged (it runs inside the 3D render, before every effect). */
+/* A pinned first effect (3D glint, 2D かすれ) can't be dragged: it runs before every other effect. */
 .effect-head .grip.pinned {
   cursor: help;
 }
@@ -59,6 +59,15 @@
 /* Block labels sit above their control (light sphere, gradient): use the card width, not the 84px row column. */
 .effect-body .row-block > .label {
   width: auto;
+}
+/* A companion generator drawn behind its layer (ui/companions.ts). */
+.fx-behind {
+  flex: none;
+  font-size: 10px;
+  color: var(--muted);
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
 }
 .fx-stack-hint {
   margin: 4px 8px 0;
@@ -183,6 +192,20 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* A companion entry (ui/companions.ts): its generator's icon, and its “behind” tag. */
+.fx-add-label > svg {
+  vertical-align: -3px;
+  margin-right: 4px;
+}
+.fx-add-label > .fx-behind {
+  margin-left: 6px;
+  font-weight: 400;
+}
+.fx-add-item.active .fx-behind,
+.fx-add-item:hover .fx-behind {
+  color: #dce8ff;
+  border-color: #dce8ff80;
 }
 .fx-add-item.active .fx-add-sum,
 .fx-add-item:hover .fx-add-sum {

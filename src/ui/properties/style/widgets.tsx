@@ -3,7 +3,7 @@ import { addAsset } from '../../../assets/registry';
 import { refKey } from '../../../store/paths';
 import { useEditor, type Refs } from '../../../store/store';
 import { msg } from '../../../store/msg';
-import { ColorInput, IconBtn, MixedCheckbox, NumberField, NumRow, Row, Seg } from '../../controls';
+import { ColorInput, Findable, IconBtn, MixedCheckbox, NumberField, NumRow, Row } from '../../controls';
 import { useT } from '../../i18n';
 import { pickFile, useRefValue } from '../../util';
 import { assetUrl, useImageAssets, type Clipboard } from './shared';
@@ -87,14 +87,17 @@ export function GroupTitle({ name, on }: { name: string; on: readonly string[] }
  * bound to its boolean `enabled` at `refp` (indeterminate when its targets differ). The feature's
  * own rows follow only while it is on.
  */
-export function FeatureToggle({ label, refp, title }: { label: string; refp: Refs; title?: string }) {
+export function FeatureToggle(props: { label: string; refp: Refs; title?: string }) {
+  const { label, refp, title } = props;
   const { value, mixed } = useRefValue(refp);
   const setAt = useEditor((s) => s.setAt);
   return (
-    <label className="sub-head sty-feature" title={title} data-fid={refKey(refp)}>
-      <MixedCheckbox checked={value === true} mixed={mixed} onChange={(v) => setAt(refp, v)} />
-      {label}
-    </label>
+    <Findable type={FeatureToggle} props={props}>
+      <label className="sub-head sty-feature" title={title} data-fid={refKey(refp)}>
+        <MixedCheckbox checked={value === true} mixed={mixed} onChange={(v) => setAt(refp, v)} />
+        {label}
+      </label>
+    </Findable>
   );
 }
 
@@ -103,113 +106,61 @@ export function FeatureToggle({ label, refp, title }: { label: string; refp: Ref
  * panel shows "+ = up", like every other Offset Y. `min` / `max` / `defaultValue` are in shown
  * units; scrubbing right raises the shown number. Mixed targets: as RefNum.
  */
-export function FlippedNum({
-  label,
-  refp,
-  min,
-  max,
-  step,
-  unit,
-  title,
-  defaultValue,
-}: {
-  label: string;
-  refp: Refs;
-  min: number;
-  max: number;
-  step?: number;
-  unit?: string;
-  title?: string;
-  defaultValue?: number;
-}) {
+export function FlippedNum(props: { label: string; refp: Refs; min: number; max: number; step?: number; unit?: string; title?: string; defaultValue?: number }) {
+  const { label, refp, min, max, step, unit, title, defaultValue } = props;
   const { value: v, mixed } = useRefValue(refp);
   const setAt = useEditor((s) => s.setAt);
   const setEachAt = useEditor((s) => s.setEachAt);
   const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : 0);
   // `0 - x` keeps a zero a positive 0 (no "-0" in the field or the file).
   return (
-    <NumRow
-      label={label}
-      title={title}
-      id={refKey(refp)}
-      value={0 - num(v)}
-      onChange={(x, c) => setAt(refp, 0 - x, c)}
-      mixed={mixed}
-      onOffset={(d, c) => setEachAt(refp, (start) => num(start) - d, c)}
-      min={min}
-      max={max}
-      step={step}
-      unit={unit}
-      defaultValue={defaultValue}
-    />
+    <Findable type={FlippedNum} props={props}>
+      <NumRow
+        label={label}
+        title={title}
+        id={refKey(refp)}
+        value={0 - num(v)}
+        onChange={(x, c) => setAt(refp, 0 - x, c)}
+        mixed={mixed}
+        onOffset={(d, c) => setEachAt(refp, (start) => num(start) - d, c)}
+        min={min}
+        max={max}
+        step={step}
+        unit={unit}
+        defaultValue={defaultValue}
+      />
+    </Findable>
   );
 }
 
-/** Colour + amount on one row (highlight / shadow / emissive). Defaults: 0..1 opacity shown as %. Mixed targets show “—” per field. */
-export function ColorAmountRow({
-  label,
-  colorRef,
-  color,
-  amountRef,
-  amount,
-  min = 0,
-  max = 1,
-  display = 100,
-  unit = '%',
-}: {
-  label: string;
-  colorRef: Refs;
-  color: string;
-  amountRef: Refs;
-  amount: number;
-  min?: number;
-  max?: number;
-  display?: number;
-  unit?: string;
-}) {
+/** Colour + amount on one row (highlight / shadow / emissive), bound to the store. Defaults: 0..1 opacity shown as %. Mixed targets show “—” per field. */
+export function ColorAmountRow(props: { label: string; colorRef: Refs; amountRef: Refs; min?: number; max?: number; display?: number; unit?: string }) {
+  const { label, colorRef, amountRef, min = 0, max = 1, display = 100, unit = '%' } = props;
   const t = useT();
   const setAt = useEditor((s) => s.setAt);
   const setEachAt = useEditor((s) => s.setEachAt);
-  const colorMixed = useRefValue(colorRef).mixed;
-  const amountMixed = useRefValue(amountRef).mixed;
+  const color = useRefValue(colorRef);
+  const amount = useRefValue(amountRef);
+  const shown = typeof amount.value === 'number' ? amount.value : min;
   return (
-    <Row label={label}>
-      <ColorInput id={refKey(colorRef)} label={t('{label} colour', { label })} value={color} mixed={colorMixed} onChange={(v, c) => setAt(colorRef, v, c)} />
-      <NumberField
-        id={refKey(amountRef)}
-        label={t('{label} amount', { label })}
-        value={amount}
-        onChange={(v, c) => setAt(amountRef, v, c)}
-        mixed={amountMixed}
-        onOffset={(d, c) => setEachAt(amountRef, (s) => Math.max(min, Math.min(max, (typeof s === 'number' ? s : amount) + d)), c)}
-        min={min}
-        max={max}
-        clamp
-        display={display}
-        unit={unit}
-      />
-    </Row>
-  );
-}
-
-/** Row of icon buttons (bevel profiles, gloss contours); `mixed`: none active, a click sets every target. */
-export function IconChoice<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-  mixed,
-}: {
-  label: string;
-  value: T;
-  options: readonly { value: T; label: string; icon: ReactNode }[];
-  onChange: (v: T) => void;
-  mixed?: boolean;
-}) {
-  return (
-    <Row label={label} className="sty-icons">
-      <Seg value={value} options={options} onChange={onChange} mixed={mixed} />
-    </Row>
+    <Findable type={ColorAmountRow} props={props}>
+      <Row label={label}>
+        <ColorInput id={refKey(colorRef)} label={t('{label} colour', { label })} value={typeof color.value === 'string' ? color.value : '#ffffff'} mixed={color.mixed} onChange={(v, c) => setAt(colorRef, v, c)} />
+        <NumberField
+          id={refKey(amountRef)}
+          label={t('{label} amount', { label })}
+          value={shown}
+          onChange={(v, c) => setAt(amountRef, v, c)}
+          mixed={amount.mixed}
+          onOffset={(d, c) => setEachAt(amountRef, (s) => Math.max(min, Math.min(max, (typeof s === 'number' ? s : shown) + d)), c)}
+          min={min}
+          max={max}
+          clamp
+          display={display}
+          unit={unit}
+        />
+      </Row>
+    </Findable>
   );
 }
 

@@ -400,7 +400,6 @@ export const JA_SHELL: Readonly<Record<string, string>> = {
   'Jitter': 'ばらつき',
   'Join': '角の形状',
   'Kind': '種類',
-  'Knockout': 'ノックアウト',
   'Length': '長さ',
   'Light': 'ライト',
   'Light altitude': '光源の高度',
@@ -1051,9 +1050,6 @@ export const JA_SHELL: Readonly<Record<string, string>> = {
   'Defaults for the next new text': '次に作成するテキストの初期設定',
   'Face colour': '面のカラー',
   'Face colour: a gradient face becomes this flat colour': '面のカラー：グラデーションの面はこの単色になります',
-  'Preset look': 'プリセットの外観',
-  'New text keeps the preset look (gold face)': '新規テキストはプリセットの外観（金の面）のまま',
-  'Back to the preset look': 'プリセットの外観に戻す',
   'Target:': '対象：',
   'Select a title layer, one of its parts or an effect: the drag sets that fill’s gradient': 'タイトルレイヤー、そのパーツ、または効果を選択してください。ドラッグでその塗りのグラデーションを設定します',
   'The fill the drag sets: the selected part’s, else the face’s': 'ドラッグで設定する塗り：選択したパーツの塗り、なければ面の塗り',
@@ -1109,8 +1105,8 @@ export const JA_SHELL: Readonly<Record<string, string>> = {
   'layers|Group': 'グループ化',
   // ── Generator layers (Layers panel menus, History)
   Generator: 'ジェネレーター',
-  'Procedural layer: particles, glints, fire, smoke, corona, lightning, speed lines, sunbursts, light streaks, lens flares, shockwaves, magic circles, brush swirls, full-frame patterns. With a layer selected, “on <layer>” makes it follow that layer':
-    'プロシージャルレイヤー：パーティクル、グリント、炎、煙、コロナ、稲妻、集中線、放射光、光の筋、レンズフレア、衝撃波、魔法陣、筆渦、全面の柄。レイヤーを選択中は「〜 on “レイヤー”」でそのレイヤーに追従します',
+  'Procedural layer: particles, speed lines, sunbursts, light streaks, lens flares, shockwaves, magic circles, brush swirls, full-frame patterns. Glints, fire, smoke and the others drawn on a layer are under that layer’s “+ Add effect”':
+    'プロシージャルレイヤー：パーティクル、集中線、放射光、光の筋、レンズフレア、衝撃波、魔法陣、筆渦、全面の柄。グリント・炎・煙など、レイヤーに描くものはそのレイヤーの「+ エフェクトを追加」にあります',
   'Adds a {generator} layer just above the selected layer': '選択中のレイヤーのすぐ上に{generator}レイヤーを追加',
   'generator|Particles': 'パーティクル',
   'generator|Lines': '線',

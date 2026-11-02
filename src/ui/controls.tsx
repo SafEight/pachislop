@@ -1,9 +1,10 @@
-import { useContext, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { refKey } from '../store/paths';
+import { createElement, useContext, useEffect, useEffectEvent, useId, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { getRef, refKey, refList } from '../store/paths';
 import { useEditor, type Refs } from '../store/store';
 import { engineHost } from './engineHost';
 import { useT } from './i18n';
-import { FindProbe, SectionScope, useSectionsOpen } from './sectionMemory';
+import { FindCapture, FindProbe, SectionScope, useSectionsOpen } from './sectionMemory';
 import { oneShot, useGesture, useLatest, usePopover, useRefValue } from './util';
 import './controls.css';
 
@@ -429,6 +430,24 @@ export function Row({ label, children, className, title, fid }: { label: ReactNo
   );
 }
 
+/**
+ * A store-bound field (`children`, whose root element carries its `data-fid`) that the Properties
+ * search results show as the live control: in the search probe (FindCapture) it registers
+ * `type` rendered with `props`, the same control bound to the same ref, under the id of a
+ * `display: contents` wrapper the index reads. Elsewhere it renders `children` alone.
+ */
+export function Findable<P extends object>({ type, props, children }: { type: (p: P) => ReactNode; props: P; children: ReactNode }) {
+  const capture = useContext(FindCapture);
+  const id = useId();
+  if (!capture) return children;
+  capture.set(id, createElement(type, props));
+  return (
+    <span data-fcap={id} style={{ display: 'contents' }}>
+      {children}
+    </span>
+  );
+}
+
 /** Labelled number row: scrub label (double-click resets) + value field (+ track or steppers) + unit. */
 export function NumRow(props: NumProps & { label: string; title?: string }) {
   const st = props.step ?? autoStep(props.min, props.max, props.integer);
@@ -466,21 +485,24 @@ type RefNumProps = Omit<NumProps, 'value' | 'onChange' | 'id' | 'mixed' | 'onOff
 };
 
 /** Number row bound to the store; over several targets, mixed values show “—” and relative gestures shift each target (see the top of this file). */
-export function RefNum({ refp, fallback = 0, ...rest }: RefNumProps) {
+export function RefNum(props: RefNumProps) {
+  const { refp, fallback = 0, ...rest } = props;
   const { value: v, mixed } = useRefValue(refp);
   const setAt = useEditor((s) => s.setAt);
   const setEachAt = useEditor((s) => s.setEachAt);
   const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
   const norm = normFor(rest);
   return (
-    <NumRow
-      {...rest}
-      id={refKey(refp)}
-      value={num(v)}
-      onChange={(x, c) => setAt(refp, x, c)}
-      mixed={mixed}
-      onOffset={(d, c) => setEachAt(refp, (start) => norm(num(start) + d), c)}
-    />
+    <Findable type={RefNum} props={props}>
+      <NumRow
+        {...rest}
+        id={refKey(refp)}
+        value={num(v)}
+        onChange={(x, c) => setAt(refp, x, c)}
+        mixed={mixed}
+        onOffset={(d, c) => setEachAt(refp, (start) => norm(num(start) + d), c)}
+      />
+    </Findable>
   );
 }
 
@@ -729,10 +751,15 @@ export function ColorRow({
   );
 }
 
-export function RefColor({ label, refp, fallback = '#ffffff' }: { label: string; refp: Refs; fallback?: string }) {
+export function RefColor(props: { label: string; refp: Refs; fallback?: string }) {
+  const { label, refp, fallback = '#ffffff' } = props;
   const { value: v, mixed } = useRefValue(refp);
   const setAt = useEditor((s) => s.setAt);
-  return <ColorRow label={label} id={refKey(refp)} value={typeof v === 'string' ? v : fallback} mixed={mixed} onChange={(x, c) => setAt(refp, x, c)} />;
+  return (
+    <Findable type={RefColor} props={props}>
+      <ColorRow label={label} id={refKey(refp)} value={typeof v === 'string' ? v : fallback} mixed={mixed} onChange={(x, c) => setAt(refp, x, c)} />
+    </Findable>
+  );
 }
 
 // ---------- choices ----------
@@ -763,10 +790,20 @@ export function SelectRow<T extends string>({ label, value, options, onChange, m
   );
 }
 
-export function RefSelect<T extends string>({ label, refp, options, fallback }: { label: string; refp: Refs; options: readonly Option<T>[]; fallback?: T }) {
+/**
+ * Choice row bound to the store. `pick` replaces setting the value when a choice does more (a
+ * material preset rewrites the whole material); it must read the project from the store, not
+ * from a render, since the search results run it from their own render.
+ */
+export function RefSelect<T extends string>(props: { label: string; refp: Refs; options: readonly Option<T>[]; fallback?: T; pick?: (v: T) => void }) {
+  const { label, refp, options, fallback, pick } = props;
   const { value: v, mixed } = useRefValue(refp);
   const setAt = useEditor((s) => s.setAt);
-  return <SelectRow label={label} id={refKey(refp)} value={(typeof v === 'string' ? v : (fallback ?? options[0]?.value)) as T} mixed={mixed} options={options} onChange={(x) => setAt(refp, x)} />;
+  return (
+    <Findable type={RefSelect<T>} props={props}>
+      <SelectRow label={label} id={refKey(refp)} value={(typeof v === 'string' ? v : (fallback ?? options[0]?.value)) as T} mixed={mixed} options={options} onChange={pick ?? ((x) => setAt(refp, x))} />
+    </Findable>
+  );
 }
 
 /** Segmented buttons; `mixed` (the targets differ): none is active, a click sets them all. */
@@ -779,6 +816,42 @@ export function Seg<T extends string>({ value, options, onChange, mixed }: { val
         </button>
       ))}
     </span>
+  );
+}
+
+/**
+ * Labelled segmented choice bound to the store (joins, axes, bevel profiles, fill types…): the
+ * choice of each target at `refp` is `read` of its stored value (default: the value itself);
+ * `mixed` (they differ): none active, a click sets every target. `pick` replaces setting the
+ * value at `refp` when a choice does more (see RefSelect). `icons`: icon buttons (a wider row);
+ * `group`: the buttons' accessible group name.
+ */
+export function RefChoice<T extends string>(props: {
+  label: string;
+  refp: Refs;
+  options: readonly (Option<T> & { icon?: ReactNode })[];
+  read?: (stored: unknown) => T;
+  pick?: (v: T) => void;
+  title?: string;
+  icons?: boolean;
+  group?: string;
+}) {
+  const { label, refp, options, read, pick, title, icons, group } = props;
+  const setAt = useEditor((s) => s.setAt);
+  const chosen = useEditor(useShallow((s) => refList(refp).map((r) => (read ? read(getRef(s.project, r)) : (getRef(s.project, r) as T)))));
+  const seg = <Seg value={chosen[0]} options={options} onChange={pick ?? ((v) => setAt(refp, v))} mixed={chosen.some((c) => c !== chosen[0])} />;
+  return (
+    <Findable type={RefChoice<T>} props={props}>
+      <Row label={label} title={title} className={icons ? 'sty-icons' : undefined} fid={refKey(refp)}>
+        {group ? (
+          <span role="group" aria-label={group}>
+            {seg}
+          </span>
+        ) : (
+          seg
+        )}
+      </Row>
+    </Findable>
   );
 }
 
@@ -806,10 +879,16 @@ export function MixedCheckbox({ checked, mixed, onChange, ...rest }: { checked: 
   );
 }
 
-export function RefCheck({ label, refp, title }: { label: string; refp: Refs; title?: string }) {
+/** Checkbox row bound to the store; `pick` replaces setting the value when ticking does more (see RefSelect). */
+export function RefCheck(props: { label: string; refp: Refs; title?: string; pick?: (v: boolean) => void }) {
+  const { label, refp, title, pick } = props;
   const { value: v, mixed } = useRefValue(refp);
   const setAt = useEditor((s) => s.setAt);
-  return <CheckRow label={label} id={refKey(refp)} title={title} value={v === true} mixed={mixed} onChange={(x) => setAt(refp, x)} />;
+  return (
+    <Findable type={RefCheck} props={props}>
+      <CheckRow label={label} id={refKey(refp)} title={title} value={v === true} mixed={mixed} onChange={pick ?? ((x) => setAt(refp, x))} />
+    </Findable>
+  );
 }
 
 // ---------- structure ----------

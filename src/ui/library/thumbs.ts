@@ -153,10 +153,12 @@ export function colourwayContentKey(project: Project, layer: Layer): string {
  * clipping), with its companions and its own group (ownGroupOf) when `withCompanions`: what a
  * colourway recolours with it. Free companions keep their place relative to the title; following
  * ones follow the moved title, or its own group (a look's companion over the group's effects).
+ * A title that isn't one of the project's layers (the Library's sample) has neither: it is drawn alone.
  */
 function titleThumbLayers(project: Project, src: Layer, withCompanions = true): Layer[] {
   const { x, y } = src.transform;
-  const own = withCompanions ? ownGroupOf(project.layers, src.id) : null;
+  const inProject = withCompanions && project.layers.includes(src);
+  const own = inProject ? ownGroupOf(project.layers, src.id) : null;
   const centred: Layer = {
     ...src,
     id: THUMB_LAYER_ID,
@@ -168,7 +170,7 @@ function titleThumbLayers(project: Project, src: Layer, withCompanions = true): 
     parentId: own ? THUMB_GROUP_ID : undefined,
     transform: { ...src.transform, x: 0, y: 0, z: 0, opacity: 1 },
   };
-  if (!withCompanions) return [centred];
+  if (!inProject) return [centred];
   const ids: Record<string, string> = { [src.id]: THUMB_LAYER_ID, ...(own && { [own.id]: THUMB_GROUP_ID }) };
   const companions = new Set(companionsOf(project.layers, src.id));
   return project.layers.flatMap((l): Layer[] => {

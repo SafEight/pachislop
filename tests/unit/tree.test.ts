@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createAdjustmentLayer, createGroupLayer, createTitle2DLayer } from '../../src/model/defaults';
+import { classicTitleStyle2D, createAdjustmentLayer, createGroupLayer, createTitle2DLayer } from '../../src/model/defaults';
 import type { EffectInstance, Layer } from '../../src/model/types';
 import {
   ancestorsOf,
@@ -122,7 +122,7 @@ describe('normalizeTree', () => {
   });
 
   it('prunes part effects of parts the style no longer has, but keeps a hidden face’s', () => {
-    const t = T('t');
+    const t = { ...T('t'), style: classicTitleStyle2D() };
     const rimId = t.style.rims[0].id;
     const live = { ...t, partEffects: { [`rim:${rimId}`]: [fx()], 'rim:deleted': [fx()], face: [fx()] } };
     const hidden = { ...live, id: 'h', style: { ...live.style, hideFace: true } };

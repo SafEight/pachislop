@@ -4,19 +4,20 @@ import type { GeneratorLayer, Layer, PartKey, TextSource, Title2DLayer, Title3DL
 import { formatMsg } from '../../store/msg';
 import { partLabel } from '../../store/labels';
 import { useEditor, type PropRef } from '../../store/store';
-import { RefNum, Row, Section, Seg } from '../controls';
-import { FontBrowser } from '../FontBrowser';
+import { RefChoice, RefNum, Section } from '../controls';
 import { useT } from '../i18n';
+import { erodeListed } from '../erode';
 import { glintListed } from '../glint';
 import { SectionScope } from '../sectionMemory';
-import { useMixed } from '../util';
 import { MultiEffectCard, type EffectTarget } from './EffectCard';
+import { ErodeCard } from './ErodeCard';
 import { GlintCard } from './GlintCard';
 import { PartEditor, PartWidth, type PartTarget } from './PartView';
 import { partScope, partSwatch, partWidth } from './parts';
 import { LayerLightingSection } from './style/Lighting3D';
 import { RenderPassesSection, Shape3DSection } from './style/Parts3D';
 import { SwatchTitle } from './style/widgets';
+import { FontField } from './TextSection';
 import { AlignBar, TransformSection } from './TransformSection';
 
 // Several layers selected: the sections every one of them has, edited together through PropRef
@@ -50,52 +51,40 @@ function MultiTextSection({ layers }: { layers: readonly TitleLayer[] }) {
   const setAt = useEditor((s) => s.setAt);
   const src = layers[0].source as TextSource;
   const r = (k: keyof TextSource): PropRef[] => layers.map((l) => ({ layerId: l.id, path: ['source', k] }));
-  const [fontMixed, verticalMixed, alignMixed] = useMixed(r('fontId'), r('vertical'), r('align'));
   return (
     <Section id="source" title={<Counted label={t('Text')} n={layers.length} />}>
       <div className="hint-line">{t('Each layer keeps its own text; these settings edit all of them.')}</div>
-      <Row label={t('Font')}>
-        <FontBrowser value={src.fontId} onChange={(id) => setAt(r('fontId'), id)} />
-        {fontMixed && (
-          <span className="muted" title={t('The layers use different fonts; picking one sets it on all of them')}>
-            —
-          </span>
-        )}
-      </Row>
+      <FontField refp={r('fontId')} />
       <RefNum label={t('Size')} refp={r('size')} min={8} max={800} step={1} unit="px" title={t('Em size in comp px — the whole style scales with it')} />
       <RefNum label={t('Line height')} refp={r('lineHeight')} min={0.5} max={3} step={0.01} unit="×" />
       <RefNum label={t('Tracking')} refp={r('tracking')} min={-300} max={1000} step={1} unit="‰" title={t('Thousandths of an em between characters')} />
-      <Row label={t('Direction')}>
-        <Seg
-          value={src.vertical ? 'v' : 'h'}
-          mixed={verticalMixed}
-          options={[
-            { value: 'h', label: t('横 Horizontal') },
-            { value: 'v', label: t('縦 Vertical') },
-          ]}
-          onChange={(v) => setAt(r('vertical'), v === 'v')}
-        />
-      </Row>
-      <Row label={t('Align')}>
-        <Seg
-          value={src.align}
-          mixed={alignMixed}
-          options={
-            src.vertical
-              ? [
-                  { value: 'start', label: '⤒', title: t('Top') },
-                  { value: 'center', label: '↕', title: t('Middle') },
-                  { value: 'end', label: '⤓', title: t('Bottom') },
-                ]
-              : [
-                  { value: 'start', label: '⇤', title: t('Left') },
-                  { value: 'center', label: '↔', title: t('Centre') },
-                  { value: 'end', label: '⇥', title: t('Right') },
-                ]
-          }
-          onChange={(v) => setAt(r('align'), v)}
-        />
-      </Row>
+      <RefChoice
+        label={t('Direction')}
+        refp={r('vertical')}
+        options={[
+          { value: 'h', label: t('横 Horizontal') },
+          { value: 'v', label: t('縦 Vertical') },
+        ]}
+        read={(v) => (v ? 'v' : 'h')}
+        pick={(v) => setAt(r('vertical'), v === 'v')}
+      />
+      <RefChoice
+        label={t('Align')}
+        refp={r('align')}
+        options={
+          src.vertical
+            ? [
+                { value: 'start', label: '⤒', title: t('Top') },
+                { value: 'center', label: '↕', title: t('Middle') },
+                { value: 'end', label: '⤓', title: t('Bottom') },
+              ]
+            : [
+                { value: 'start', label: '⇤', title: t('Left') },
+                { value: 'center', label: '↔', title: t('Centre') },
+                { value: 'end', label: '⇥', title: t('Right') },
+              ]
+        }
+      />
       <Section id="text-typography" defaultOpen={false} title={t('Typography')}>
         <RefNum label={t('Italic')} refp={r('shear')} min={-30} max={30} step={0.5} unit="deg" title={t('Faux italic shear; 10–15° is the usual pachislot lean')} />
         <RefNum
@@ -223,10 +212,13 @@ export function MultiView({ layer }: { layer: Layer }) {
   const titles = layers.every(isTitleLayer) ? (layers as TitleLayer[]) : null;
   const texts = titles?.every((l) => l.source.kind === 'text') ? titles : null;
   const in3D = titles?.every((l): l is Title3DLayer => l.kind === 'title3d') ? (titles as Title3DLayer[]) : null;
+  const in2D = titles?.every((l): l is Title2DLayer => l.kind === 'title2d') ? (titles as Title2DLayer[]) : null;
   const effects = sharedEffects(layers);
-  // The glint card edits every selected 3D title while any lists its glint (as Render passes did).
+  // The glint card edits every selected 3D title while any lists its glint (as Render passes
+  // did); the かすれ card every selected 2D title while any lists its dry brush.
   const glints = in3D?.some(glintListed) ? in3D : null;
-  const nFx = effects.length + (glints ? 1 : 0);
+  const erodes = in2D?.some(erodeListed) ? in2D : null;
+  const nFx = effects.length + (glints || erodes ? 1 : 0);
   const names = layers.map((l) => l.name).join(', ');
   return (
     <>
@@ -248,6 +240,7 @@ export function MultiView({ layer }: { layer: Layer }) {
         <Section id="effects" title={<Counted label={t('Effects {n}', { n: nFx })} n={n} />}>
           <div className="hint-line">{t('The effects every layer has (by type); add, reorder or remove effects on each layer.')}</div>
           {glints && <GlintCard layers={glints} />}
+          {erodes && <ErodeCard layers={erodes} />}
           {effects.map((targets) => (
             <MultiEffectCard key={targets.map((x) => x.fx.id).join('|')} targets={targets} />
           ))}

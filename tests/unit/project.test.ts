@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { migrateEffects, migrateProject, parseProjectFile, toBase64 } from '../../src/io/project';
-import { band3D, createBackgroundLayer, createProject, createTitle2DLayer, createTitle3DLayer, imageSource, material2D, material3D, solidFill } from '../../src/model/defaults';
+import {
+  band3D,
+  classicTitle3D,
+  classicTitleStyle2D,
+  createBackgroundLayer,
+  createProject,
+  createTitle2DLayer,
+  createTitle3DLayer,
+  imageSource,
+  material2D,
+  material3D,
+  solidFill,
+} from '../../src/model/defaults';
 import { charBandSide, charSide, sideMaterial } from '../../src/model/bands';
 import type { Band3D, CharAdjust, EffectInstance, Material2D, Material3D, Project, Title2DLayer, Title3DLayer } from '../../src/model/types';
 
@@ -13,22 +25,23 @@ const effect = (type: string, params: Json): EffectInstance => ({ id: `${type}-i
  * A current (v6) project that an older file migrates to exactly: values the migration fills
  * with the OLD behaviour (useGlobalLight false, tateChuYoko false, bevelPosition 'inside') are
  * set to those here. Has a 3D text title with a backplate and per-char face, a 2D text title with
- * per-char face / scale, a 2D image title, and layer effects.
+ * per-char face / scale, a 2D image title, and layer effects; the titles in the classic looks, so
+ * bevels and rims go through the migration.
  */
 function currentProject(): Project {
-  const p: Project = { ...createProject(), layers: [createBackgroundLayer(), createTitle3DLayer('確定'), createTitle2DLayer('BIG BONUS')] };
+  const t3: Title3DLayer = { ...createTitle3DLayer('確定'), style3d: classicTitle3D() };
+  const t2: Title2DLayer = { ...createTitle2DLayer('BIG BONUS'), style: classicTitleStyle2D() };
+  const p: Project = { ...createProject(), layers: [createBackgroundLayer(), t3, t2] };
   const off2D = (m: Material2D) => {
     m.bevel.useGlobalLight = false;
     m.satin.useGlobalLight = false;
   };
-  const t3 = p.layers[1] as Title3DLayer;
   t3.style3d.bevelPosition = 'inside';
   t3.style3d.bands = [{ ...band3D(4, 'chrome'), fillCounters: true, depth: 10, bevel: { width: 1.5, depth: 1.5, profile: 'round', segments: 6, curve: 0 } }];
   if (t3.source.kind !== 'text') throw new Error('expected text');
   t3.source.tateChuYoko = false;
   t3.source.chars = { 0: { dx: 1, dy: 0, scale: 1.2, rotate: 0, face3d: { ...t3.style3d.face } } };
 
-  const t2 = p.layers[2] as Title2DLayer;
   off2D(t2.style.face);
   t2.style.rims.forEach((r) => off2D(r.material));
   if (t2.source.kind !== 'text') throw new Error('expected text');
@@ -38,7 +51,7 @@ function currentProject(): Project {
   t2.source.chars = { 2: { dx: 5, dy: -3, scale: 0.8, rotate: 10, face: charFace } };
   t2.effects = [effect('dropShadow', { angle: 60, distance: 10, size: 14, useGlobalLight: false })];
 
-  const img = { ...createTitle2DLayer('img'), source: imageSource('asset-1', 300) };
+  const img = { ...createTitle2DLayer('img'), source: imageSource('asset-1', 300), style: classicTitleStyle2D() };
   off2D(img.style.face);
   img.style.rims.forEach((r) => off2D(r.material));
   p.layers.push(img);

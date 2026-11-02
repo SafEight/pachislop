@@ -5,10 +5,13 @@ import { maskLabel, partLabel } from '../../store/labels';
 import { useEditor } from '../../store/store';
 import { SectionScope } from '../sectionMemory';
 import { useT } from '../i18n';
+import { ERODE_NAME } from '../erode';
 import { effectName } from '../util';
 import { Breadcrumb } from './Breadcrumb';
+import { CompanionCard } from './CompanionCard';
 import { DocumentView } from './DocumentView';
 import { EffectView } from './EffectView';
+import { ErodeCard } from './ErodeCard';
 import { GlintCard } from './GlintCard';
 import { LayerView } from './LayerView';
 import { MultiView } from './MultiView';
@@ -41,7 +44,7 @@ function Header({ at }: { at: Resolved }) {
   const badge =
     at.kind === 'part' ? (
       <span className="badge k-part">{t('Part')}</span>
-    ) : at.kind === 'effect' || at.kind === 'glint' ? (
+    ) : at.kind === 'effect' || at.kind === 'glint' || at.kind === 'erode' || at.kind === 'companion' ? (
       <span className="badge k-effect">fx</span>
     ) : at.kind === 'mask' ? (
       <span className="badge k-mask">{t('Mask')}</span>
@@ -57,7 +60,11 @@ function Header({ at }: { at: Resolved }) {
           ? formatMsg(maskLabel(at.layer, at.mask.id), t)
           : at.kind === 'glint'
             ? t('Glint')
-            : layer.name;
+            : at.kind === 'erode'
+              ? t(ERODE_NAME)
+              : at.kind === 'companion'
+                ? at.gen.name
+                : layer.name;
   return (
     <div className="panel-head props-head">
       {badge}
@@ -111,9 +118,11 @@ export function PropertiesPanel() {
           ? `${at.layer.id}:${at.part}`
           : at.kind === 'mask'
             ? `${at.layer.id}:${at.mask.id}`
-            : at.kind === 'glint'
-              ? `${at.layer.id}:glint`
-              : `${at.layer.id}:${at.fx.id}`;
+            : at.kind === 'glint' || at.kind === 'erode'
+              ? `${at.layer.id}:${at.kind}`
+              : at.kind === 'companion'
+                ? `${at.layer.id}:${at.gen.id}`
+                : `${at.layer.id}:${at.fx.id}`;
   // The body remounts per node: restore its remembered scroll, once more on the next frame for
   // content that grows after the first layout (thumbnails, previews).
   const shownKey = useRef(scrollKey);
@@ -143,7 +152,7 @@ export function PropertiesPanel() {
       <Breadcrumb at={at} />
       <Header at={at} />
       <div
-        className={`scroll props-body ${at.kind === 'effect' || at.kind === 'glint' ? 'full' : ''}`}
+        className={`scroll props-body ${at.kind === 'effect' || at.kind === 'glint' || at.kind === 'erode' ? 'full' : ''}`}
         key={key}
         ref={bodyRef}
         onScroll={(e) => scrollMemory.set(scrollKey, e.currentTarget.scrollTop)}
@@ -159,6 +168,10 @@ export function PropertiesPanel() {
             <MaskView layer={at.layer} mask={at.mask} />
           ) : at.kind === 'glint' ? (
             <GlintCard layers={[at.layer]} full />
+          ) : at.kind === 'erode' ? (
+            <ErodeCard layers={[at.layer]} full />
+          ) : at.kind === 'companion' ? (
+            <CompanionCard owner={at.layer} gen={at.gen} behind={project.layers.indexOf(at.gen) < project.layers.indexOf(at.layer)} full />
           ) : (
             <EffectView layerId={at.layer.id} part={at.part} effectId={at.fx.id} />
           )}

@@ -10,11 +10,13 @@ import { AdjustmentIcon } from '../adjustIcons';
 import { GeneratorIcon } from '../generatorIcons';
 import { useT } from '../i18n';
 import { draggingFiles, importFiles } from '../layerActions';
-import { effectName } from '../util';
+import { effectName, oneShot } from '../util';
+import { placeCompanion } from '../companions';
+import { ERODE_NAME, ERODE_PINNED, setErodeEnabled } from '../erode';
 import { GLINT_PINNED, setGlintEnabled } from '../glint';
 import type { MenuAnchor } from '../properties/AddEffectMenu';
 import { partSwatch } from '../properties/parts';
-import { canClip, effectMenu, glintMenu, layerMenu, maskMenu, partMenu, type PanelUi } from './commands';
+import { canClip, companionMenu, effectMenu, layerMenu, maskMenu, partMenu, pinnedMenu, type PanelUi } from './commands';
 import { drag, DRAG_MIME, dropPosAt, fxDropIndex, INDENT, layerDest, type DropPos } from './dnd';
 import type { CtxEntry } from './LayerContextMenu';
 import { partEnabled, partHasEye } from './parts';
@@ -33,7 +35,7 @@ export interface RowUi extends PanelUi {
   endRename: () => void;
 }
 
-/** Extra indent of a clipped row, px: room for its ↳ arrow. */
+/** Extra indent of a clipped row, px: room for its ↴ arrow. */
 const CLIP_INDENT = 14;
 
 /** Nesting indent between the eye column and the row's content (the eye column stays aligned, as in PS). */
@@ -97,6 +99,38 @@ function fxDrop(e: DragEvent, to: EffectOwner, gap?: number) {
 const endDrag = () => {
   drag.current = null;
 };
+
+/** Accept a dragged companion of layer `ownerId` over a row of that layer's Effects list (move only). */
+function companionOver(e: DragEvent, ownerId: string): boolean {
+  const p = drag.current;
+  if (p?.kind !== 'companion' || p.ownerId !== ownerId) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer.dropEffect = 'move';
+  return true;
+}
+
+/**
+ * Drop the dragged companion of `owner` on the `pos` half of a row of its Effects: next to the
+ * companion `target` in the stack, or (an effect or glint row, `target` null) in front of the
+ * layer (upper half) or behind it (lower half).
+ */
+function companionDrop(e: DragEvent, owner: Layer, pos: 'above' | 'below', target: string | null) {
+  const p = drag.current;
+  if (p?.kind !== 'companion' || p.ownerId !== owner.id) return;
+  e.preventDefault();
+  e.stopPropagation();
+  drag.current = null;
+  if (target === p.id) return;
+  if (target) useEditor.getState().moveLayers([p.id], pos === 'above' ? { aboveId: target } : { belowId: target });
+  else placeCompanion(owner, p.id, pos === 'above');
+}
+
+/** Row half under the pointer. */
+function halfAt(e: DragEvent<HTMLElement>): 'above' | 'below' {
+  const r = e.currentTarget.getBoundingClientRect();
+  return e.clientY - r.top < r.height / 2 ? 'above' : 'below';
+}
 
 /** Draggable `fx` badge: dragging it moves every effect of `owner` (⌥ copies). */
 function FxBadge({ owner, ids, title }: { owner: EffectOwner; ids: string[]; title: string }) {
@@ -289,6 +323,10 @@ export function LayerRow({
 }) {
   const t = useT();
   const { layer, depth, clipped, isBase, dimmed, open } = row;
+  // A folded companion group's row: drops land next to the group, the eye shows and hides it.
+  const unit = row.wrapper ?? layer;
+  const shown = layer.visible && unit.visible;
+  const intoable = layer.kind === 'group' && !row.wrapper;
   const [drop, setDrop] = useState<DropPos | 'fx' | null>(null);
   const [clipEdge, setClipEdge] = useState<'top' | 'bottom' | null>(null);
   const node: NodeRef = { kind: 'layer', layerId: layer.id };
@@ -300,9 +338,9 @@ export function LayerRow({
   const clipTarget = (e: MouseEvent): Layer | null => {
     const r = e.currentTarget.getBoundingClientRect();
     const layers = useEditor.getState().project.layers;
-    if (e.clientY - r.top >= r.height / 2) return canClip(layers, layer) ? layer : null;
-    const sibs = childrenOf(layers, layer.parentId ?? null);
-    return sibs[sibs.findIndex((s) => s.id === layer.id) + 1] ?? null;
+    if (e.clientY - r.top >= r.height / 2) return canClip(layers, unit) ? unit : null;
+    const sibs = childrenOf(layers, unit.parentId ?? null);
+    return sibs[sibs.findIndex((s) => s.id === unit.id) + 1] ?? null;
   };
 
   const onDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -314,11 +352,11 @@ export function LayerRow({
     if (!p && draggingFiles(e.dataTransfer)) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
-      return setDrop(dropPosAt(e.clientY, e.currentTarget.getBoundingClientRect(), layer.kind === 'group'));
+      return setDrop(dropPosAt(e.clientY, e.currentTarget.getBoundingClientRect(), intoable));
     }
     if (p?.kind !== 'layers') return;
-    const pos = dropPosAt(e.clientY, e.currentTarget.getBoundingClientRect(), layer.kind === 'group');
-    if (!layerDest(useEditor.getState().project.layers, p.ids, layer, pos, !!open, outLevels(e))) return setDrop(null);
+    const pos = dropPosAt(e.clientY, e.currentTarget.getBoundingClientRect(), intoable);
+    if (!layerDest(useEditor.getState().project.layers, p.ids, unit, pos, !!open && !row.wrapper, outLevels(e))) return setDrop(null);
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     setDrop(pos);
@@ -330,16 +368,16 @@ export function LayerRow({
     if (p?.kind === 'fx') return fxDrop(e, fxOwner);
     if (!p && draggingFiles(e.dataTransfer)) {
       e.preventDefault();
-      const pos = dropPosAt(e.clientY, e.currentTarget.getBoundingClientRect(), layer.kind === 'group');
-      const dest = layerDest(useEditor.getState().project.layers, [], layer, pos, !!open, outLevels(e)) ?? undefined;
+      const pos = dropPosAt(e.clientY, e.currentTarget.getBoundingClientRect(), intoable);
+      const dest = layerDest(useEditor.getState().project.layers, [], unit, pos, !!open && !row.wrapper, outLevels(e)) ?? undefined;
       // Images and SVG become 2D layers here (the canvas drop offers 3D).
       return void importFiles([...e.dataTransfer.files], { dim: '2d', dest });
     }
     if (p?.kind !== 'layers') return;
     e.preventDefault();
-    const pos = dropPosAt(e.clientY, e.currentTarget.getBoundingClientRect(), layer.kind === 'group');
+    const pos = dropPosAt(e.clientY, e.currentTarget.getBoundingClientRect(), intoable);
     const st = useEditor.getState();
-    const dest = layerDest(st.project.layers, p.ids, layer, pos, !!open, outLevels(e));
+    const dest = layerDest(st.project.layers, p.ids, unit, pos, !!open && !row.wrapper, outLevels(e));
     // The dragged row may unmount (moved into a closed group) before its dragend.
     drag.current = null;
     if (dest) st.moveLayers(p.ids, dest);
@@ -352,7 +390,7 @@ export function LayerRow({
     selected && 'sel',
     focused && 'focus',
     dimmed && 'dimmed',
-    layer.guide && 'guide',
+    unit.guide && 'guide',
     clipped && 'clipped',
     drop && `drop-${drop}`,
     clipEdge && `clip-${clipEdge}`,
@@ -404,14 +442,20 @@ export function LayerRow({
       }}
     >
       <Eye
-        on={layer.visible}
-        title={layer.visible ? t('Visible (click to hide; ⌥-click: solo)') : t('Hidden (click to show; ⌥-click: solo)')}
-        onToggle={(alt) => useEditor.getState().setAt({ layerId: layer.id, path: [alt ? 'solo' : 'visible'] }, alt ? !layer.solo : !layer.visible)}
+        on={shown}
+        title={shown ? t('Visible (click to hide; ⌥-click: solo)') : t('Hidden (click to show; ⌥-click: solo)')}
+        onToggle={(alt) => {
+          const st = useEditor.getState();
+          if (alt) return st.setAt({ layerId: unit.id, path: ['solo'] }, !unit.solo);
+          const c = oneShot(`lp-eye:${layer.id}`);
+          st.setAt({ layerId: unit.id, path: ['visible'] }, !shown, c);
+          if (unit !== layer && !layer.visible) st.setAt({ layerId: layer.id, path: ['visible'] }, true, c);
+        }}
       />
       <Indent depth={depth} clipped={clipped}>
         {clipped && (
           <span className="lp-clip-arrow" title={t('Clipped to the layer below')} aria-label={t('Clipped to the layer below')}>
-            ↳
+            ↴
           </span>
         )}
       </Indent>
@@ -437,17 +481,17 @@ export function LayerRow({
       </span>
       {KIND_BADGE[layer.kind] && <span className={`lp-badge k-${layer.kind}`}>{KIND_BADGE[layer.kind]}</span>}
       {layer.kind === 'background' && <span className="lp-badge k-background">{t('BG')}</span>}
-      {layer.solo && (
+      {unit.solo && (
         <span className="lp-badge lp-flag" title={t('Solo (show only soloed layers)')}>
           S
         </span>
       )}
-      {layer.guide && (
+      {unit.guide && (
         <span className="lp-badge lp-flag" title={t('Guide layer: visible in the editor, excluded from exports')}>
           G
         </span>
       )}
-      {layer.locked && (
+      {unit.locked && (
         <span className="lp-lock" title={t('Locked')} aria-label={t('Locked')}>
           🔒
         </span>
@@ -528,11 +572,6 @@ export function EffectRow({ row, layer, focused, ui }: { row: Extract<PanelRow, 
   const owner: EffectOwner = { layerId: layer.id, part };
   const node: NodeRef = { kind: 'effect', layerId: layer.id, part, effectId: fx.id };
   const name = effectName(t, fx);
-  /** Row half under the pointer. The list shows last-applied on top, so "above" is the higher array index. */
-  const posAt = (e: DragEvent<HTMLElement>): 'above' | 'below' => {
-    const r = e.currentTarget.getBoundingClientRect();
-    return e.clientY - r.top < r.height / 2 ? 'above' : 'below';
-  };
   return (
     <div
       className={['lp-row', 'lp-effect', focused && 'focus', dimmed && 'dimmed', drop && `drop-${drop}`].filter(Boolean).join(' ')}
@@ -546,12 +585,14 @@ export function EffectRow({ row, layer, focused, ui }: { row: Extract<PanelRow, 
         startFxDrag(e, owner, [fx.id]);
       }}
       onDragEnd={endDrag}
-      onDragOver={(e) => fxOver(e) && setDrop(posAt(e))}
+      onDragOver={(e) => (fxOver(e) || (part === null && companionOver(e, layer.id))) && setDrop(halfAt(e))}
       onDragLeave={() => setDrop(null)}
       onDrop={(e) => {
         setDrop(null);
+        if (drag.current?.kind === 'companion') return companionDrop(e, layer, halfAt(e), null);
+        // The list shows last-applied on top, so "above" is the higher array index.
         const i = effectsOf(useEditor.getState().project, owner).findIndex((x) => x.id === fx.id);
-        fxDrop(e, owner, posAt(e) === 'above' ? i + 1 : i);
+        fxDrop(e, owner, halfAt(e) === 'above' ? i + 1 : i);
       }}
       onClick={(e) => clickNode(node, e)}
       onContextMenu={(e) => {
@@ -573,37 +614,139 @@ export function EffectRow({ row, layer, focused, ui }: { row: Extract<PanelRow, 
   );
 }
 
-/** A 3D title's glint, pinned first under its Effects: its eye switches it on / off; no drag (it runs inside the 3D render, before every effect). */
-export function GlintRow({ row, focused, ui }: { row: Extract<PanelRow, { kind: 'glint' }>; focused: boolean; ui: RowUi }) {
+/**
+ * A title's pinned first effect under its Effects: a 3D title's glint or a 2D title's かすれ dry
+ * brush. Its eye switches it on / off; no drag (it runs before every effect: inside the 3D render,
+ * or on the drawn title itself).
+ */
+export function PinnedRow({ row, focused, ui }: { row: Extract<PanelRow, { kind: 'glint' | 'erode' }>; focused: boolean; ui: RowUi }) {
   const t = useT();
   const { layer, depth, dimmed } = row;
-  const on = layer.style3d.glint.enabled;
-  const node: NodeRef = { kind: 'glint', layerId: layer.id };
-  const name = t('Glint');
+  const [drop, setDrop] = useState<'above' | 'below' | null>(null);
+  const glint = layer.kind === 'title3d';
+  const on = glint ? layer.style3d.glint.enabled : layer.style.erode.enabled;
+  const node: NodeRef = { kind: row.kind, layerId: layer.id };
+  const name = t(glint ? 'Glint' : ERODE_NAME);
   return (
     <div
-      className={['lp-row', 'lp-effect', 'lp-glint', focused && 'focus', dimmed && 'dimmed'].filter(Boolean).join(' ')}
+      className={['lp-row', 'lp-effect', `lp-${row.kind}`, focused && 'focus', dimmed && 'dimmed', drop && `drop-${drop}`].filter(Boolean).join(' ')}
       role="treeitem"
       aria-level={depth + 1}
       aria-selected={focused}
       aria-label={name}
-      title={t(GLINT_PINNED)}
+      title={t(glint ? GLINT_PINNED : ERODE_PINNED)}
+      onDragOver={(e) => companionOver(e, layer.id) && setDrop(halfAt(e))}
+      onDragLeave={() => setDrop(null)}
+      onDrop={(e) => {
+        setDrop(null);
+        companionDrop(e, layer, halfAt(e), null);
+      }}
       onClick={(e) => clickNode(node, e)}
       onContextMenu={(e) => {
         e.preventDefault();
         useEditor.getState().selectNode(node);
         const anchor = pointAnchor(e);
-        ui.openMenu(anchor, glintMenu(t, layer, ui, anchor), name);
+        ui.openMenu(anchor, pinnedMenu(t, layer, ui, anchor), name);
       }}
     >
-      <Eye on={on} title={on ? t('Effect on (click to turn off)') : t('Effect off (click to turn on)')} onToggle={() => setGlintEnabled([layer.id], !on)} />
+      <Eye on={on} title={on ? t('Effect on (click to turn off)') : t('Effect off (click to turn on)')} onToggle={() => (glint ? setGlintEnabled : setErodeEnabled)([layer.id], !on)} />
       <Indent depth={depth} />
       <span className="lp-fx-icon" aria-hidden>
-        ✦
+        {glint ? '✦' : '≋'}
       </span>
       <span className="lp-name-col">
         <span className="lp-name">{name}</span>
       </span>
+    </div>
+  );
+}
+
+/**
+ * A companion generator under the Effects of the layer it follows (ui/companions.ts): its eye is
+ * the generator layer's, its name the layer's (double-click renames), “behind” while it is below
+ * that layer. Dragging it among the layer's Effects moves it in the stack: next to another
+ * companion, or onto an effect / glint row's upper or lower half, in front of or behind the layer.
+ */
+export function CompanionRow({
+  row,
+  focused,
+  focusedMask,
+  renaming,
+  ui,
+}: {
+  row: Extract<PanelRow, { kind: 'companion' }>;
+  focused: boolean;
+  focusedMask: string | null;
+  renaming: boolean;
+  ui: RowUi;
+}) {
+  const t = useT();
+  const { owner, layer, behind, depth, dimmed } = row;
+  const [drop, setDrop] = useState<'above' | 'below' | null>(null);
+  const node: NodeRef = { kind: 'layer', layerId: layer.id };
+  return (
+    <div
+      className={['lp-row', 'lp-effect', 'lp-companion', focused && 'focus', dimmed && 'dimmed', drop && `drop-${drop}`].filter(Boolean).join(' ')}
+      role="treeitem"
+      aria-level={depth + 1}
+      aria-selected={focused}
+      aria-label={layer.name}
+      draggable={!renaming}
+      onDragStart={(e) => {
+        e.stopPropagation();
+        useEditor.getState().selectNode(node);
+        drag.current = { kind: 'companion', ownerId: owner.id, id: layer.id };
+        e.dataTransfer.setData(DRAG_MIME, layer.id);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      onDragEnd={endDrag}
+      onDragOver={(e) => companionOver(e, owner.id) && setDrop(halfAt(e))}
+      onDragLeave={() => setDrop(null)}
+      onDrop={(e) => {
+        setDrop(null);
+        companionDrop(e, owner, halfAt(e), layer.id);
+      }}
+      onClick={(e) => clickNode(node, e)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        useEditor.getState().selectNode(node);
+        const anchor = pointAnchor(e);
+        ui.openMenu(anchor, companionMenu(t, owner, layer, behind, ui, anchor), layer.name);
+      }}
+    >
+      <Eye
+        on={layer.visible}
+        title={layer.visible ? t('Effect on (click to turn off)') : t('Effect off (click to turn on)')}
+        onToggle={() => useEditor.getState().setAt({ layerId: layer.id, path: ['visible'] }, !layer.visible)}
+      />
+      <Indent depth={depth} />
+      <span className="lp-gen-icon" aria-hidden>
+        <GeneratorIcon type={layer.generator.type} />
+      </span>
+      {layer.masks.map((m) => (
+        <MaskChip key={m.id} layer={layer} mask={m} focused={focusedMask === m.id} ui={ui} />
+      ))}
+      <span className="lp-name-col">
+        {renaming ? (
+          <RenameInput layer={layer} onDone={ui.endRename} />
+        ) : (
+          <span
+            className="lp-name"
+            title={t('{name}\nDouble-click to rename', { name: layer.name })}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              ui.rename(layer.id);
+            }}
+          >
+            {layer.name}
+          </span>
+        )}
+      </span>
+      {behind && (
+        <span className="lp-badge lp-behind" title={t('Drawn behind “{name}”', { name: owner.name })}>
+          {t('behind')}
+        </span>
+      )}
     </div>
   );
 }

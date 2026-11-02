@@ -4,16 +4,23 @@ import type { GeneratorDef, GeneratorPreset } from '../../src/engine/contracts';
 import { createGeneratorLayer, listGenerators } from '../../src/generators/registry';
 import { clusterIslands, DEFAULT_MERGE, labelIslands, readPixels } from '../../src/io/imageSplit';
 import {
+  ao3D,
   band3D,
+  bevel3D,
+  classicTitle3D,
+  classicTitleStyle2D,
   createAdjustmentLayer,
   createGroupLayer,
   createTitle2DLayer,
   createTitle3DLayer,
   defaultComp,
+  glint3D,
   imageSource,
+  material3D,
+  shadow3D,
   shapeSource,
 } from '../../src/model/defaults';
-import type { GradientMask, Layer, LayerMask, Project, ShapeMask } from '../../src/model/types';
+import type { GradientMask, Layer, LayerMask, Project, ShapeMask, Title3DProps } from '../../src/model/types';
 import { applyPreset, applyPresetToProject } from '../../src/presets/apply';
 import { FACTORY_STYLES } from '../../src/presets/factory';
 import { TEMPLATES } from '../../src/presets/templates';
@@ -38,14 +45,14 @@ const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, '_');
 
 const project = (name: string, layers: Layer[]): Project => ({ version: 11, name, comp: defaultComp(), layers: normalizeTree(layers) });
 
-/** The standard titles: 2D looks and effects on 確定, 3D looks on BIG. */
+/** The standard titles: 2D looks and effects on 確定, 3D looks on BIG, in the classic looks (the references were drawn with them). */
 const title2D = (text = '確定', y = 0) => {
-  const l = createTitle2DLayer(text);
+  const l = { ...createTitle2DLayer(text), style: classicTitleStyle2D() };
   l.transform.y = y;
   return l;
 };
 const title3D = (text = 'BIG', y = 0) => {
-  const l = createTitle3DLayer(text);
+  const l = { ...createTitle3DLayer(text), style3d: classicTitle3D() };
   l.transform.y = y;
   return l;
 };
@@ -236,7 +243,24 @@ function scenes(): GoldenCase[] {
       id: 'scene/image-3d-plain',
       build: async () => {
         await picture();
-        return project('3D image', [titleLayerFor('3d', imageSource(PICTURE_ID, 480), 'golden')]);
+        // The 3D image look the reference was drawn with (light AO, a clear-coated face); new image layers start plainer.
+        const layer = titleLayerFor('3d', imageSource(PICTURE_ID, 480), 'golden');
+        if (layer.kind !== 'title3d') throw new Error('unreachable: a 3D image title');
+        const face = { ...material3D('custom'), color: '#ffffff', metalness: 0, roughness: 0.35, clearcoat: 0.3, reflectivity: 0.5 };
+        const style3d: Title3DProps = {
+          ...classicTitle3D(),
+          depth: 5,
+          bevel: bevel3D(0.5, 0.5),
+          bevelPosition: 'inside',
+          face,
+          faceImage: 1,
+          edgeImage: 1,
+          bands: [],
+          shadow: shadow3D({ softness: 0.8 }),
+          glint: glint3D(),
+          ao: ao3D({ enabled: true, intensity: 0.5 }),
+        };
+        return project('3D image', [{ ...layer, style3d }]);
       },
     },
     {

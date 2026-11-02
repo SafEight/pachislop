@@ -1,17 +1,20 @@
 import { createElement } from 'react';
 import type { GeneratorCategory } from '../../engine/contracts';
 import { listGenerators } from '../../generators/registry';
+import { foldedUnit } from '../../model/companions';
 import { ADJUSTMENT_NAMES, createBackgroundLayer } from '../../model/defaults';
 import { isTitleLayer, type TitleLayer } from '../../model/parts';
-import type { AdjustmentType, EffectInstance, Layer, LayerMask, PartKey, ShapeKind, Title3DLayer } from '../../model/types';
+import type { AdjustmentType, BlendMode, EffectInstance, GeneratorLayer, Layer, LayerMask, PartKey, ShapeKind } from '../../model/types';
 import { errorMsg, formatMsg, type Translate } from '../../store/msg';
 import { effectOwnerLabel, maskLabel, partLabel } from '../../store/labels';
 import { effectsOf } from '../../store/effects';
-import { selectedLayer, useEditor, type AddMaskOpts, type EffectOwner } from '../../store/store';
+import { useEditor, type AddMaskOpts, type EffectOwner } from '../../store/store';
 import { nodeParts } from '../../store/selection';
 import { childrenOf } from '../../store/tree';
 import { flipTargets } from '../../store/transformOps';
+import { placeCompanion } from '../companions';
 import { GeneratorIcon } from '../generatorIcons';
+import { deleteErode, setErodeEnabled } from '../erode';
 import { deleteGlint, setGlintEnabled } from '../glint';
 import { addFileLayer, addGroupLayer, addShapeLayer, addTextLayer, openSplitImage, replaceWithSvgFile } from '../layerActions';
 import type { MenuAnchor } from '../properties/AddEffectMenu';
@@ -61,6 +64,15 @@ export const ADJUSTMENT_MENU: { type: AdjustmentType; label: string }[] = (
   ['effectsOnly', 'brightnessContrast', 'levels', 'curves', 'exposure', 'vibrance', 'hueSaturation', 'colorBalance', 'blackWhite', 'photoFilter', 'invert', 'posterize', 'threshold', 'gradientMap'] as const
 ).map((type) => ({ type, label: ADJUSTMENT_NAMES[type] }));
 
+/** Blend modes with their menu labels (PS wording; translated): the Layers panel header's, a companion card's. */
+export const BLENDS: readonly { value: BlendMode; label: string }[] = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'add', label: 'Add' },
+  { value: 'screen', label: 'Screen' },
+  { value: 'multiply', label: 'Multiply' },
+  { value: 'overlay', label: 'Overlay' },
+];
+
 /** New adjustment ▸ items: Effects only, a separator, then the adjustments (PS order); ⌥ creates it clipped to the layer below. */
 export const adjustmentItems = (t: Translate): CtxEntry[] =>
   ADJUSTMENT_MENU.flatMap(({ type, label }): CtxEntry[] => {
@@ -79,37 +91,26 @@ export const adjustmentItems = (t: Translate): CtxEntry[] =>
 const CATEGORY_ORDER: Record<GeneratorCategory, number> = { Particles: 0, Lines: 1, Rings: 2, Light: 3, Energy: 4, Pattern: 5 };
 
 /**
- * ⊕ ▸ Generator ▸ items: the generators under their category headings, each ▸ its presets (the
- * first = the plain add). With a layer selected, a follow generator's presets come first as
- * "on <layer>" (following it, grouped with it), then the free ones (a follow-required one has none).
+ * ⊕ ▸ Generator ▸ items: the free-standing generators under their category headings, each ▸ its
+ * presets (the first = the plain add). A generator that has to follow a layer is no layer of its
+ * own: “+ Add effect” adds it to the layer (ui/companions.ts), as it does the following version
+ * of one that may follow.
  */
-export const generatorItems = (t: Translate): CtxItem[] => {
-  const sel = selectedLayer(useEditor.getState());
-  const target = sel && sel.kind !== 'adjustment' ? sel : null;
-  return listGenerators()
+export const generatorItems = (t: Translate): CtxItem[] =>
+  listGenerators()
+    .filter((def) => def.follow !== 'required')
     .toSorted((a, b) => CATEGORY_ORDER[a.category] - CATEGORY_ORDER[b.category])
-    .map((def) => {
-      const free: CtxEntry[] = def.follow === 'required' && target ? [] : def.presets.map((p) => ({
+    .map((def) => ({
+      label: t(def.label),
+      hint: t(def.description),
+      icon: createElement(GeneratorIcon, { type: def.type }),
+      group: t(def.category, undefined, { ctx: 'generator' }),
+      items: def.presets.map((p) => ({
         label: t(p.label),
         hint: t('Adds a {generator} layer just above the selected layer', { generator: t(def.label) }),
         onSelect: () => useEditor.getState().addGenerator(def.type, p.id),
-      }));
-      const on: CtxEntry[] = def.follow && target
-        ? def.presets.map((p) => ({
-            label: t('{preset} on “{layer}”', { preset: t(p.label), layer: target.name }),
-            hint: t('Adds a {generator} layer following “{layer}”, in a group with it', { generator: t(def.label), layer: target.name }),
-            onSelect: () => useEditor.getState().addGenerator(def.type, p.id, target.id),
-          }))
-        : [];
-      return {
-        label: t(def.label),
-        hint: t(def.description),
-        icon: createElement(GeneratorIcon, { type: def.type }),
-        group: t(def.category, undefined, { ctx: 'generator' }),
-        items: on.length && free.length ? [...on, 'sep', ...free] : [...on, ...free],
-      };
-    });
-};
+      })),
+    }));
 
 /** ⊕ New layer ▾ items (also the row context menu's New layer ▸). */
 export function newLayerItems(t: Translate): CtxEntry[] {
@@ -127,7 +128,7 @@ export function newLayerItems(t: Translate): CtxEntry[] {
     },
     {
       label: t('Generator'),
-      hint: t('Procedural layer: particles, glints, fire, smoke, corona, lightning, speed lines, sunbursts, light streaks, lens flares, shockwaves, magic circles, brush swirls, full-frame patterns. With a layer selected, “on <layer>” makes it follow that layer'),
+      hint: t('Procedural layer: particles, speed lines, sunbursts, light streaks, lens flares, shockwaves, magic circles, brush swirls, full-frame patterns. Glints, fire, smoke and the others drawn on a layer are under that layer’s “+ Add effect”'),
       items: generatorItems(t),
     },
     'sep',
@@ -154,6 +155,9 @@ export function newLayerItems(t: Translate): CtxEntry[] {
 export function layerMenu(t: Translate, layer: Layer, ui: PanelUi, anchor: MenuAnchor): CtxEntry[] {
   const st = useEditor.getState();
   const ids = targetsOf(layer.id);
+  // A layer in a folded companion group (isFoldedWrapper): its flags and place are the group's.
+  const units = ids.map((id) => foldedUnit(st.project.layers, id));
+  const unit = st.project.layers.find((l) => l.id === foldedUnit(st.project.layers, layer.id)) ?? layer;
   const title = isTitleLayer(layer) ? layer : null;
   const group = layer.kind === 'group';
   const noFlip = flipTargets(st.project.layers, ids).length === 0;
@@ -206,12 +210,12 @@ export function layerMenu(t: Translate, layer: Layer, ui: PanelUi, anchor: MenuA
     { label: t('Rename'), shortcut: 'F2', onSelect: () => ui.rename(layer.id) },
     'sep',
     { label: t('Group', undefined, { ctx: 'layers' }), shortcut: '⌘G', hint: t('One group: its effects run on the members’ composite (a glow around burst + text)'), onSelect: () => st.groupLayers(ids) },
-    { label: t('Ungroup'), shortcut: '⇧⌘G', hint: t('Dissolve the group; its layers stay in place'), disabled: !group && !layer.parentId, onSelect: () => st.ungroupLayers(ids) },
+    { label: t('Ungroup'), shortcut: '⇧⌘G', hint: t('Dissolve the group; its layers stay in place'), disabled: !group && !unit.parentId, onSelect: () => st.ungroupLayers(ids) },
     {
-      label: layer.clip ? t('Release clipping mask') : t('Create clipping mask'),
+      label: unit.clip ? t('Release clipping mask') : t('Create clipping mask'),
       shortcut: '⌥⌘G',
       hint: t('Show the layer only inside the layer below it (⌥-click the line between two rows)'),
-      disabled: !canClip(st.project.layers, layer),
+      disabled: !canClip(st.project.layers, unit),
       onSelect: () => st.toggleClip(ids),
     },
     { label: t('Add mask'), hint: t('Vector, gradient or layer mask: shows the layer only where the mask is white'), items: addMaskItems(t, layer.id) },
@@ -237,10 +241,10 @@ export function layerMenu(t: Translate, layer: Layer, ui: PanelUi, anchor: MenuA
       ],
     },
     'sep',
-    { label: t('Visible'), checked: layer.visible, onSelect: () => setFlag(ids, 'visible', !layer.visible) },
-    { label: t('Lock'), checked: layer.locked, hint: t('Lock (no canvas selection / dragging)'), onSelect: () => setFlag(ids, 'locked', !layer.locked) },
-    { label: t('Solo'), checked: layer.solo, hint: t('Solo (show only soloed layers)'), onSelect: () => setFlag(ids, 'solo', !layer.solo) },
-    { label: t('Guide layer', undefined, { ctx: 'layers' }), checked: layer.guide, hint: t('Guide layer: visible in the editor, excluded from exports'), onSelect: () => setFlag(ids, 'guide', !layer.guide) },
+    { label: t('Visible'), checked: unit.visible, onSelect: () => setFlag(units, 'visible', !unit.visible) },
+    { label: t('Lock'), checked: unit.locked, hint: t('Lock (no canvas selection / dragging)'), onSelect: () => setFlag(units, 'locked', !unit.locked) },
+    { label: t('Solo'), checked: unit.solo, hint: t('Solo (show only soloed layers)'), onSelect: () => setFlag(units, 'solo', !unit.solo) },
+    { label: t('Guide layer', undefined, { ctx: 'layers' }), checked: unit.guide, hint: t('Guide layer: visible in the editor, excluded from exports'), onSelect: () => setFlag(units, 'guide', !unit.guide) },
     ...style,
   ];
 }
@@ -335,15 +339,39 @@ export function effectMenu(t: Translate, layer: Layer, owner: EffectOwner, fx: E
   ];
 }
 
-/** Context menu of a 3D title's glint row: on / off and delete (no duplicate or move: there is one glint, computed inside the 3D render). */
-export function glintMenu(t: Translate, layer: Title3DLayer, ui: PanelUi, anchor: MenuAnchor): CtxEntry[] {
-  const on = layer.style3d.glint.enabled;
+/**
+ * Context menu of a title's pinned first effect, a 3D glint or a 2D かすれ: on / off and delete (no
+ * duplicate or move: there is one, run before every effect).
+ */
+export function pinnedMenu(t: Translate, layer: TitleLayer, ui: PanelUi, anchor: MenuAnchor): CtxEntry[] {
+  const glint = layer.kind === 'title3d';
+  const on = glint ? layer.style3d.glint.enabled : layer.style.erode.enabled;
   const owner: EffectOwner = { layerId: layer.id, part: null };
   return [
-    { label: t('Enabled'), checked: on, onSelect: () => setGlintEnabled([layer.id], !on) },
-    { label: t('Delete effect'), onSelect: () => deleteGlint([layer.id]) },
+    { label: t('Enabled'), checked: on, onSelect: () => (glint ? setGlintEnabled : setErodeEnabled)([layer.id], !on) },
+    { label: t('Delete effect'), onSelect: () => (glint ? deleteGlint : deleteErode)([layer.id]) },
     { label: t('Add effect to {part}…', { part: formatMsg(effectOwnerLabel(layer, null), t) }), onSelect: () => ui.addEffect(owner, anchor) },
     'sep',
     layerSubmenu(t, layer, ui, anchor),
+  ];
+}
+
+/**
+ * Context menu of a companion row (ui/companions.ts): shown / hidden, rename, duplicate, in front
+ * of / behind its layer, delete — the generator layer's own commands, worded as an effect's.
+ */
+export function companionMenu(t: Translate, owner: Layer, gen: GeneratorLayer, behind: boolean, ui: PanelUi, anchor: MenuAnchor): CtxEntry[] {
+  const st = useEditor.getState();
+  return [
+    { label: t('Visible'), checked: gen.visible, onSelect: () => st.setAt({ layerId: gen.id, path: ['visible'] }, !gen.visible) },
+    { label: t('Rename'), shortcut: 'F2', onSelect: () => ui.rename(gen.id) },
+    { label: t('Duplicate effect'), onSelect: () => st.duplicateLayers([gen.id]) },
+    behind
+      ? { label: t('Move in front of the layer'), hint: t('Draw it over “{name}”', { name: owner.name }), onSelect: () => placeCompanion(owner, gen.id, true) }
+      : { label: t('Move behind the layer'), hint: t('Draw it under “{name}”', { name: owner.name }), onSelect: () => placeCompanion(owner, gen.id, false) },
+    { label: t('Delete effect'), onSelect: () => st.removeLayers([gen.id]) },
+    { label: t('Add effect to {part}…', { part: formatMsg(effectOwnerLabel(owner, null), t) }), onSelect: () => ui.addEffect({ layerId: owner.id, part: null }, anchor) },
+    'sep',
+    layerSubmenu(t, owner, ui, anchor),
   ];
 }

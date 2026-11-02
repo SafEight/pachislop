@@ -7,6 +7,8 @@ import { partLabel } from '../../store/labels';
 import { useEditor } from '../../store/store';
 import { IconBtn, Section } from '../controls';
 import { useT } from '../i18n';
+import { useCompanionSides } from '../companions';
+import { erodeListed } from '../erode';
 import { glintListed } from '../glint';
 import { partEnabled } from '../layers/parts';
 import { listedParts } from '../layers/rows';
@@ -21,7 +23,6 @@ import { AddPartButtons, PartActions, PartEye, PartsInline, PartWidth } from './
 import { isInheritedSide, partSummary, partSwatch, partWidth, usePartPage } from './parts';
 import { FillEditor } from './style/FillEditor';
 import { PartLinkBadge } from './style/MaterialLink';
-import { Style2DSettings } from './style/Parts2D';
 import { LayerLightingSection } from './style/Lighting3D';
 import { RenderPassesSection, Shape3DSection } from './style/Parts3D';
 import { fillCss } from './style/shared';
@@ -123,14 +124,15 @@ function StyleClipButtons({ layer }: { layer: TitleLayer }) {
 /**
  * Title layer node, ordered by how often things change: transform, source (text / shape / asset),
  * Appearance (parts, edited in place, with the style check and copy / paste style), Letters
- * (per-character), the 2D Style (knockout, かすれ), for 3D the Shape and Lighting, then effects
- * (a 3D title's glint pinned first) and the 3D Render passes. Blend and opacity are the Layers
- * panel header's; 2D ⇄ 3D conversion is a layer command (context menu). `parts`: the selected
- * parts, expanded in Appearance.
+ * (per-character), for 3D the Shape and Lighting, then effects (a 3D title's glint or a 2D
+ * title's かすれ pinned first) and the 3D Render passes. Blend and opacity are the Layers panel
+ * header's; 2D ⇄ 3D conversion is a layer command (context menu). `parts`: the selected parts,
+ * expanded in Appearance.
  */
 function TitleView({ layer, parts }: { layer: TitleLayer; parts: readonly PartKey[] }) {
   const t = useT();
-  const n = layer.effects.length + (glintListed(layer) ? 1 : 0);
+  const { front, back } = useCompanionSides(layer.id);
+  const n = layer.effects.length + (glintListed(layer) || erodeListed(layer) ? 1 : 0) + front.length + back.length;
   const openSection = useOpenSection();
   const scope = useContext(SectionScope);
   const appearanceOpen = useSectionsOpen((s) => s[`${scope}/appearance`] ?? true);
@@ -156,11 +158,6 @@ function TitleView({ layer, parts }: { layer: TitleLayer; parts: readonly PartKe
         <AppearanceList layer={layer} expanded={parts} />
       </Section>
       {layer.source.kind === 'text' && <LettersSection layer={layer} src={layer.source} />}
-      {layer.kind === 'title2d' && (
-        <Section id="style" title={t('Style')}>
-          <Style2DSettings layer={layer} />
-        </Section>
-      )}
       {layer.kind === 'title3d' && (
         <>
           {layer.source.kind !== 'model' && <Shape3DSection layers={[layer]} />}
@@ -178,7 +175,8 @@ function TitleView({ layer, parts }: { layer: TitleLayer; parts: readonly PartKe
 /** Background node: its fill, and the effects that run on it. */
 function BackgroundView({ layer }: { layer: BackgroundLayer }) {
   const t = useT();
-  const n = layer.effects.length;
+  const { front, back } = useCompanionSides(layer.id);
+  const n = layer.effects.length + front.length + back.length;
   return (
     <>
       <Section id="background-fill" title={<SwatchTitle css={fillCss(layer.fill)}>{t('Fill')}</SwatchTitle>}>

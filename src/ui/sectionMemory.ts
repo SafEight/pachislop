@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext } from 'react';
+import { createContext, useCallback, useContext, type ReactElement } from 'react';
 import { create } from 'zustand';
 
 // Remembered open state of every collapsible Section (controls.tsx), per node kind and section
@@ -36,6 +36,14 @@ export const SectionScope = createContext('panel');
  * cards (effects, indexed on their own) render what the index needs instead.
  */
 export const FindProbe = createContext(false);
+
+/**
+ * The live controls of the search probe's fields: a store-bound control rendered under it
+ * registers, by the `data-fcap` id of its wrapper, an element that renders it again bound to the
+ * same ref, which the search results show in place (controls.tsx `Findable`). Null outside the
+ * probe, and around fields that the results must not edit in place.
+ */
+export const FindCapture = createContext<Map<string, ReactElement> | null>(null);
 
 /** Opens the section with `id` in the current SectionScope from code (e.g. when a tool needs it), and remembers that. */
 export function useOpenSection(): (id: string) => void {

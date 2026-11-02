@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Title3DLayer } from '../../model/types';
 import { useEditor } from '../../store/store';
-import { IconBtn, MixedCheckbox, RefColor, RefNum, Row, Seg } from '../controls';
+import { IconBtn, MixedCheckbox, RefChoice, RefColor, RefNum } from '../controls';
 import { deleteGlint, GLINT_ABOUT, GLINT_PINNED, glintRefs, resetGlint, setGlintEnabled } from '../glint';
 import { useT } from '../i18n';
 import { useMixed, useRefValue } from '../util';
@@ -80,14 +80,13 @@ export function GlintCard({ layers, full }: { layers: readonly Title3DLayer[]; f
           <RefNum label={t('Threshold')} refp={sub(refp, 'threshold')} min={0} max={8} step={0.05} title={t('HDR luminance above which pixels glint (1 ≈ brighter than white)')} />
           <RefNum label={t('Intensity')} refp={sub(refp, 'intensity')} min={0} max={4} step={0.01} clamp unit="x" />
           <RefNum label={t('Bloom radius')} refp={sub(refp, 'radius')} min={0} max={40} step={0.1} unit="%" title={t('% of the source size')} />
-          <Row label={t('Streaks')}>
-            <Seg
-              value={String(glint.streaks) as (typeof STREAK_COUNTS)[number]['value']}
-              mixed={streaksMixed}
-              options={STREAK_COUNTS.map((o) => (o.value === '0' ? { ...o, label: t(o.label) } : o))}
-              onChange={(v) => setAt(sub(refp, 'streaks'), Number(v))}
-            />
-          </Row>
+          <RefChoice
+            label={t('Streaks')}
+            refp={sub(refp, 'streaks')}
+            options={STREAK_COUNTS.map((o) => (o.value === '0' ? { ...o, label: t(o.label) } : o))}
+            read={(v) => String(v) as (typeof STREAK_COUNTS)[number]['value']}
+            pick={(v) => setAt(sub(refp, 'streaks'), Number(v))}
+          />
           {(streaksMixed || glint.streaks > 0) && (
             <>
               <RefNum label={t('Length')} refp={sub(refp, 'length')} min={0} max={200} step={0.5} unit="%" title={t('% of the source size')} />

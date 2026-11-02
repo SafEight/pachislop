@@ -2,6 +2,7 @@ import type { GroupLayer } from '../../model/types';
 import { useEditor } from '../../store/store';
 import { childrenOf } from '../../store/tree';
 import { Section } from '../controls';
+import { useCompanionSides } from '../companions';
 import { useT } from '../i18n';
 import { EffectStack } from './EffectCard';
 import { InfoTip } from './InfoTip';
@@ -11,7 +12,8 @@ import { GroupTransformSection } from './TransformSection';
 export function GroupView({ layer }: { layer: GroupLayer }) {
   const t = useT();
   const n = useEditor((s) => childrenOf(s.project.layers, layer.id).length);
-  const fx = layer.effects.length;
+  const { front, back } = useCompanionSides(layer.id);
+  const fx = layer.effects.length + front.length + back.length;
   return (
     <>
       <GroupTransformSection layer={layer} />

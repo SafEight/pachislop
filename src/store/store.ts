@@ -26,8 +26,9 @@ export type { Path } from './paths';
 
 /**
  * A row of the Layers panel the user can focus: a layer, one style part of a title, several parts
- * of one title (2+, ⇧ / ⌘-clicked; edited together), one effect, one layer mask, or a 3D title's
- * glint (`style3d.glint`, listed as its first effect).
+ * of one title (2+, ⇧ / ⌘-clicked; edited together), one effect, one layer mask, a 3D title's
+ * glint (`style3d.glint`) or a 2D title's かすれ dry brush (`style.erode`), each listed as its
+ * first effect.
  */
 export type NodeRef =
   | { kind: 'layer'; layerId: string }
@@ -35,7 +36,8 @@ export type NodeRef =
   | { kind: 'parts'; layerId: string; parts: PartKey[] }
   | { kind: 'effect'; layerId: string; part: PartKey | null; effectId: string }
   | { kind: 'mask'; layerId: string; maskId: string }
-  | { kind: 'glint'; layerId: string };
+  | { kind: 'glint'; layerId: string }
+  | { kind: 'erode'; layerId: string };
 /** Whose effect stack: `part` null = the layer's / group's own effects, else that title part's. */
 export type EffectOwner = { layerId: string; part: PartKey | null };
 /** Tool strip tools (Photoshop keys V A T U G D L H Z). */
@@ -60,7 +62,7 @@ export interface TextDefaults {
   size: number;
   /** Letter spacing, as TextSource.tracking. */
   tracking: number;
-  /** Solid face colour '#rrggbb'; null = the factory look. */
+  /** Face colour '#rrggbb' new text takes; null = the plain look's own (a white 2D face, the light-grey plain 3D material). */
   fill: string | null;
 }
 
@@ -234,22 +236,30 @@ export interface EditorState {
   addBackingShape(shape: Title2DLayer | Title3DLayer, targetId: string): void;
   /** Re-fit a shape layer around the nearest text / shape title above or below it in the stack (keeps its rotation). */
   fitShapeLayer(id: string, to: 'above' | 'below'): void;
-  /** Deleting a group deletes its subtree; the selection moves to a neighbour in the same parent, else to the parent. */
+  /**
+   * Deleting a group deletes its subtree, and a layer its companions (model/companions.ts) with
+   * the companion groups left empty; the selection moves to a neighbour in the same parent, else to
+   * the parent. Companions deleted on their own (as effects) keep their layer selected, and its
+   * companion group dissolves once it holds just the layer.
+   */
   removeLayers(ids: string[]): void;
   /**
-   * Copies (groups with their subtrees) land just above their originals — above a base's whole
+   * Copies (groups with their subtrees, layers with their companions: the companion group a layer
+   * sits in on its own is copied whole) land just above their originals — above a base's whole
    * clip group, so the copy doesn't steal its clipped layers — and become the selection.
    */
   duplicateLayers(ids: string[]): void;
   /**
-   * Move the layers (groups with their subtrees, bases with the layers clipped to them) as one
-   * block: just above / below layer `aboveId` / `belowId` (below = under its whole subtree) in its
-   * parent, or `into` a group (null = top level) at `index` among that parent's other children
-   * counted from the BOTTOM (default: on top). Landing inside a clip group clips the moved layers;
-   * a clipped layer moved out of one is released. Moving a group into its own subtree is refused.
+   * Move the layers (groups with their subtrees, bases with the layers clipped to them, layers
+   * with their companions: as the companion group they sit in on their own, unless moving within
+   * it) as one block: just above / below layer `aboveId` / `belowId` (below = under its whole
+   * subtree) in its parent, or `into` a group (null = top level) at `index` among that parent's
+   * other children counted from the BOTTOM (default: on top). Landing inside a clip group clips
+   * the moved layers; a clipped layer moved out of one is released. Moving a group into its own
+   * subtree is refused.
    */
   moveLayers(ids: string[], to: LayerDest): void;
-  /** Photoshop Arrange (⌘] / ⌘[ / ⌘⇧] / ⌘⇧[); see arrange(). */
+  /** Photoshop Arrange (⌘] / ⌘[ / ⌘⇧] / ⌘⇧[); see arrange(). Layers carry their companions as in moveLayers. */
   arrangeLayers(ids: string[], op: ArrangeOp): void;
   /** Translate the movable layers (groups: their descendants) by comp px (+y up); same `coalesce` = one undo step. */
   nudgeLayers(ids: string[], dx: number, dy: number, coalesce?: string): void;
@@ -270,28 +280,34 @@ export interface EditorState {
    */
   flipLayers(ids: string[], axis: 'x' | 'y'): void;
   /**
-   * ⌘G: put the layers (bases with their clipped layers) in a new group, selected, at the
-   * topmost one's place in that one's parent; returns its id (null when nothing was listed).
+   * ⌘G: put the layers (bases with their clipped layers, layers with their companions as in
+   * moveLayers) in a new group, selected, at the topmost one's place in that one's parent; returns
+   * its id (null when nothing was listed).
    */
   groupLayers(ids: string[]): string | null;
   /** ⇧⌘G: dissolve the listed groups and the parents of listed non-groups; their children take the group's place in its parent. */
   ungroupLayers(ids: string[]): void;
-  /** ⌥⌘G on the selection (or `ids`): clip them to the layer below, or release them (and the clipped layers above them) when all are clipped. */
+  /**
+   * ⌥⌘G on the selection (or `ids`): clip them to the layer below, or release them (and the
+   * clipped layers above them) when all are clipped. A layer in a folded companion group
+   * (isFoldedWrapper) clips or releases the group.
+   */
   toggleClip(ids?: string[]): void;
   /** New adjustment layer just above the primary selection in its parent, selected; clipped when `opts.clip` or when inserted inside a clip group. Returns its id. */
   addAdjustment(type: AdjustmentType, opts?: { clip?: boolean }): string;
   /**
    * New generator layer of `type` from preset `presetId` (default: its first preset) just above
    * the primary selection in its parent, selected (clipped when inserted inside a clip group),
-   * named “<preset> N” in the UI language. With `on` (a layer id) a follow generator instead
-   * follows that layer as its companion, in a group with it, above or below it as the preset's
-   * `place` says. Returns its id; null for an unknown type.
+   * named “<preset> N” in the UI language. With `on` (a layer id, “+ Add effect”) a follow
+   * generator instead follows that layer as its companion (withCompanion), named after the preset
+   * alone. Returns its id; null for an unknown type.
    */
   addGenerator(type: string, presetId?: string, on?: string): string | null;
   /**
    * Replace a generator layer's params with preset `presetId`'s, as one undo step: transform,
    * effects and the picked source layers ('layer' params) are kept. A layer still named after
-   * one of its type's presets (“金粉 2”) takes the new preset's numbered name.
+   * one of its type's presets (“金粉 2”) takes the new preset's numbered name (a companion: the
+   * preset's name alone).
    */
   applyGeneratorPreset(layerId: string, presetId: string): void;
   renameLayer(id: string, name: string): void;
@@ -309,7 +325,7 @@ export interface EditorState {
   /**
    * Turn a 2D title into a 3D one or back, as one undo step: the source (text, shape, SVG or
    * image), transform, warp / distort / weight, effects, masks, name, parent, clip and the layer flags
-   * stay; the style becomes the target kind's default look, as a new layer of that kind gets it
+   * stay; the style becomes the target kind's plain look, as a new layer of that kind gets it
    * (titleLayerFor: an image takes the plain image look). Model sources are refused (3D only).
    */
   convertLayerKind(id: string, kind: '2d' | '3d'): void;
@@ -324,8 +340,9 @@ export interface EditorState {
    */
   splitImageLayer(id: string, size: { w: number; h: number }, pieces: readonly ImagePiece[]): void;
   /**
-   * 図柄 size matching: a locked guide copy at 30 % opacity just above the layer. Selection
-   * stays on the original so it can be retyped / resized against the ghost.
+   * 図柄 size matching: a locked guide copy at 30 % opacity just above the layer (a layer in a
+   * folded companion group: a copy of the group, companions included). Selection stays on the
+   * original so it can be retyped / resized against the ghost.
    */
   duplicateAsGhost(id: string): void;
   copyStyle(id: string): void;

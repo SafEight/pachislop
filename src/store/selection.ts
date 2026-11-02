@@ -1,3 +1,4 @@
+import { companionOwner } from '../model/companions';
 import { isTitleLayer, layerParts, type TitleLayer } from '../model/parts';
 import type { PartKey, Project } from '../model/types';
 import { orderIds } from './arrange';
@@ -10,13 +11,14 @@ import { ancestorsOf, hasPart } from './tree';
 
 export const layerNode = (id: string | null): NodeRef | null => (id ? { kind: 'layer', layerId: id } : null);
 
-/** Whether `node`'s layer, part(s), effect or mask all still exist (a glint node: its layer is a 3D title). */
+/** Whether `node`'s layer, part(s), effect or mask all still exist (a glint node: its layer is a 3D title; an erode node: a 2D title). */
 function nodeExists(project: Project, node: NodeRef): boolean {
   const l = project.layers.find((x) => x.id === node.layerId);
   if (!l) return false;
   if (node.kind === 'layer') return true;
   if (node.kind === 'mask') return l.masks.some((m) => m.id === node.maskId);
   if (node.kind === 'glint') return l.kind === 'title3d';
+  if (node.kind === 'erode') return l.kind === 'title2d';
   if (node.kind === 'parts') return isTitleLayer(l) && node.parts.every((p) => hasPart(l, p));
   if (node.part !== null && !(isTitleLayer(l) && hasPart(l, node.part))) return false;
   return node.kind === 'part' || effectsOf(project, node).some((e) => e.id === node.effectId);
@@ -37,7 +39,7 @@ function listedParts(l: TitleLayer): PartKey[] {
   return parts;
 }
 
-/** The node one level up: effect → its part or layer, part / mask / glint → its layer, layer → none. */
+/** The node one level up: effect → its part or layer, part / mask / glint / erode → its layer, layer → none. */
 export const ownerNode = (node: NodeRef): NodeRef | null =>
   node.kind === 'effect' && node.part !== null ? { kind: 'part', layerId: node.layerId, part: node.part } : node.kind === 'layer' ? null : layerNode(node.layerId);
 
@@ -146,9 +148,12 @@ export const selectionSlice: Slice<'selectLayer' | 'selectLayers' | 'toggleLayer
         const from = project.layers.findIndex((l) => l.id === (core.anchor ?? selectedLayerId));
         const to = project.layers.findIndex((l) => l.id === id);
         if (from >= 0) {
-          // Rows the panel shows between the two (project.layers reversed = panel order); rows inside closed groups are skipped.
+          // Rows the panel shows between the two (project.layers reversed = panel order); rows inside
+          // closed groups and companions (listed as their layer's effects) are skipped.
           const [a, b] = from < to ? [from, to] : [to, from];
-          const shown = project.layers.slice(a, b + 1).filter((l) => ancestorsOf(project.layers, l.id).every((g) => view.expanded[g.id] ?? true));
+          const shown = project.layers
+            .slice(a, b + 1)
+            .filter((l) => (l.id === id || !companionOwner(project.layers, l)) && ancestorsOf(project.layers, l.id).every((g) => view.expanded[g.id] ?? true));
           return set(selection(core, shown.map((l) => l.id), id, node));
         }
       }

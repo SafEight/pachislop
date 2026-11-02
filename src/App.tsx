@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { loadBuiltinFonts } from './assets/registry';
 import { loadAutosave, startAutosave } from './io/autosave';
+import { companionOwner, foldedUnit } from './model/companions';
 import { isTitleLayer } from './model/parts';
 import { formatMsg, joinMsgs, msg } from './store/msg';
 import { ownerNode } from './store/selection';
@@ -9,6 +10,7 @@ import { ancestorsOf } from './store/tree';
 import { Menu } from './ui/controls';
 import { Dock } from './ui/dock/Dock';
 import { useDock } from './ui/dock/layout';
+import { deleteErode } from './ui/erode';
 import { deleteGlint } from './ui/glint';
 import { tr, useT } from './ui/i18n';
 import { addTextLayer, clipboardFiles, closeSplitImage, draggingFiles, importFiles, pasteClipboard, shapeItems, useSplitImage } from './ui/layerActions';
@@ -204,7 +206,7 @@ function useShortcuts(setExportOpen: (open: boolean) => void, toggleSheet: () =>
       switch (e.key) {
         case 'Delete':
         case 'Backspace': {
-          // A selected effect, glint or mask row is deleted on its own; a part is never deleted from the keyboard.
+          // A selected effect, glint, かすれ or mask row is deleted on its own; a part is never deleted from the keyboard.
           const node = st.selectedNode;
           if (node?.kind === 'effect') {
             e.preventDefault();
@@ -212,6 +214,9 @@ function useShortcuts(setExportOpen: (open: boolean) => void, toggleSheet: () =>
           } else if (node?.kind === 'glint') {
             e.preventDefault();
             deleteGlint([node.layerId]);
+          } else if (node?.kind === 'erode') {
+            e.preventDefault();
+            deleteErode([node.layerId]);
           } else if (node?.kind === 'mask') {
             e.preventDefault();
             st.removeMask(node.layerId, node.maskId);
@@ -231,12 +236,20 @@ function useShortcuts(setExportOpen: (open: boolean) => void, toggleSheet: () =>
           // An open menu / popover takes this Esc to close (usePopover); the selection stays.
           if (document.querySelector('.menu-pop')) break;
           // One level up: picked glyphs → layer; effect → its part or layer; part / mask → layer;
-          // layer → its group; only a top-level layer (or nothing) deselects to the Document.
+          // a companion (listed as an effect) → its layer; layer → its group; only a top-level
+          // layer (or nothing) deselects to the Document.
           const node = st.selectedNode;
           const up = node && ownerNode(node);
+          const owner = node?.kind === 'layer' ? companionOwner(st.project.layers, layer) : undefined;
           if (st.selectedChars.length) st.selectChars([]);
           else if (up) st.selectNode(up);
-          else if (node && layer?.parentId) st.selectLayer(layer.parentId);
+          else if (owner) st.selectLayer(owner.id);
+          else if (node && layer) {
+            // Up past a folded companion group: it has no row of its own.
+            const parent = st.project.layers.find((l) => l.id === foldedUnit(st.project.layers, layer.id))?.parentId;
+            if (parent) st.selectLayer(parent);
+            else st.selectNode(null);
+          }
           else st.selectNode(null);
           break;
         }

@@ -51,7 +51,7 @@ const RULES: Record<string, Text> = {
   thick: msg('Rims thicker than the strokes (≈{stem}% of the size for heavy faces) eat into the letters and flood the counters; use a heavy font or thinner rims (smallppt 縁取り文字).', { stem: STEM }),
   shadow: 'A hard black drop shadow reads cheap: opacity 0.5–0.7, a large soft blur and a small offset, tinted toward the face colour (marumarutelop; CGWORLD).',
   span: 'Rainbow titles carry the whole spectrum on EACH line (varietytelop 虹文字): a layer-wide ramp gives every line only part of it.',
-  noop: 'A switch that is on but changes nothing hides the reason a look doesn’t work: knockout needs rims to show and a face fill opacity below 100 % (as in Photoshop); かすれ needs an amount and an edge width.',
+  noop: 'A switch that is on but changes nothing hides the reason a look doesn’t work: Hollow letters needs rims to show and a face fill opacity below 100 % (as Photoshop’s Knockout); かすれ needs an amount and an edge width.',
 };
 
 // ---------- colour ----------
@@ -322,8 +322,8 @@ function spanIssues(l: TitleLayer): LintIssue[] {
 }
 
 /**
- * v5 settings that are on but render nothing (each fixable in one click): knockout without rims
- * or over an opaque face, かすれ at amount / edge 0.
+ * v5 settings that are on but render nothing (each fixable in one click): Hollow letters
+ * (knockout) without rims or over an opaque face, かすれ at amount / edge 0.
  */
 function noopIssues(l: TitleLayer): LintIssue[] {
   const out: LintIssue[] = [];
@@ -332,14 +332,14 @@ function noopIssues(l: TitleLayer): LintIssue[] {
   if (knockout && !rims.some((r) => r.enabled && r.width > 0))
     out.push({
       id: 'knockout-rims',
-      message: msg('Knockout is on but there are no rims to punch through: the face simply disappears.'),
+      message: msg('Hollow letters is on but there are no rims to cut through: the face simply disappears.'),
       rule: RULES.noop,
-      fix: { label: 'Turn knockout off', apply: (x) => (x.kind === 'title2d' ? { ...x, style: { ...x.style, knockout: false } } : x) },
+      fix: { label: 'Turn Hollow letters off', apply: (x) => (x.kind === 'title2d' ? { ...x, style: { ...x.style, knockout: false } } : x) },
     });
   else if (knockout && face.opacity >= 1)
     out.push({
       id: 'knockout-face',
-      message: msg('Knockout is on under an opaque face: the face covers the hole it punches.'),
+      message: msg('Hollow letters is on under an opaque face: the face covers the hollow it cuts.'),
       rule: RULES.noop,
       fix: { label: 'Face fill opacity 0', apply: (x) => (x.kind === 'title2d' ? { ...x, style: { ...x.style, face: { ...x.style.face, opacity: 0 } } } : x) },
     });

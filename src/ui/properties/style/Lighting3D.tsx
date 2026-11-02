@@ -22,7 +22,7 @@ import type { Comp, Environment3D, EnvironmentOverrides, EnvPreset, Light3D, Lig
 import { formatMsg, msg } from '../../../store/msg';
 import { getRef, refKey, refList } from '../../../store/paths';
 import { useEditor, type PropRef, type Refs } from '../../../store/store';
-import { ColorRow, IconBtn, NumRow, RefCheck, Row, Section, Seg, SelectRow, type Option } from '../../controls';
+import { ColorRow, Findable, IconBtn, NumRow, RefCheck, Row, Section, Seg, SelectRow, type Option } from '../../controls';
 import { engineHost } from '../../engineHost';
 import { useT } from '../../i18n';
 import { oneShot, pickFile, useGesture } from '../../util';
@@ -248,18 +248,18 @@ function NumField({ field, spec }: { field: Field; spec: NumSpec }) {
   );
 }
 
-/** Preset or custom HDR, intensity and the Element 3D grade of an environment. */
-function EnvironmentRows({ env }: { env: EnvBinding }) {
+/** Preset or custom HDR, intensity and the Element 3D grade of the environment of `scope`. */
+export function EnvironmentRows({ scope }: { scope: LightScope }) {
   const t = useT();
   const notify = useEditor((s) => s.notify);
+  const lit = useLighting(scope);
+  if (!lit) return null;
+  const { env } = lit;
   const preset = env.field('preset');
-  const tint = env.field('tint');
-  const num = (key: Exclude<EnvKey, 'preset' | 'tint'>) => <NumField field={env.field(key)} spec={NUM_SPECS[key]} />;
+  const row = (key: EnvKey) => <LightRow scope={scope} fkey={key} />;
   return (
     <>
-      <Marked mark={preset.mark}>
-        <SelectRow label={t('Preset')} id={preset.id} value={preset.value as EnvPreset} mixed={preset.mixed} options={tOpts(t, ENV_OPTIONS)} onChange={(v) => preset.set(v)} />
-      </Marked>
+      {row('preset')}
       {preset.value === 'custom' && !preset.mixed && (
         <Row label={t('HDR / image')}>
           <span className="muted ellipsis">{env.assetLoaded ? t('loaded') : t('none')}</span>
@@ -279,35 +279,60 @@ function EnvironmentRows({ env }: { env: EnvBinding }) {
           </button>
         </Row>
       )}
-      {num('intensity')}
-      <Marked mark={tint.mark}>
-        <ColorRow label={t('Tint')} id={tint.id} value={typeof tint.value === 'string' ? tint.value : '#ffffff'} mixed={tint.mixed} onChange={(v, c) => tint.set(v, c)} />
-      </Marked>
-      {num('contrast')}
-      {num('saturation')}
-      {num('repeatX')}
-      {num('repeatY')}
-      {num('blur')}
-      {num('rotation')}
+      {row('intensity')}
+      {row('tint')}
+      {row('contrast')}
+      {row('saturation')}
+      {row('repeatX')}
+      {row('repeatY')}
+      {row('blur')}
+      {row('rotation')}
     </>
   );
 }
 
-/** Tone mapping and exposure. */
-function ToneRows({ tone }: { tone: (key: 'toneMapping' | 'exposure') => Field }) {
-  const t = useT();
-  const map = tone('toneMapping');
+/** Tone mapping and exposure of `scope` (the document or layers). */
+export function ToneRows({ scope }: { scope: LightScope }) {
   return (
     <>
-      <Marked mark={map.mark}>
-        <Row label={t('Tone map')} title={t('How 3D layers squeeze bright light into the visible range')} fid={map.id}>
-          <span role="group" aria-label={t('Tone mapping')}>
-            <Seg value={map.value as Comp['toneMapping']} mixed={map.mixed} options={tOpts(t, TONE_OPTIONS)} onChange={(v) => map.set(v)} />
-          </span>
-        </Row>
-      </Marked>
-      <NumField field={tone('exposure')} spec={NUM_SPECS.exposure} />
+      <LightRow scope={scope} fkey="toneMapping" />
+      <LightRow scope={scope} fkey="exposure" />
     </>
+  );
+}
+
+/**
+ * One environment or tone value of `scope`, with its source marker, read from the store (so the
+ * search results show it live): the effective value, and an edit sets it at the scope's level.
+ */
+function LightRow(props: { scope: LightScope; fkey: EnvKey | 'toneMapping' | 'exposure' }) {
+  const { scope, fkey } = props;
+  const t = useT();
+  const lit = useLighting(scope);
+  const field = !lit ? null : fkey === 'toneMapping' || fkey === 'exposure' ? (lit.tone?.(fkey) ?? null) : lit.env.field(fkey);
+  if (!field) return null;
+  return (
+    <Findable type={LightRow} props={props}>
+      {fkey === 'preset' ? (
+        <Marked mark={field.mark}>
+          <SelectRow label={t('Preset')} id={field.id} value={field.value as EnvPreset} mixed={field.mixed} options={tOpts(t, ENV_OPTIONS)} onChange={(v) => field.set(v)} />
+        </Marked>
+      ) : fkey === 'tint' ? (
+        <Marked mark={field.mark}>
+          <ColorRow label={t('Tint')} id={field.id} value={typeof field.value === 'string' ? field.value : '#ffffff'} mixed={field.mixed} onChange={(v, c) => field.set(v, c)} />
+        </Marked>
+      ) : fkey === 'toneMapping' ? (
+        <Marked mark={field.mark}>
+          <Row label={t('Tone map')} title={t('How 3D layers squeeze bright light into the visible range')} fid={field.id}>
+            <span role="group" aria-label={t('Tone mapping')}>
+              <Seg value={field.value as Comp['toneMapping']} mixed={field.mixed} options={tOpts(t, TONE_OPTIONS)} onChange={(v) => field.set(v)} />
+            </span>
+          </Row>
+        </Marked>
+      ) : (
+        <NumField field={field} spec={NUM_SPECS[fkey]} />
+      )}
+    </Findable>
   );
 }
 
@@ -315,10 +340,16 @@ function ToneRows({ tone }: { tone: (key: 'toneMapping' | 'exposure') => Field }
 
 const compRef = (...path: (string | number)[]): PropRef => ({ layerId: null, path: ['comp', ...path] });
 
-/** The document's environment (Document properties). */
-export function CompEnvironment({ comp }: { comp: Comp }) {
-  const setAt = useEditor((s) => s.setAt);
-  const env: EnvBinding = {
+/** Where lighting values are edited: the document's, the own lighting of 3D layers `layerIds`, or the environment of the 3D materials at `refp` (parts). */
+export type LightScope = { level: 'document' } | { level: 'layer'; layerIds: readonly string[] } | { level: 'part'; refp: Refs };
+
+/** The document's lighting (Document properties). */
+export const DOCUMENT_LIGHTING: LightScope = { level: 'document' };
+
+/** The document's environment. */
+function documentEnvironment(comp: Comp): EnvBinding {
+  const { setAt } = useEditor.getState();
+  return {
     field: (key) => {
       const ref = compRef('environment', key);
       return { id: refKey(ref), value: comp.environment[key], mixed: false, set: (v, c) => setAt(ref, v, c) };
@@ -326,20 +357,12 @@ export function CompEnvironment({ comp }: { comp: Comp }) {
     assetLoaded: !!comp.environment.customAssetId,
     upload: (id) => setAt(compRef('environment', 'customAssetId'), id),
   };
-  return <EnvironmentRows env={env} />;
 }
 
-/** The document's tone mapping and exposure. */
-export function CompTone({ comp }: { comp: Comp }) {
-  const setAt = useEditor((s) => s.setAt);
-  return (
-    <ToneRows
-      tone={(key) => {
-        const ref = compRef(key);
-        return { id: refKey(ref), value: comp[key], mixed: false, set: (v, c) => setAt(ref, v, c) };
-      }}
-    />
-  );
+/** The document's tone mapping or exposure. */
+function documentValue(comp: Comp, key: 'toneMapping' | 'exposure'): Field {
+  const ref = compRef(key);
+  return { id: refKey(ref), value: comp[key], mixed: false, set: (v, c) => useEditor.getState().setAt(ref, v, c) };
 }
 
 // ---------- inherited values (layers and parts) ----------
@@ -420,6 +443,48 @@ function layerValue(targets: readonly LayerTarget[], key: 'toneMapping' | 'expos
   };
 }
 
+/** The environment of layer targets: the document's, overridden value by value. */
+const layerEnvironment = (targets: readonly LayerTarget[]): EnvBinding =>
+  inheritedEnvironment(
+    targets.map((tg) => ({ ref: sub(tg.ref, 'environment'), own: tg.own.environment, parent: tg.parent.environment, from: () => 'document' })),
+    'layer',
+  );
+
+const NO_IDS: readonly string[] = [];
+const NO_REFS: readonly PropRef[] = [];
+
+/** The own lighting of the 3D layers `ids`, from the store, each inheriting the document's. */
+function useLayerTargets(ids: readonly string[]): LayerTarget[] {
+  const comp = useEditor((s) => s.project.comp);
+  const layers = useEditor(useShallow((s) => ids.map((id) => s.project.layers.find((l) => l.id === id))));
+  const parent = effectiveLighting(comp, null);
+  return layers.flatMap((l) => (l?.kind === 'title3d' ? [{ ref: { layerId: l.id, path: ['style3d', 'lighting'] }, own: l.style3d.lighting, parent }] : []));
+}
+
+/** The environments of the 3D materials at `refp`, from the store (none where there is no 3D material). */
+function usePartTargets(refp: Refs): EnvTarget[] {
+  const comp = useEditor((s) => s.project.comp);
+  const refs = refList(refp);
+  const mats = useEditor(useShallow((s) => refs.map((r) => getRef(s.project, r) as Material3D | undefined)));
+  const layers = useEditor(useShallow((s) => refs.map((r) => s.project.layers.find((l) => l.id === r.layerId))));
+  return refs.flatMap((r, i) => {
+    const mat = mats[i];
+    const layer = layers[i];
+    if (!mat || layer?.kind !== 'title3d') return [];
+    return [{ ref: sub(r, 'environment'), own: mat.environment, parent: effectiveLighting(comp, layer).environment, from: (key: EnvKey) => lightingSource(layer, key) }];
+  });
+}
+
+/** The environment and tone values of `scope`, from the store; null where it has nothing to edit (a part without a 3D material). Tone is null on a part (always the layer's). */
+function useLighting(scope: LightScope): { env: EnvBinding; tone: ((key: 'toneMapping' | 'exposure') => Field) | null } | null {
+  const comp = useEditor((s) => s.project.comp);
+  const layerTargets = useLayerTargets(scope.level === 'layer' ? scope.layerIds : NO_IDS);
+  const partTargets = usePartTargets(scope.level === 'part' ? scope.refp : NO_REFS);
+  if (scope.level === 'document') return { env: documentEnvironment(comp), tone: (key) => documentValue(comp, key) };
+  if (scope.level === 'layer') return layerTargets.length ? { env: layerEnvironment(layerTargets), tone: (key) => layerValue(layerTargets, key) } : null;
+  return partTargets.length ? { env: inheritedEnvironment(partTargets, 'part'), tone: null } : null;
+}
+
 /**
  * Lighting of 3D layers (their own section, after Shape): the reflections lock, then every
  * environment, tone and light value with its source (set on this layer or from Document), Reset
@@ -430,14 +495,10 @@ function layerValue(targets: readonly LayerTarget[], key: 'toneMapping' | 'expos
  */
 export function LayerLightingSection({ layers }: { layers: readonly Title3DLayer[] }) {
   const t = useT();
-  const comp = useEditor((s) => s.project.comp);
   const { edit, setEachAt } = useEditor.getState();
-  const parent = effectiveLighting(comp, null);
-  const targets: LayerTarget[] = layers.map((l) => ({ ref: { layerId: l.id, path: ['style3d', 'lighting'] }, own: l.style3d.lighting, parent }));
-  const env = inheritedEnvironment(
-    targets.map((tg) => ({ ref: sub(tg.ref, 'environment'), own: tg.own.environment, parent: parent.environment, from: () => 'document' })),
-    'layer',
-  );
+  const layerIds = layers.map((l) => l.id);
+  const scope: LightScope = { level: 'layer', layerIds };
+  const targets = useLayerTargets(layerIds);
   const lights = layerValue(targets, 'lights');
   const single = layers.length === 1 ? layers[0] : null;
   const anySet = targets.some((tg) => lightingKeysSet(tg.own).length > 0);
@@ -495,15 +556,15 @@ export function LayerLightingSection({ layers }: { layers: readonly Title3DLayer
         )}
       </div>
       <div className="sub-head">{t('Environment (3D reflections)')}</div>
-      <EnvironmentRows env={env} />
+      <EnvironmentRows scope={scope} />
       <div className="sub-head">{t('Tone')}</div>
-      <ToneRows tone={(key) => layerValue(targets, key)} />
+      <ToneRows scope={scope} />
       <div className="sub-head lt-row">
         {lights.mark && <SourceMark {...lights.mark} />}
         {lights.mixed ? t('Lights') : t('Lights ({n})', { n: (lights.value as Light3D[]).length })}
       </div>
       {single ? (
-        <LightsEditor refp={sub(targets[0].ref, 'lights')} lights={lights.value as Light3D[]} own={!!single.style3d.lighting.lights} />
+        <LightsEditor refp={sub(targets[0].ref, 'lights')} />
       ) : (
         <div className="hint-line">{t('Each layer keeps its own lights: select one layer to edit them.')}</div>
       )}
@@ -518,16 +579,7 @@ export function LayerLightingSection({ layers }: { layers: readonly Title3DLayer
  */
 export function PartReflections({ refp }: { refp: Refs }) {
   const t = useT();
-  const comp = useEditor((s) => s.project.comp);
-  const refs = refList(refp);
-  const mats = useEditor(useShallow((s) => refs.map((r) => getRef(s.project, r) as Material3D | undefined)));
-  const layers = useEditor(useShallow((s) => refs.map((r) => s.project.layers.find((l) => l.id === r.layerId))));
-  const targets: EnvTarget[] = refs.flatMap((r, i) => {
-    const mat = mats[i];
-    const layer = layers[i];
-    if (!mat || layer?.kind !== 'title3d') return [];
-    return [{ ref: sub(r, 'environment'), own: mat.environment, parent: effectiveLighting(comp, layer).environment, from: (key) => lightingSource(layer, key) }];
-  });
+  const targets = usePartTargets(refp);
   const setEachAt = useEditor((s) => s.setEachAt);
   if (targets.length === 0) return null;
   return (
@@ -543,7 +595,7 @@ export function PartReflections({ refp }: { refp: Refs }) {
           {t('Reset to layer')}
         </button>
       </div>
-      <EnvironmentRows env={inheritedEnvironment(targets, 'part')} />
+      <EnvironmentRows scope={{ level: 'part', refp }} />
     </>
   );
 }
@@ -560,7 +612,7 @@ const DIR_FALLBACK_DIST = 1000; // distance used when a light sits exactly at th
  * camera, or the one behind the title when toggled to "Behind" (the dot turns hollow); the
  * distance from the centre is kept, so for a directional light only the direction changes.
  */
-function LightDirPad({ id, light, onChange }: { id: string; light: Light3D; onChange: (light: Light3D, coalesce: string) => void }) {
+function LightDirPad({ id, label, light, onChange }: { id: string; label: string; light: Light3D; onChange: (light: Light3D, coalesce: string) => void }) {
   const t = useT();
   const g = useGesture(`light-dir-${id}`);
   const dist = Math.hypot(light.x, light.y, light.z) || DIR_FALLBACK_DIST;
@@ -595,7 +647,7 @@ function LightDirPad({ id, light, onChange }: { id: string; light: Light3D; onCh
     ? `radial-gradient(circle at ${hx}% ${hy}%, #555 0%, #2a2a2e 45%, #141416 100%)`
     : `radial-gradient(circle at ${hx}% ${hy}%, #fff 0%, #9a9aa0 30%, #3a3a40 70%, #1a1a1e 100%)`;
   return (
-    <Row label={t('Direction')} title={t('Drag to aim the light (front view of the scene; distance from the centre is kept). Arrow keys nudge.')}>
+    <Row label={label} title={t('Drag to aim the light (front view of the scene; distance from the centre is kept). Arrow keys nudge.')}>
       <div
         role="slider"
         tabIndex={0}
@@ -647,12 +699,74 @@ function LightDirPad({ id, light, onChange }: { id: string; light: Light3D; onCh
   );
 }
 
-/** Light `i`; `set` edits one of its values (`key`) or the whole light (`key` null). */
-function LightEditor({ id, light, i, set, remove }: { id: string; light: Light3D; i: number; set: (key: keyof Light3D | null, value: unknown, coalesce?: string) => void; remove: () => void }) {
+/** The light values shown as number rows: labels and titles are i18n keys. */
+const LIGHT_NUMS = {
+  intensity: { label: 'Intensity', min: 0, max: 10, step: 0.05, unit: undefined, title: undefined },
+  x: { label: 'X', min: -3000, max: 3000, step: 1, unit: 'px', title: 'Light position right of the scene centre (directional: only the direction from the centre counts)' },
+  y: { label: 'Y', min: -3000, max: 3000, step: 1, unit: 'px', title: 'Light position above the scene centre' },
+  z: { label: 'Z', min: -3000, max: 3000, step: 1, unit: 'px', title: 'Light position toward the camera (negative = behind the title)' },
+} as const;
+
+type LightField = 'type' | 'color' | keyof typeof LIGHT_NUMS | 'direction';
+
+/**
+ * The lights at `refp` (the document's, or a layer's `lighting.lights`) from the store: the stored
+ * list, or the document's that a layer setting none inherits. `set` edits light `i`'s `key` (the
+ * whole light for null); a layer that inherits them sets the whole list on its first edit.
+ */
+function useLights(refp: PropRef) {
+  const stored = useEditor((s) => getRef(s.project, refp) as readonly Light3D[] | undefined);
+  const inherited = useEditor((s) => s.project.comp.lights);
+  const lights = stored ?? inherited;
+  const set = (i: number, key: keyof Light3D | null, value: unknown, coalesce?: string) => {
+    const { setAt } = useEditor.getState();
+    if (stored) setAt(key ? sub(refp, i, key) : sub(refp, i), value, coalesce);
+    else setAt(refp, lights.map((x, k) => (k === i ? (key ? { ...x, [key]: value } : (value as Light3D)) : x)), coalesce);
+  };
+  return { lights, set };
+}
+
+/**
+ * One value of light `i` at `refp`, read from the store (so the search results show it live);
+ * the position rows only while it isn't ambient. `named`: the label says which light (the search
+ * results, away from its card).
+ */
+function LightRowOf(props: { refp: PropRef; i: number; field: LightField; named?: boolean }) {
+  const { refp, i, field, named } = props;
   const t = useT();
-  const num = (key: 'intensity' | 'x' | 'y' | 'z', label: string, min: number, max: number, step: number, unit?: string, title?: string) => (
-    <NumRow label={label} title={title} id={`${id}.${key}`} value={light[key]} onChange={(v, c) => set(key, v, c)} min={min} max={max} step={step} unit={unit} />
+  const { lights, set } = useLights(refp);
+  const light = lights[i];
+  if (!light || (light.type === 'ambient' && field !== 'type' && field !== 'color' && field !== 'intensity')) return null;
+  const id = refKey(sub(refp, i));
+  const label = (text: string) => (named ? `${t('Light {n}', { n: i + 1 })} · ${text}` : text);
+  return (
+    <Findable type={LightRowOf} props={named ? props : { ...props, named: true }}>
+      {field === 'type' ? (
+        <SelectRow label={label(t('Type'))} id={`${id}.type`} value={light.type} options={tOpts(t, LIGHT_TYPES)} onChange={(v) => set(i, 'type', v)} />
+      ) : field === 'color' ? (
+        <ColorRow label={label(t('Colour'))} id={`${id}.color`} value={light.color} onChange={(v, c) => set(i, 'color', v, c)} />
+      ) : field === 'direction' ? (
+        <LightDirPad id={id} label={label(t('Direction'))} light={light} onChange={(l, c) => set(i, null, l, c)} />
+      ) : (
+        <NumRow
+          label={label(t(LIGHT_NUMS[field].label))}
+          title={LIGHT_NUMS[field].title && t(LIGHT_NUMS[field].title)}
+          id={`${id}.${field}`}
+          value={light[field]}
+          onChange={(v, c) => set(i, field, v, c)}
+          min={LIGHT_NUMS[field].min}
+          max={LIGHT_NUMS[field].max}
+          step={LIGHT_NUMS[field].step}
+          unit={LIGHT_NUMS[field].unit}
+        />
+      )}
+    </Findable>
   );
+}
+
+/** Light `i` at `refp` as a card: its type in the head, Remove, then its values. */
+function LightEditor({ refp, light, i, remove }: { refp: PropRef; light: Light3D; i: number; remove: () => void }) {
+  const t = useT();
   return (
     <div className="light-card">
       <div className="stack-head">
@@ -665,43 +779,29 @@ function LightEditor({ id, light, i, set, remove }: { id: string; light: Light3D
           </IconBtn>
         </span>
       </div>
-      <SelectRow label={t('Type')} id={`${id}.type`} value={light.type} options={tOpts(t, LIGHT_TYPES)} onChange={(v) => set('type', v)} />
-      <ColorRow label={t('Colour')} id={`${id}.color`} value={light.color} onChange={(v, c) => set('color', v, c)} />
-      {num('intensity', t('Intensity'), 0, 10, 0.05)}
-      {light.type !== 'ambient' && (
-        <>
-          <LightDirPad id={id} light={light} onChange={(l, c) => set(null, l, c)} />
-          {num('x', t('X'), -3000, 3000, 1, 'px', t('Light position right of the scene centre (directional: only the direction from the centre counts)'))}
-          {num('y', t('Y'), -3000, 3000, 1, 'px', t('Light position above the scene centre'))}
-          {num('z', t('Z'), -3000, 3000, 1, 'px', t('Light position toward the camera (negative = behind the title)'))}
-        </>
-      )}
+      <LightRowOf refp={refp} i={i} field="type" />
+      <LightRowOf refp={refp} i={i} field="color" />
+      <LightRowOf refp={refp} i={i} field="intensity" />
+      <LightRowOf refp={refp} i={i} field="direction" />
+      <LightRowOf refp={refp} i={i} field="x" />
+      <LightRowOf refp={refp} i={i} field="y" />
+      <LightRowOf refp={refp} i={i} field="z" />
     </div>
   );
 }
 
 /**
- * The lights at `refp` (the document's, or a layer's `lighting.lights`), one card each, plus Add
- * light. `own`: `refp` holds `lights`; a layer that inherits them (false) sets the whole list
- * on its first edit.
+ * The lights at `refp` (the document's, or a layer's `lighting.lights`, the document's while it
+ * sets none), one card each, plus Add light.
  */
-export function LightsEditor({ refp, lights, own = true }: { refp: PropRef; lights: readonly Light3D[]; own?: boolean }) {
+export function LightsEditor({ refp }: { refp: PropRef }) {
   const t = useT();
   const setAt = useEditor((s) => s.setAt);
+  const { lights } = useLights(refp);
   return (
     <>
       {lights.map((l, i) => (
-        <LightEditor
-          key={l.id}
-          id={refKey(sub(refp, i))}
-          light={l}
-          i={i}
-          set={(key, value, coalesce) => {
-            if (own) setAt(key ? sub(refp, i, key) : sub(refp, i), value, coalesce);
-            else setAt(refp, lights.map((x) => (x === l ? (key ? { ...x, [key]: value } : (value as Light3D)) : x)), coalesce);
-          }}
-          remove={() => setAt(refp, lights.filter((x) => x !== l), undefined, 'Remove light')}
-        />
+        <LightEditor key={l.id} refp={refp} light={l} i={i} remove={() => setAt(refp, lights.filter((x) => x !== l), undefined, 'Remove light')} />
       ))}
       <button className="small" onClick={() => setAt(refp, [...lights, { id: uid(), type: 'point', color: '#ffffff', intensity: 2, x: 0, y: 300, z: 600 }], undefined, 'Add light')}>
         + {t('Add light')}

@@ -4,25 +4,35 @@ import { listEffects } from '../../effects/registry';
 import type { EffectCategory, EffectDef } from '../../engine/contracts';
 import { defaultAdjustment } from '../../model/defaults';
 import { isTitleLayer, partEffectsOf } from '../../model/parts';
-import type { EffectInstance, Layer, ParamValue } from '../../model/types';
+import type { EffectInstance, Layer, ParamValue, Project } from '../../model/types';
 import { makeEffect } from '../../store/effects';
 import { effectOwnerLabel } from '../../store/labels';
-import { formatMsg } from '../../store/msg';
+import { withCompanion } from '../../store/layerOps';
+import { formatMsg, type Translate } from '../../store/msg';
 import { useEditor, type EffectOwner } from '../../store/store';
+import { COMPANION_CATEGORIES, companionEntries, takesCompanions, type CompanionCategory, type CompanionEntry } from '../companions';
+import { addErode, ERODE_ABOUT, ERODE_NAME } from '../erode';
+import { GeneratorIcon } from '../generatorIcons';
 import { addGlint, GLINT_ABOUT, GLINT_ADD_LABEL } from '../glint';
 import { tr, useT } from '../i18n';
 import { ADJUSTMENT_MENU } from '../layers/commands';
 import './effects.css';
 
-/** Add-menu categories in menu order, with a rail glyph and a tooltip. */
-const CATEGORIES: { id: EffectCategory; glyph: string; title: string }[] = [
+type Category = EffectCategory | CompanionCategory;
+
+/** Add-menu categories in menu order, with a rail glyph and a tooltip: the effects', then the companions' (ui/companions.ts). */
+const CATEGORIES: { id: Category; glyph: string; title: string }[] = [
   { id: 'Glow', glyph: '✺', title: 'Outer and inner glows (colour or gradient), HDR deep glow, 導光板 contour lines' },
   { id: 'Blur', glyph: '◍', title: 'Gaussian, motion, lens, tilt-shift and radial blurs' },
   { id: 'Shadow', glyph: '◣', title: 'Drop, inner and perspective shadows, floor reflection' },
   { id: 'Material', glyph: '◈', title: 'Material (bevel, chrome, glass, metal grain), keyline strokes and 2D extrusion' },
   { id: 'Color', glyph: '◐', title: 'Adjustments (levels, curves, hue/saturation, gradient map…), gradient overlay (rainbow, glint sweep), halftone, film grain' },
-  { id: 'Distort', glyph: '≈', title: 'Wave, chromatic aberration, glitch, shatter and motion trail' },
+  { id: 'Distort', glyph: '≈', title: 'Wave, chromatic aberration, glitch, shatter, motion trail and かすれ dry brush' },
+  ...COMPANION_CATEGORIES,
 ];
+
+/** A category's name: the companions' Light and Energy are the generator categories' words. */
+const categoryName = (t: Translate, c: Category) => (c === 'Light' || c === 'Energy' ? t(c, undefined, { ctx: 'generator' }) : t(c));
 
 /** First sentence of a (translated) description: the menu's one-line summary (the full text is the tooltip). */
 const summary = (desc: string) => desc.match(/^.*?(?:\.(?=\s|$)|。)/)?.[0] ?? desc;
@@ -30,14 +40,18 @@ const summary = (desc: string) => desc.match(/^.*?(?:\.(?=\s|$)|。)/)?.[0] ?? d
 /**
  * One add-menu entry: an effect with its default params, or, for the Adjust effect, one entry
  * per adjustment of the adjustment-layer menu (bar Effects only), named by the adjustment; or,
- * on a 3D title, its glint (switched on, ui/glint.ts).
+ * on a 3D title, its glint (switched on, ui/glint.ts); on a 2D title, its かすれ (switched on,
+ * ui/erode.ts); or, on a layer that takes them, a generator preset added as a companion
+ * (ui/companions.ts).
  */
 interface Entry {
-  /** Unique per entry: the effect type, `adjust:<adjustment type>`, or `glint3d`. */
+  /** Unique per entry: the effect type, `adjust:<adjustment type>`, `glint3d`, `erode2d` or `gen:<type>:<preset>`. */
   key: string;
-  /** The effect added; null for the 3D glint. */
+  /** The effect added; null for the 3D glint, the 2D かすれ and companions. */
   def: EffectDef | null;
-  category: EffectCategory;
+  /** The companion added. */
+  companion?: CompanionEntry;
+  category: Category;
   /** English description (the i18n key). */
   description: string;
   /** English name (the i18n key) and its i18n context. */
@@ -48,6 +62,7 @@ interface Entry {
 }
 
 const GLINT_ENTRY: Entry = { key: 'glint3d', def: null, category: 'Glow', description: GLINT_ABOUT, label: GLINT_ADD_LABEL };
+const ERODE_ENTRY: Entry = { key: 'erode2d', def: null, category: 'Distort', description: ERODE_ABOUT, label: ERODE_NAME };
 
 function menuEntries(): Entry[] {
   return listEffects().flatMap((def): Entry[] =>
@@ -65,6 +80,15 @@ function menuEntries(): Entry[] {
   );
 }
 
+const COMPANION_ENTRIES: Entry[] = companionEntries().map((c) => ({
+  key: `gen:${c.def.type}:${c.presetId}`,
+  def: null,
+  companion: c,
+  category: c.category,
+  description: c.def.description,
+  label: c.label,
+}));
+
 /** The searchable text of an entry in one language, normalised (NFKC, lower case) for matching. */
 interface SearchText {
   label: string;
@@ -81,9 +105,10 @@ function searchTextsOf(e: Entry): SearchText[] {
     const d = e.def;
     texts = (['en', 'ja'] as const).map((lang) => {
       const label = norm(tr(e.label, undefined, { lang, ctx: e.ctx }));
-      // An adjustment entry is also found by its effect's name (“Adjust”).
-      const effect = d && e.label !== d.label ? ` ${norm(tr(d.label, undefined, { lang }))}` : '';
-      return { label, hay: `${label}${effect} ${e.key.toLowerCase()} ${norm(tr(e.category, undefined, { lang }))} ${norm(tr(e.description, undefined, { lang }))}` };
+      // An adjustment entry is also found by its effect's name (“Adjust”), a companion by its generator's (“Fire”).
+      const also = d && e.label !== d.label ? d.label : e.companion?.def.label;
+      const effect = also ? ` ${norm(tr(also, undefined, { lang }))}` : '';
+      return { label, hay: `${label}${effect} ${e.key.toLowerCase()} ${norm(categoryName((en, v, o) => tr(en, v, { ...o, lang }), e.category))} ${norm(tr(e.description, undefined, { lang }))}` };
     });
     searchTexts.set(e.key, texts);
   }
@@ -110,7 +135,7 @@ function searchRank(e: Entry, q: string): number {
   return ranks.length ? Math.min(...ranks) : -1;
 }
 
-const catRank = (c: EffectCategory) => CATEGORIES.findIndex((x) => x.id === c);
+const catRank = (c: Category) => CATEGORIES.findIndex((x) => x.id === c);
 
 /** `layer` with `fx` added on top of each of `owners`' stacks (all on `layer`): the hover preview. */
 function withEffect(layer: Layer, owners: readonly EffectOwner[], fx: EffectInstance): Layer {
@@ -150,7 +175,7 @@ function placement(a: MenuAnchor): CSSProperties {
  */
 export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: EffectOwner | readonly EffectOwner[]; onClose: () => void; anchor: MenuAnchor }) {
   const t = useT();
-  const { addEffect, setPreviewOverride } = useEditor.getState();
+  const { addEffect, addGenerator, setPreviewOverride } = useEditor.getState();
   const [selected] = useState<readonly EffectOwner[]>(() => ('layerId' in picked ? [picked] : picked));
   const layerId = selected[0].layerId;
   const ownerLayer = useEditor((s) => s.project.layers.find((l) => l.id === layerId));
@@ -158,15 +183,22 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
   const [owners, setOwners] = useState(selected);
   const [style] = useState(() => placement(anchor));
   const [query, setQuery] = useState('');
-  const [cat, setCat] = useState<EffectCategory | 'all'>('all');
+  const [cat, setCat] = useState<Category | 'all'>('all');
   const [active, setActive] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const previewing = useRef(false);
   const q = query.trim().normalize('NFKC').toLowerCase();
-  // A 3D title's glint is offered for the layer (not its parts) while it is off.
-  const glintOffered = ownerLayer?.kind === 'title3d' && owners[0].part === null && !ownerLayer.style3d.glint.enabled;
-  const entries = useMemo(() => (glintOffered ? [GLINT_ENTRY, ...menuEntries()] : menuEntries()), [glintOffered]);
+  // A 3D title's glint and a 2D title's かすれ are offered for the layer (not its parts) while
+  // off; companions on a title or group itself.
+  const onLayer = owners.length === 1 && owners[0].part === null;
+  const glintOffered = ownerLayer?.kind === 'title3d' && onLayer && !ownerLayer.style3d.glint.enabled;
+  const erodeOffered = ownerLayer?.kind === 'title2d' && onLayer && !ownerLayer.style.erode.enabled;
+  const companionsOffered = onLayer && takesCompanions(ownerLayer);
+  const entries = useMemo(
+    () => [...(glintOffered ? [GLINT_ENTRY] : []), ...(erodeOffered ? [ERODE_ENTRY] : []), ...menuEntries(), ...(companionsOffered ? COMPANION_ENTRIES : [])],
+    [glintOffered, erodeOffered, companionsOffered],
+  );
   // Every match across categories, best first while searching, else category then registry order.
   const hits = useMemo(() => {
     const scored = entries.map((e, i) => ({ e, i, s: q ? searchRank(e, q) : 0 })).filter((h) => h.s >= 0);
@@ -174,7 +206,7 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
   }, [entries, q]);
   const shown = useMemo(() => (cat === 'all' ? hits : hits.filter((e) => e.category === cat)), [hits, cat]);
   const counts = useMemo(() => {
-    const m = new Map<EffectCategory, number>();
+    const m = new Map<Category, number>();
     for (const e of hits) m.set(e.category, (m.get(e.category) ?? 0) + 1);
     return m;
   }, [hits]);
@@ -183,16 +215,21 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
   const name = (e: Entry) => t(e.label, undefined, { ctx: e.ctx });
   const preview = (e: Entry | null) => {
     setActive(e?.key ?? null);
-    const layer = useEditor.getState().project.layers.find((l) => l.id === layerId);
-    let shownLayer: Layer | null = null;
+    const project = useEditor.getState().project;
+    const layer = project.layers.find((l) => l.id === layerId);
+    let shownAs: Layer | Project | null = null;
     if (layer && e?.def) {
       const fx = makeEffect(e.def.type, e.params);
-      shownLayer = fx && withEffect(layer, owners, fx);
+      shownAs = fx && withEffect(layer, owners, fx);
+    } else if (layer && e?.companion) {
+      shownAs = withCompanion(project, e.companion.def.type, e.companion.presetId, layer.id)?.project ?? null;
     } else if (layer?.kind === 'title3d' && e) {
-      shownLayer = { ...layer, style3d: { ...layer.style3d, glint: { ...layer.style3d.glint, enabled: true } } };
+      shownAs = { ...layer, style3d: { ...layer.style3d, glint: { ...layer.style3d.glint, enabled: true } } };
+    } else if (layer?.kind === 'title2d' && e) {
+      shownAs = { ...layer, style: { ...layer.style, erode: { ...layer.style.erode, enabled: true } } };
     }
-    previewing.current = !!shownLayer;
-    setPreviewOverride(shownLayer);
+    previewing.current = !!shownAs;
+    setPreviewOverride(shownAs);
   };
   // Esc and outside clicks close the menu. Closing drops the hover preview, only when this menu
   // set one, so mounting or closing never clears another preview.
@@ -214,6 +251,8 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
     if (previewing.current) setPreviewOverride(null);
     previewing.current = false;
     if (e.def) addEffect(owners, e.def.type, e.params);
+    else if (e.companion) addGenerator(e.companion.def.type, e.companion.presetId, layerId);
+    else if (e.key === ERODE_ENTRY.key) addErode(layerId);
     else addGlint(layerId);
     onClose();
   };
@@ -240,7 +279,7 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
       if (hit) add(hit);
     }
   };
-  const railBtn = (id: EffectCategory | 'all', glyph: string, name: string, title: string, n: number) => (
+  const railBtn = (id: Category | 'all', glyph: string, name: string, title: string, n: number) => (
     <button
       key={id}
       role="tab"
@@ -319,7 +358,7 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
       <div className="fx-add-body">
         <div className="fx-add-rail" role="tablist" aria-label={t('Effect categories')} aria-orientation="vertical">
           {railBtn('all', '☰', t('All'), t(q ? 'Every match, best first' : 'Every effect, grouped by category'), hits.length)}
-          {CATEGORIES.map((c) => railBtn(c.id, c.glyph, t(c.id), t(c.title), counts.get(c.id) ?? 0))}
+          {CATEGORIES.filter((c) => companionsOffered || !COMPANION_CATEGORIES.some((x) => x.id === c.id)).map((c) => railBtn(c.id, c.glyph, categoryName(t, c.id), t(c.title), counts.get(c.id) ?? 0))}
         </div>
         <div className="fx-add-list" id="fx-add-list" role="listbox" aria-label={t('Effects')} ref={listRef} onPointerLeave={() => preview(null)}>
           {shown.length === 0 && (
@@ -327,13 +366,13 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
               {q
                 ? cat === 'all'
                   ? t('No effect matches “{query}”.', { query: query.trim() })
-                  : t('No effect in {category} matches “{query}”.', { category: t(cat), query: query.trim() })
+                  : t('No effect in {category} matches “{query}”.', { category: categoryName(t, cat), query: query.trim() })
                 : t('No effects in this category.')}
             </div>
           )}
           {shown.map((e, i) => (
             <div key={e.key}>
-              {!q && cat === 'all' && e.category !== shown[i - 1]?.category && <div className="menu-group">{t(e.category)}</div>}
+              {!q && cat === 'all' && e.category !== shown[i - 1]?.category && <div className="menu-group">{categoryName(t, e.category)}</div>}
               <button
                 id={`fx-add-${e.key}`}
                 role="option"
@@ -346,8 +385,10 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
                 onClick={() => add(e)}
               >
                 <span className="fx-add-label">
+                  {e.companion && <GeneratorIcon type={e.companion.def.type} />}
                   {name(e)}
-                  {q && <span className="fx-add-cat">{t(e.category)}</span>}
+                  {e.companion?.behind && <span className="fx-behind">{t('behind')}</span>}
+                  {q && <span className="fx-add-cat">{categoryName(t, e.category)}</span>}
                   {e === current && q && <kbd className="fx-add-enter">↵</kbd>}
                 </span>
                 <span className="fx-add-sum">{summary(t(e.description))}</span>

@@ -1,14 +1,87 @@
 import { createGroupLayer, defaultTransform } from './defaults';
 import type { GeneratorLayer, GroupLayer, Layer } from './types';
 
-// Companion generators (GeneratorLayer.companionOf): the generators a look or "on <layer>" made
+// Companion generators (GeneratorLayer.companionOf): the generators a look or “+ Add effect” made
 // for a layer (glints on its highlights, fire behind it). They sit directly below the layer or
 // above its clip group, in a group with it, so the group composites them with the layer alone (an
-// 'add' companion lights only the layer, as the effects they replaced did) and moves as one.
+// 'add' companion lights only the layer, as the effects they replaced did) and moves as one. The
+// UI lists them as effects of that layer (ui/companions.ts) while it exists.
 
 /** The companions of layer `id`. */
 export const companionsOf = (layers: readonly Layer[], id: string): GeneratorLayer[] =>
   layers.filter((l): l is GeneratorLayer => l.kind === 'generator' && l.companionOf === id);
+
+/**
+ * The layer generator `l` is listed under as an effect: its `companionOf` layer while that exists
+ * and isn't itself listed as a companion (else `l` shows as a layer of its own).
+ */
+export function companionOwner(layers: readonly Layer[], l: Layer | undefined): Layer | undefined {
+  if (l?.kind !== 'generator' || l.companionOf === undefined || l.companionOf === l.id) return undefined;
+  const owner = layers.find((x) => x.id === l.companionOf);
+  if (owner?.kind === 'generator' && owner.companionOf !== undefined && layers.some((x) => x.id === owner.companionOf)) return undefined;
+  return owner;
+}
+
+/** Layer id → the companions listed under it as effects (companionOwner), bottom first. */
+export function listedCompanions(layers: readonly Layer[]): Map<string, GeneratorLayer[]> {
+  const out = new Map<string, GeneratorLayer[]>();
+  for (const l of layers) {
+    const owner = l.kind === 'generator' ? companionOwner(layers, l) : undefined;
+    if (owner && l.kind === 'generator') out.set(owner.id, [...(out.get(owner.id) ?? []), l]);
+  }
+  return out;
+}
+
+/** `ids` with every companion of a listed layer, transitively (mutated and returned). */
+export function addCompanionsOf(layers: readonly Layer[], ids: Set<string>): Set<string> {
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const l of layers)
+      if (!ids.has(l.id) && l.kind === 'generator' && l.companionOf !== undefined && ids.has(l.companionOf)) {
+        ids.add(l.id);
+        grew = true;
+      }
+  }
+  return ids;
+}
+
+/** The companion group (GroupLayer.companionGroupOf) layer `id` sits in with only its clip group and companions; else null. */
+function wrapperOf(layers: readonly Layer[], id: string): GroupLayer | null {
+  const l = layers.find((x) => x.id === id);
+  const p = l?.parentId !== undefined ? layers.find((x) => x.id === l.parentId) : undefined;
+  if (p?.kind !== 'group' || p.companionGroupOf !== id) return null;
+  return layers.every((c) => c.parentId !== p.id || c.id === id || c.clip || (c.kind === 'generator' && c.companionOf !== undefined)) ? p : null;
+}
+
+/**
+ * What moves, duplicates or groups as layer `id` with its companions: the outermost companion
+ * group wrapping it on its own (a look's outer companions sit in a group around the inner one),
+ * else the layer itself.
+ */
+export function companionUnit(layers: readonly Layer[], id: string): string {
+  let unit = id;
+  for (let w = wrapperOf(layers, unit); w; w = wrapperOf(layers, unit)) unit = w.id;
+  return unit;
+}
+
+/**
+ * Whether `g` is a companion group the UI folds away: one holding just its layer (with that
+ * layer's clip group) and companions, with no effects or masks of its own. The Layers panel shows
+ * the layer's row in its place, and that row's eye, flags, blend, opacity, drag and stack
+ * commands act on the group. A layer dragged into it (or effects / masks put on it) makes it a
+ * group of its own again, shown as such. A plain boolean, not a type guard: false says nothing
+ * about the kind (a group of the user's own fails it too).
+ */
+export function isFoldedWrapper(layers: readonly Layer[], g: Layer | undefined): boolean {
+  return g?.kind === 'group' && g.companionGroupOf !== undefined && !g.effects.length && !g.masks.length && wrapperOf(layers, g.companionGroupOf)?.id === g.id;
+}
+
+/** Layer `id`, or the outermost folded companion group (isFoldedWrapper) standing behind it. */
+export function foldedUnit(layers: readonly Layer[], id: string): string {
+  let unit = id;
+  for (let w = wrapperOf(layers, unit); w && isFoldedWrapper(layers, w); w = wrapperOf(layers, unit)) unit = w.id;
+  return unit;
+}
 
 /**
  * Index span [from, to] of layer `i` with its subtree (contiguous directly below a group's row)

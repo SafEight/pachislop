@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { companionOwner, foldedUnit, listedCompanions } from '../../model/companions';
 import type { BlendMode, Layer } from '../../model/types';
 import { effectsOf } from '../../store/effects';
 import { effectOwnerLabel } from '../../store/labels';
@@ -7,14 +8,15 @@ import { useEditor, type EffectOwner, type NodeRef } from '../../store/store';
 import { ancestorsOf } from '../../store/tree';
 import { NumberField } from '../controls';
 import { useT } from '../i18n';
+import { deleteErode } from '../erode';
 import { deleteGlint } from '../glint';
 import { addGroupLayer, draggingFiles, importFiles } from '../layerActions';
 import { AddEffectMenu, type MenuAnchor } from '../properties/AddEffectMenu';
 import { oneShot } from '../util';
-import { addMaskItems, adjustmentItems, newLayerItems } from './commands';
+import { addMaskItems, adjustmentItems, BLENDS, newLayerItems } from './commands';
 import { drag } from './dnd';
 import { ContextMenu, type CtxEntry } from './LayerContextMenu';
-import { EffectRow, GlintRow, HeadRow, LayerRow, PartRow, type RowUi } from './LayerRow';
+import { CompanionRow, EffectRow, HeadRow, LayerRow, PartRow, PinnedRow, type RowUi } from './LayerRow';
 import { buildRows, rowFocused, rowNode, sameNode, twirlOf, type PanelRow } from './rows';
 import './layers.css';
 
@@ -22,28 +24,25 @@ import './layers.css';
 // of the selection), the layer tree with title style parts and effects under their twirls, and
 // the bottom toolbar. Projects stay under ~100 rows, so the tree is a plain (unvirtualised) list.
 
-/** Blend modes with their menu labels (PS wording; translated). */
-const BLENDS: readonly { value: BlendMode; label: string }[] = [
-  { value: 'normal', label: 'Normal' },
-  { value: 'add', label: 'Add' },
-  { value: 'screen', label: 'Screen' },
-  { value: 'multiply', label: 'Multiply' },
-  { value: 'overlay', label: 'Overlay' },
-];
-
-/** The effect stack(s) a node edits: a layer's own (also when one of its masks is focused), a part's, each of several selected parts', or the one an effect is in. */
+/**
+ * The effect stack(s) a node edits: a layer's own (also when one of its masks is focused), a
+ * part's, each of several selected parts', or the one an effect (or a companion: its layer's) is in.
+ */
 function ownersOf(node: NodeRef | null, layers: readonly Layer[]): EffectOwner[] {
   if (!node) return [];
   if (node.kind === 'part' || node.kind === 'effect') return [{ layerId: node.layerId, part: node.part }];
   if (node.kind === 'parts') return node.parts.map((part) => ({ layerId: node.layerId, part }));
-  return layers.some((x) => x.id === node.layerId) ? [{ layerId: node.layerId, part: null }] : [];
+  const l = layers.find((x) => x.id === node.layerId);
+  const owner = node.kind === 'layer' ? companionOwner(layers, l) : undefined;
+  return l ? [{ layerId: (owner ?? l).id, part: null }] : [];
 }
 
-/** Delete / trash: the focused effect, glint or mask, or the selected layers. A part can't be deleted here (its editor removes rims / bands). */
+/** Delete / trash: the focused effect, glint, かすれ or mask, or the selected layers. A part can't be deleted here (its editor removes rims / bands). */
 function deleteNode(node: NodeRef | null) {
   const st = useEditor.getState();
   if (node?.kind === 'effect') st.removeEffect({ layerId: node.layerId, part: node.part }, node.effectId);
   else if (node?.kind === 'glint') deleteGlint([node.layerId]);
+  else if (node?.kind === 'erode') deleteErode([node.layerId]);
   else if (node?.kind === 'mask') st.removeMask(node.layerId, node.maskId);
   else if (node?.kind !== 'part' && node?.kind !== 'parts' && st.selectedLayerIds.length) st.removeLayers(st.selectedLayerIds);
 }
@@ -185,7 +184,8 @@ export function LayersPanel() {
       twirl: (id, open, all) => {
         const st = useEditor.getState();
         const next = { ...st.view.expanded };
-        if (all) for (const l of st.project.layers) if (twirlOf(l, next) !== null) next[l.id] = open;
+        const listed = listedCompanions(st.project.layers);
+        if (all) for (const l of st.project.layers) if (twirlOf(l, next, listed.has(l.id)) !== null) next[l.id] = open;
         next[id] = open;
         st.setView({ expanded: next });
       },
@@ -194,15 +194,18 @@ export function LayersPanel() {
   );
 
   // A node selected elsewhere (canvas, Properties breadcrumb) is twirled into view: its groups
-  // open, and its layer when it is a part, an effect or the glint.
+  // open, and its layer when it is a part, an effect, the glint / かすれ or a companion (under its layer's).
   useEffect(() => {
     if (!node) return;
     const st = useEditor.getState();
     const { layers: all } = st.project;
-    const want: Layer[] = ancestorsOf(all, node.layerId);
-    const own = all.find((l) => l.id === node.layerId);
-    if ((node.kind === 'part' || node.kind === 'parts' || node.kind === 'effect' || node.kind === 'glint') && own) want.push(own);
-    const closed = want.filter((l) => twirlOf(l, st.view.expanded) === false);
+    const sel = all.find((l) => l.id === node.layerId);
+    const owner = node.kind === 'layer' ? companionOwner(all, sel) : undefined;
+    const own = owner ?? sel;
+    const want: Layer[] = own ? ancestorsOf(all, own.id) : [];
+    if ((owner || node.kind === 'part' || node.kind === 'parts' || node.kind === 'effect' || node.kind === 'glint' || node.kind === 'erode') && own) want.push(own);
+    const listed = listedCompanions(all);
+    const closed = want.filter((l) => twirlOf(l, st.view.expanded, listed.has(l.id)) === false);
     if (closed.length) st.setView({ expanded: { ...st.view.expanded, ...Object.fromEntries(closed.map((l) => [l.id, true])) } });
   }, [node]);
 
@@ -239,11 +242,11 @@ export function LayersPanel() {
     switch (e.key) {
       case 'ArrowDown':
       case 'ArrowUp': {
-        // ⇧ extends the layer range, so it skips part / effect rows.
+        // ⇧ extends the layer range, so it skips part / effect / companion rows.
         const step = e.key === 'ArrowDown' ? 1 : -1;
         let j = i < 0 ? (step > 0 ? -1 : nodes.length) : i;
         do j += step;
-        while (e.shiftKey && nodes[j] && nodes[j].n.kind !== 'layer');
+        while (e.shiftKey && nodes[j] && nodes[j].r.kind !== 'layer');
         const next = nodes[j];
         if (next) st.selectNode(next.n, e.shiftKey ? { range: true } : undefined);
         break;
@@ -263,12 +266,13 @@ export function LayersPanel() {
           ui.twirl(cur.r.layer.id, false, false);
           break;
         }
-        // Up to the parent node: mask → its layer, effect → its part or layer, part / glint → layer, member → group.
+        // Up to the parent node: mask → its layer, effect → its part or layer, part / glint / かすれ / companion → layer, member → group.
         const n = cur.n;
         if (n.kind === 'effect' && n.part) st.selectNode({ kind: 'part', layerId: n.layerId, part: n.part });
+        else if (cur.r.kind === 'companion') st.selectNode({ kind: 'layer', layerId: cur.r.owner.id });
         else if (n.kind !== 'layer') st.selectNode({ kind: 'layer', layerId: n.layerId });
         else {
-          const parent = byId.get(n.layerId)?.parentId;
+          const parent = byId.get(foldedUnit(layers, n.layerId))?.parentId;
           if (parent) st.selectNode({ kind: 'layer', layerId: parent });
         }
         break;
@@ -288,11 +292,15 @@ export function LayersPanel() {
     e.stopPropagation();
   };
 
-  const primary = primaryId ? byId.get(primaryId) : undefined;
+  // Blend, opacity, the flags and the clip of a layer in a folded companion group are the group's.
+  const headerIds = useMemo(() => selectedIds.map((id) => foldedUnit(layers, id)), [selectedIds, layers]);
+  const headerLayer = primaryId ? byId.get(foldedUnit(layers, primaryId)) : undefined;
   const fxOwners = ownersOf(node, layers);
   const fxLayer = fxOwners.length > 0 ? byId.get(fxOwners[0].layerId) : undefined;
   const fxTarget = !fxLayer ? null : fxOwners.length > 1 ? t('{n} parts', { n: fxOwners.length }) : formatMsg(effectOwnerLabel(fxLayer, fxOwners[0].part), t);
   const selSet = new Set(selectedIds);
+  // A companion row is an effect to the toolbar's Duplicate / Delete.
+  const fxNode = node?.kind === 'effect' || node?.kind === 'glint' || node?.kind === 'erode' || (node?.kind === 'layer' && !!companionOwner(layers, byId.get(node.layerId)));
 
   const renderRow = (r: PanelRow) => {
     const focused = rowFocused(rowNode(r), node);
@@ -316,7 +324,19 @@ export function LayersPanel() {
         return layer && <EffectRow key={r.fx.id} row={r} layer={layer} focused={focused} ui={ui} />;
       }
       case 'glint':
-        return <GlintRow key={`${r.layer.id}|glint`} row={r} focused={focused} ui={ui} />;
+      case 'erode':
+        return <PinnedRow key={`${r.layer.id}|${r.kind}`} row={r} focused={focused} ui={ui} />;
+      case 'companion':
+        return (
+          <CompanionRow
+            key={r.layer.id}
+            row={r}
+            focused={focused}
+            focusedMask={node?.kind === 'mask' && node.layerId === r.layer.id ? node.maskId : null}
+            renaming={renaming === r.layer.id}
+            ui={ui}
+          />
+        );
       case 'head':
         return <HeadRow key={r.key} row={r} />;
     }
@@ -324,7 +344,7 @@ export function LayersPanel() {
 
   return (
     <div ref={rootRef} className={`lp ${alt ? 'alt' : ''}`} tabIndex={0} aria-label={t('Layers')} onKeyDown={onKeyDown}>
-      <Header layer={primary} ids={selectedIds} />
+      <Header layer={headerLayer} ids={headerIds} />
       <div
         ref={treeRef}
         className="lp-tree"
@@ -394,14 +414,18 @@ export function LayersPanel() {
         >
           📁
         </ToolButton>
-        <ToolButton label={`${primary?.clip ? t('Release clipping mask') : t('Create clipping mask')} (⌥⌘G)`} disabled={!selectedIds.length} onClick={() => useEditor.getState().toggleClip()}>
-          ↳
+        <ToolButton label={`${headerLayer?.clip ? t('Release clipping mask') : t('Create clipping mask')} (⌥⌘G)`} disabled={!selectedIds.length} onClick={() => useEditor.getState().toggleClip()}>
+          ↴
         </ToolButton>
-        <ToolButton label={node?.kind === 'effect' ? t('Duplicate effect') : t('Duplicate layer (⌘J)')} disabled={!node || node.kind === 'part' || node.kind === 'parts' || node.kind === 'glint'} onClick={() => duplicateNode(node)}>
+        <ToolButton
+          label={fxNode ? t('Duplicate effect') : t('Duplicate layer (⌘J)')}
+          disabled={!node || node.kind === 'part' || node.kind === 'parts' || node.kind === 'glint' || node.kind === 'erode'}
+          onClick={() => duplicateNode(node)}
+        >
           ⧉
         </ToolButton>
         <ToolButton
-          label={node?.kind === 'effect' || node?.kind === 'glint' ? t('Delete effect') : node?.kind === 'mask' ? t('Delete mask') : t('Delete layer (Del)')}
+          label={fxNode ? t('Delete effect') : node?.kind === 'mask' ? t('Delete mask') : t('Delete layer (Del)')}
           disabled={!node || node.kind === 'part' || node.kind === 'parts'}
           onClick={() => deleteNode(node)}
         >
