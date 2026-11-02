@@ -337,8 +337,6 @@ uniform int uShape; uniform float uRing, uSheen; uniform bool uLight;
 const int DOT = 0, GLINT4 = 1, GLINT6 = 2, EMBER = 3, SQUARE = 4, CONFETTI = 5, PETAL = 6, STAR = 7, HEART = 8, BOKEH = 9, RAIN = 10;
 float max3(vec3 c) { return max(c.r, max(c.g, c.b)); }
 float cover(float d, float e) { return 1.0 - smoothstep(-e, e, d); }
-// The glint shapes are the Glints star look (src/generators/glints.ts).
-${GLINT_STAR_GLSL}
 // Signed distances (Inigo Quilez): a 5-point star pointing up, a heart with its tip at the origin.
 float sdStar5(vec2 p, float r, float rf) {
   const vec2 k1 = vec2(0.809016994375, -0.587785252292);
@@ -368,16 +366,10 @@ void main() {
   float s = 1.0 + b;
   float I = 0.0;   // light intensity, or coverage of solids
   float hot = 0.0; // white-hot core of light shapes
-  vec3 glint = vec3(0.0); // glint shapes: their light, colour included
   vec3 tint = vec3(1.0);
   if (uShape == DOT) {
     I = exp(-2.6 * r * r / (s * s)) / s;
     hot = 0.5 * exp(-18.0 * r * r) / (1.0 + 4.0 * b);
-  } else if (uShape == GLINT4 || uShape == GLINT6) {
-    // The colour unpremultiplied (it saturates toward the ray tips), the light × opacity.
-    vec2 v = l / s;
-    float a = max(vColor.a, 1e-4);
-    glint = glintStar(v, uShape == GLINT4 ? 4 : 6, 0.035 * (1.0 + 3.0 * b), vExtra.w, max(fw.x, fw.y) / s, vColor.rgb / a, false) * (vColor.a / s);
   } else if (uShape == EMBER) {
     // A dot dragged along its motion: dim tail at −x, hot head at +x.
     float hl = A - 1.0;
@@ -419,11 +411,26 @@ void main() {
     tint *= 1.0 + 0.25 * exp(-8.0 * dot(hl, hl));
   }
   if (uLight) {
-    vec3 c = vColor.rgb * I + vColor.a * hot + glint;
+    vec3 c = vColor.rgb * I + vColor.a * hot;
     o = vec4(c, min(1.0, max3(c)));
   } else {
     o = vec4(vColor.rgb * tint, vColor.a) * (I / (1.0 + 0.6 * b));
   }
+}`;
+
+// The glint shapes (4- / 6-point): the Glints star look (src/generators/glints.ts), a program of
+// their own so the other shapes don't carry its registers. Glints are round (aspect 1), so the
+// position in glint radii (defocus pad included) is the quad position itself.
+const GLINT_FRAG = /* glsl */ `
+uniform int uShape;
+${GLINT_STAR_GLSL}
+void main() {
+  float b = vExtra.x;
+  vec2 fw = fwidth(vQuad);
+  // The colour unpremultiplied (it saturates toward the ray tips), the light × opacity.
+  float a = max(vColor.a, 1e-4);
+  vec3 c = glintStar(vQuad, uShape == 1 ? 4 : 6, 0.035 * (1.0 + 3.0 * b), vExtra.w, max(fw.x, fw.y), vColor.rgb / a, false) * (vColor.a / (1.0 + b));
+  o = vec4(c, min(1.0, max(c.r, max(c.g, c.b))));
 }`;
 
 const quadUniforms = {
@@ -480,7 +487,7 @@ function drawPass(ctx: GpuContext, target: THREE.WebGLRenderTarget, list: Partic
     color: buf.color,
     extra: buf.extra,
     toRender,
-    fragmentShader: PARTICLE_FRAG,
+    fragmentShader: shape === 'glint4' || shape === 'glint6' ? GLINT_FRAG : PARTICLE_FRAG,
     uniforms: quadUniforms,
     blend: light ? 'add' : 'normal',
   });

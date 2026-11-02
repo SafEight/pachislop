@@ -10,7 +10,7 @@ import type { Resolved } from './resolve';
 
 /**
  * Path of the shown node — Document, the enclosing groups, the layer, the part (also one
- * expanded in the layer page), the effect or mask — like `BIG BONUS › Rim 2 › Outer Glow`,
+ * expanded in the layer page), the effect, glint or mask — like `BIG BONUS › Rim 2 › Outer Glow`,
  * `BIG BONUS › Mask 1` or `BIG BONUS › 2 parts`. Every crumb but the last selects its node, so the
  * layer crumb collapses an expanded part.
  */
@@ -28,6 +28,7 @@ export function Breadcrumb({ at }: { at: Resolved }) {
     if (at.kind === 'layer' && isTitleLayer(layer) && at.parts.length)
       crumbs.push({ key: 'parts', label: at.parts.length === 1 ? formatMsg(partLabel(layer, at.parts[0]), t) : t('{n} parts', { n: at.parts.length }), node: null });
     if (at.kind === 'effect') crumbs.push({ key: at.fx.id, label: effectName(t, at.fx), node: null });
+    if (at.kind === 'glint') crumbs.push({ key: 'glint', label: t('Glint'), node: null });
     if (at.kind === 'mask') crumbs.push({ key: at.mask.id, label: formatMsg(maskLabel(layer, at.mask.id), t), node: null });
   }
   return (

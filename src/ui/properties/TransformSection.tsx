@@ -173,7 +173,7 @@ export function TransformSection({ layers }: { layers: readonly (TitleLayer | Ge
         {is3d && <RefNum label="Z" refp={r('z')} min={-3000} max={1000} step={1} unit="px" slider={false} title={t('+ = toward the viewer')} />}
       </div>
       {is3d && (
-        <div className="xf-grid">
+        <div className="xf-grid xf-wide">
           <RefNum label={t('Rotation X')} refp={r('rotX')} min={-180} max={180} step={0.5} unit="deg" slider={false} title={t('+ = top toward the viewer')} />
           <RefNum label={t('Rotation Y')} refp={r('rotY')} min={-180} max={180} step={0.5} unit="deg" slider={false} title={t('+ = right side away from the viewer')} />
           <RefNum label={t('Rotation Z')} refp={r('rotZ')} min={-180} max={180} step={0.5} unit="deg" slider={false} title={t('Clockwise on screen')} />

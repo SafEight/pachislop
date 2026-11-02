@@ -26,14 +26,16 @@ export type { Path } from './paths';
 
 /**
  * A row of the Layers panel the user can focus: a layer, one style part of a title, several parts
- * of one title (2+, ⇧ / ⌘-clicked; edited together), one effect, or one layer mask.
+ * of one title (2+, ⇧ / ⌘-clicked; edited together), one effect, one layer mask, or a 3D title's
+ * glint (`style3d.glint`, listed as its first effect).
  */
 export type NodeRef =
   | { kind: 'layer'; layerId: string }
   | { kind: 'part'; layerId: string; part: PartKey }
   | { kind: 'parts'; layerId: string; parts: PartKey[] }
   | { kind: 'effect'; layerId: string; part: PartKey | null; effectId: string }
-  | { kind: 'mask'; layerId: string; maskId: string };
+  | { kind: 'mask'; layerId: string; maskId: string }
+  | { kind: 'glint'; layerId: string };
 /** Whose effect stack: `part` null = the layer's / group's own effects, else that title part's. */
 export type EffectOwner = { layerId: string; part: PartKey | null };
 /** Tool strip tools (Photoshop keys V A T U G D L H Z). */

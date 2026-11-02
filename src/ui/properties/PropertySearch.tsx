@@ -5,12 +5,14 @@ import type { EffectInstance, Layer, PartKey, Project } from '../../model/types'
 import { maskLabel, partLabel } from '../../store/labels';
 import { formatMsg, type Translate } from '../../store/msg';
 import { useEditor, type NodeRef } from '../../store/store';
+import { glintListed } from '../glint';
 import { tr, useLang, useT, type Lang } from '../i18n';
 import { listedParts } from '../layers/rows';
 import { FindProbe, SectionScope } from '../sectionMemory';
 import { effectName } from '../util';
 import { DocumentView } from './DocumentView';
 import { EffectView } from './EffectView';
+import { GlintCard } from './GlintCard';
 import { LayerView } from './LayerView';
 import { MaskView } from './MaskView';
 import { MultiView } from './MultiView';
@@ -43,8 +45,8 @@ interface ProbeView {
 
 /**
  * The pages of the index for the selection: the layer's page (or the several layers' page), each
- * part as edited in place, each effect (layer and part) and mask as its own node page, then the
- * Document.
+ * part as edited in place, a 3D title's listed glint, each effect (layer and part) and mask as its
+ * own node page, then the Document.
  */
 function probeViews({ project, node, ids }: Inputs, t: Translate): ProbeView[] {
   const views: ProbeView[] = [];
@@ -74,6 +76,12 @@ function probeViews({ project, node, ids }: Inputs, t: Translate): ProbeView[] {
           for (const fx of partEffectsOf(layer, part)) views.push(effectView(part, fx, [name, effectName(t, fx)]));
         }
       }
+      if (glintListed(layer))
+        views.push({
+          slot: { key: 'glint', target: { kind: 'glint', layerId: layer.id }, prefix: [t('Effects'), t('Glint')], open: [] },
+          scope: 'glint3d',
+          view: <GlintCard layers={[layer]} full />,
+        });
       for (const fx of layer.effects) views.push(effectView(null, fx, [t('Effects'), effectName(t, fx)]));
       for (const mask of layer.masks)
         views.push({
@@ -128,7 +136,13 @@ function buildIndex(inputs: Inputs): Promise<FindIndex> {
       finishProbe = null;
       const hits = probeHost.querySelector(`[data-find-end="${run}"]`) ? collectHits(probeHost, views.map((v) => v.slot), inputs.lang) : [];
       probeRoot?.render(null);
-      done({ hits, with3d: uses3d(inputs.project, inputs.ids), addTo: layer?.id ?? null, hasTypes: new Set(layer?.effects.map((e) => e.type)) });
+      done({
+        hits,
+        with3d: uses3d(inputs.project, inputs.ids),
+        addTo: layer?.id ?? null,
+        hasTypes: new Set(layer?.effects.map((e) => e.type)),
+        addGlint: layer?.kind === 'title3d' && !glintListed(layer),
+      });
     };
     const observer = new MutationObserver(() => {
       if (probeHost.querySelector(`[data-find-end="${run}"]`)) finish();
@@ -247,7 +261,7 @@ export function PropertySearch() {
               const path = add ? t('Add effect') : m.hit.crumbs.join(' › ');
               return (
                 <div
-                  key={add ? `add:${m.def.type}` : `${m.hit.slot.key}|${m.hit.order}`}
+                  key={add ? `add:${m.def?.type ?? 'glint3d'}` : `${m.hit.slot.key}|${m.hit.order}`}
                   role="option"
                   aria-selected={i === at}
                   className={`props-find-item ${add ? 'add' : ''}`}

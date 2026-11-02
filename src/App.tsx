@@ -9,6 +9,7 @@ import { ancestorsOf } from './store/tree';
 import { Menu } from './ui/controls';
 import { Dock } from './ui/dock/Dock';
 import { useDock } from './ui/dock/layout';
+import { deleteGlint } from './ui/glint';
 import { tr, useT } from './ui/i18n';
 import { addTextLayer, clipboardFiles, closeSplitImage, draggingFiles, importFiles, pasteClipboard, shapeItems, useSplitImage } from './ui/layerActions';
 import { Loading } from './ui/Loading';
@@ -203,11 +204,14 @@ function useShortcuts(setExportOpen: (open: boolean) => void, toggleSheet: () =>
       switch (e.key) {
         case 'Delete':
         case 'Backspace': {
-          // A selected effect or mask row is deleted on its own; a part is never deleted from the keyboard.
+          // A selected effect, glint or mask row is deleted on its own; a part is never deleted from the keyboard.
           const node = st.selectedNode;
           if (node?.kind === 'effect') {
             e.preventDefault();
             st.removeEffect({ layerId: node.layerId, part: node.part }, node.effectId);
+          } else if (node?.kind === 'glint') {
+            e.preventDefault();
+            deleteGlint([node.layerId]);
           } else if (node?.kind === 'mask') {
             e.preventDefault();
             st.removeMask(node.layerId, node.maskId);

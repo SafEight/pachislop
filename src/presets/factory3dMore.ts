@@ -6,7 +6,6 @@ import {
   edge3D,
   envLook,
   fx,
-  fx3D,
   g,
   glow3D,
   letter3D,
@@ -100,7 +99,8 @@ export function more3DLooks(): StylePreset[] {
         side: darkMetal('#2a1400', 0.3),
         plates: [
           blackPlate(2.4, { depth: 7 }, { color: '#0a0806' }),
-          plate(1.4, 'gold', { depth: 5, bevel: bevel3D(1.2, 1.2, 'round') }, { reflectivity: 0.9 }),
+          // the classic banded gold line (punchyGold's banding at plain gold's gloss), kept as designed
+          plate(1.4, 'punchyGold', { depth: 5, bevel: bevel3D(1.2, 1.2, 'round') }, { reflectivity: 0.9, roughness: 0.08, specBoost: 1 }),
           blackPlate(1.4, { depth: 5, bevel: bevel3D(0.6, 0.6) }),
         ],
       }),
@@ -110,40 +110,6 @@ export function more3DLooks(): StylePreset[] {
     },
     // no highlight glow: its haze would grey the black lacquer
     effects: edge3D('#ffb020'),
-    lighting: envLook('studio', 0),
-  });
-
-  // ---------- トリコロール: red candy, white tube, black band, red line, black plate ----------
-  const candyTricolor = p3({
-    id: 'f-3d-candy-tricolor',
-    name: 'キャンディ赤 Red Candy / White / Black',
-    group: THREE_D,
-    style3d: {
-      curveSegments: 10,
-      face: m3('candy', {
-        color: '#c00018',
-        gradient: g([0, '#ff3848'], [0.25, '#d0001a'], [0.46, '#700010'], [0.53, '#200004'], [0.62, '#900012'], [0.85, '#e00020'], [1, '#ff5868']),
-        gradientBend: 0.4,
-        roughness: 0.14,
-        reflectivity: 0.6,
-        flakes: 0.12,
-      }),
-      ...letter3D({
-        depth: 10,
-        bevel: letterBevel('round', 1.3),
-        rings: [ring(0.25, 0.4, darkMetal('#2a0006'), 'step')],
-        side: darkMetal('#3a0008'),
-        plates: [
-          plate(2.2, 'whiteGloss', { depth: 6, join: 'round', bevel: { ...bevel3D(2.2, 1.4, 'round'), segments: 10 } }),
-          blackPlate(2.2, { depth: 6, bevel: bevel3D(0.8, 0.8) }, { color: '#0a0204' }),
-          plate(0.9, 'redMetal', { depth: 4, bevel: bevel3D(0.8, 0.8, 'round') }),
-          blackPlate(1.1, { depth: 4, bevel: bevel3D(0.5, 0.5) }),
-        ],
-      }),
-      shadow: shadow3D(),
-      glint: starGlint({ intensity: 0.8, tint: '#fff0f2' }),
-    },
-    effects: [...edge3D('#ff2a3a'), ...glow3D('#ff2a3a', 0.8)],
     lighting: envLook('studio', 0),
   });
 
@@ -352,7 +318,8 @@ export function more3DLooks(): StylePreset[] {
         roughness: 0.08,
         reflectivity: 0.9,
         iridescence: 1,
-        flakes: 0.35,
+        // fine glitter, not a field of sparks: each flake turned into the light would read as a star
+        flakes: 0.2,
         flakeScale: 0.5,
       },
       ...letter3D({
@@ -366,7 +333,8 @@ export function more3DLooks(): StylePreset[] {
         ],
       }),
       shadow: shadow3D(),
-      glint: starGlint({ intensity: 0.8, threshold: 1.3, tint: '#ffffff', streaks: 6 }),
+      // a handful of crisp 6-ray stars on the hottest chrome points, not every lit flake or face
+      glint: starGlint({ intensity: 0.6, threshold: 2, tint: '#ffffff', streaks: 6 }),
     },
     effects: [
       ...edge3D('#b080ff', '#06041a'),
@@ -376,30 +344,54 @@ export function more3DLooks(): StylePreset[] {
     lighting: envLook('studio', 60),
   });
 
-  // ---------- 銅: hammered copper, brass step, chocolate band, gold line, black plate ----------
-  const bronze = p3({
+  // ---------- 銅: polished rose copper, hot copper chamfer, teal (verdigris) band, copper line, black plate ----------
+  const copperFace: Material3D = {
+    ...material3D('custom'),
+    color: '#e08a68',
+    gradient: g([0, '#fff2ea'], [0.16, '#ffc0a4'], [0.36, '#d8724e'], [0.47, '#7a2c18'], [0.53, '#2e0c04'], [0.62, '#a84c30'], [0.82, '#f49c7c'], [1, '#ffdccc']),
+    gradientBend: 0.3,
+    metalness: 1,
+    roughness: 0.06,
+    clearcoat: 0.3,
+    reflectivity: 0.9,
+  };
+  // paler and hotter than the face, so every edge flares
+  const copperEdge: Material3D = {
+    ...copperFace,
+    gradient: g([0, '#ffffff'], [0.3, '#ffd0bc'], [0.5, '#b05a3c'], [0.7, '#ffc0a8'], [1, '#fff4ee']),
+    roughness: 0.03,
+    reflectivity: 1.2,
+    specBoost: 2,
+  };
+  const copper = p3({
     id: 'f-3d-copper-bronze',
-    name: '銅 Hammered Copper',
+    name: '銅 Rose Copper + Teal',
     group: THREE_D,
     style3d: {
       curveSegments: 10,
-      face: m3('copper', { reflectivity: 0.9, surface: { kind: 'hammered', amount: 0.35, scale: 5, seed: 7 } }),
+      face: copperFace,
+      // the hot chamfer is not the face's material: it is a band, the letter has no bevel
       ...letter3D({
         depth: 10,
-        bevel: letterBevel('chamfer', 1.3),
-        rings: [ring(0.3, 0.6, darkMetal('#2a0e00'), 'step')],
-        side: darkMetal('#3a1404', 0.3),
+        bevel: bevel3D(0, 0),
+        rings: [ring(1.3, 1.3, copperEdge, 'chamfer'), ring(0.3, 0.6, darkMetal('#1a0804'), 'step')],
+        side: darkMetal('#2a1006', 0.3),
         plates: [
-          plate(2.2, 'copper', { depth: 6, bevel: bevel3D(1.2, 1.2, 'chamfer') }, { color: '#6a2a10', gradient: g([0, '#d0804a'], [0.45, '#6a2a10'], [0.55, '#200800'], [1, '#a85a30']) }),
-          plate(0.9, 'gold', { depth: 4, bevel: bevel3D(0.7, 0.7, 'round') }),
-          blackPlate(1.8, { depth: 6 }, { color: '#0c0400' }),
+          plate(
+            2.8,
+            'blueMetal',
+            { depth: 6, bevel: bevel3D(1.6, 1.6, 'chamfer') },
+            { color: '#0a6a68', gradient: g([0, '#7af0e0'], [0.3, '#18a8a0'], [0.47, '#04403e'], [0.53, '#011614'], [0.65, '#0c7a74'], [1, '#60e0d0']) },
+          ),
+          plate(0.8, 'custom', { depth: 4, bevel: bevel3D(0.6, 0.6, 'round') }, copperEdge),
+          blackPlate(1.6, { depth: 5 }, { color: '#040202' }),
         ],
       }),
       shadow: shadow3D(),
-      glint: starGlint({ intensity: 0.5, threshold: 1.6, tint: '#ffe8d0' }),
+      glint: starGlint({ intensity: 0.4, threshold: 2.2, tint: '#fff0e8' }),
     },
-    effects: fx3D('#ff7a30'),
-    lighting: envLook('softbox', 20),
+    effects: [...edge3D('#30e0d0', '#040202'), ...glow3D('#ffd0bc', 1)],
+    lighting: envLook('studio', 20),
   });
 
   // ---------- ツートン: gold / silver split face, white line, red / blue split band, black plate ----------
@@ -490,5 +482,5 @@ export function more3DLooks(): StylePreset[] {
     },
   });
 
-  return [chromeBlue, lacquerGold, candyTricolor, emerald, violetNeon, pearlPink, ice, fire, holo, bronze, twoTone, matteGlow];
+  return [chromeBlue, lacquerGold, emerald, violetNeon, pearlPink, ice, fire, holo, copper, twoTone, matteGlow];
 }

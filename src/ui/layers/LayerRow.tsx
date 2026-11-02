@@ -11,9 +11,10 @@ import { GeneratorIcon } from '../generatorIcons';
 import { useT } from '../i18n';
 import { draggingFiles, importFiles } from '../layerActions';
 import { effectName } from '../util';
+import { GLINT_PINNED, setGlintEnabled } from '../glint';
 import type { MenuAnchor } from '../properties/AddEffectMenu';
 import { partSwatch } from '../properties/parts';
-import { canClip, effectMenu, layerMenu, maskMenu, partMenu, type PanelUi } from './commands';
+import { canClip, effectMenu, glintMenu, layerMenu, maskMenu, partMenu, type PanelUi } from './commands';
 import { drag, DRAG_MIME, dropPosAt, fxDropIndex, INDENT, layerDest, type DropPos } from './dnd';
 import type { CtxEntry } from './LayerContextMenu';
 import { partEnabled, partHasEye } from './parts';
@@ -564,6 +565,41 @@ export function EffectRow({ row, layer, focused, ui }: { row: Extract<PanelRow, 
       <Indent depth={depth} />
       <span className="lp-fx-icon" aria-hidden>
         ƒ
+      </span>
+      <span className="lp-name-col">
+        <span className="lp-name">{name}</span>
+      </span>
+    </div>
+  );
+}
+
+/** A 3D title's glint, pinned first under its Effects: its eye switches it on / off; no drag (it runs inside the 3D render, before every effect). */
+export function GlintRow({ row, focused, ui }: { row: Extract<PanelRow, { kind: 'glint' }>; focused: boolean; ui: RowUi }) {
+  const t = useT();
+  const { layer, depth, dimmed } = row;
+  const on = layer.style3d.glint.enabled;
+  const node: NodeRef = { kind: 'glint', layerId: layer.id };
+  const name = t('Glint');
+  return (
+    <div
+      className={['lp-row', 'lp-effect', 'lp-glint', focused && 'focus', dimmed && 'dimmed'].filter(Boolean).join(' ')}
+      role="treeitem"
+      aria-level={depth + 1}
+      aria-selected={focused}
+      aria-label={name}
+      title={t(GLINT_PINNED)}
+      onClick={(e) => clickNode(node, e)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        useEditor.getState().selectNode(node);
+        const anchor = pointAnchor(e);
+        ui.openMenu(anchor, glintMenu(t, layer, ui, anchor), name);
+      }}
+    >
+      <Eye on={on} title={on ? t('Effect on (click to turn off)') : t('Effect off (click to turn on)')} onToggle={() => setGlintEnabled([layer.id], !on)} />
+      <Indent depth={depth} />
+      <span className="lp-fx-icon" aria-hidden>
+        ✦
       </span>
       <span className="lp-name-col">
         <span className="lp-name">{name}</span>

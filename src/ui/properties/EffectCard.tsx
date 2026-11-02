@@ -11,7 +11,9 @@ import { useT } from '../i18n';
 import { effectName, oneShot, useRefValue } from '../util';
 import { LightSphere } from '../LightSphere';
 import { FindProbe } from '../sectionMemory';
+import { glintListed } from '../glint';
 import { AddEffectButton } from './AddEffectMenu';
+import { GlintCard } from './GlintCard';
 import { InfoTip } from './InfoTip';
 import { ParamControl } from './ParamControl';
 import { paramShown } from './params';
@@ -329,11 +331,14 @@ export function MultiEffectCard({ targets }: { targets: readonly EffectTarget[] 
   );
 }
 
-/** Every effect of `owner` as cards (last applied on top) with “+ Add effect” (the count is the section title's). */
+/** Every effect of `owner` as cards (last applied on top) with “+ Add effect” (the count is the section title's); a 3D title's listed glint is pinned first. */
 export function EffectStack({ owner }: { owner: EffectOwner }) {
   const t = useT();
   // Select the project, not effectsOf's result: a part without effects may yield a fresh [] per call.
-  const effects = effectsOf(useEditor((s) => s.project), owner);
+  const project = useEditor((s) => s.project);
+  const effects = effectsOf(project, owner);
+  const layer = owner.part === null ? project.layers.find((l) => l.id === owner.layerId) : undefined;
+  const glint = glintListed(layer) ? layer : null;
   // The search index renders every effect on its own (its node page), not inside its owner's list.
   const probe = useContext(FindProbe);
   if (probe) return null;
@@ -343,7 +348,8 @@ export function EffectStack({ owner }: { owner: EffectOwner }) {
       <div className="fx-toolbar">
         <AddEffectButton owner={owner} />
       </div>
-      {n === 0 && <div className="empty">{t('No effects yet. Open “+ Add effect” and hover an entry to preview it on this layer.')}</div>}
+      {glint && <GlintCard layers={[glint]} />}
+      {n === 0 && !glint && <div className="empty">{t('No effects yet. Open “+ Add effect” and hover an entry to preview it on this layer.')}</div>}
       {n > 1 && (
         <div className="fx-stack-hint" title={t('Effects apply bottom to top: each one works on the result of those below it, so the top one is drawn last, over everything else')}>
           {t('↑ drawn on top (applied last)')}

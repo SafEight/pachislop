@@ -32,6 +32,10 @@
   color: var(--muted);
   font-size: 10px;
 }
+/* The 3D glint's pin: it can't be dragged (it runs inside the 3D render, before every effect). */
+.effect-head .grip.pinned {
+  cursor: help;
+}
 .effect-head .right {
   flex-shrink: 0;
 }

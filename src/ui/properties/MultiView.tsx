@@ -7,9 +7,11 @@ import { useEditor, type PropRef } from '../../store/store';
 import { RefNum, Row, Section, Seg } from '../controls';
 import { FontBrowser } from '../FontBrowser';
 import { useT } from '../i18n';
+import { glintListed } from '../glint';
 import { SectionScope } from '../sectionMemory';
 import { useMixed } from '../util';
 import { MultiEffectCard, type EffectTarget } from './EffectCard';
+import { GlintCard } from './GlintCard';
 import { PartEditor, PartWidth, type PartTarget } from './PartView';
 import { partScope, partSwatch, partWidth } from './parts';
 import { LayerLightingSection } from './style/Lighting3D';
@@ -222,6 +224,9 @@ export function MultiView({ layer }: { layer: Layer }) {
   const texts = titles?.every((l) => l.source.kind === 'text') ? titles : null;
   const in3D = titles?.every((l): l is Title3DLayer => l.kind === 'title3d') ? (titles as Title3DLayer[]) : null;
   const effects = sharedEffects(layers);
+  // The glint card edits every selected 3D title while any lists its glint (as Render passes did).
+  const glints = in3D?.some(glintListed) ? in3D : null;
+  const nFx = effects.length + (glints ? 1 : 0);
   const names = layers.map((l) => l.name).join(', ');
   return (
     <>
@@ -239,9 +244,10 @@ export function MultiView({ layer }: { layer: Layer }) {
       {titles && <MultiAppearance layers={titles} />}
       {in3D && in3D.every((l) => l.source.kind !== 'model') && <Shape3DSection layers={in3D} />}
       {in3D && <LayerLightingSection layers={in3D} />}
-      {effects.length > 0 && (
-        <Section id="effects" title={<Counted label={t('Effects {n}', { n: effects.length })} n={n} />}>
+      {nFx > 0 && (
+        <Section id="effects" title={<Counted label={t('Effects {n}', { n: nFx })} n={n} />}>
           <div className="hint-line">{t('The effects every layer has (by type); add, reorder or remove effects on each layer.')}</div>
+          {glints && <GlintCard layers={glints} />}
           {effects.map((targets) => (
             <MultiEffectCard key={targets.map((x) => x.fx.id).join('|')} targets={targets} />
           ))}

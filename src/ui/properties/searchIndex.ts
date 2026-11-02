@@ -3,6 +3,7 @@ import type { EffectDef } from '../../engine/contracts';
 import type { PartKey } from '../../model/types';
 import { useEditor } from '../../store/store';
 import { selectTab } from '../dock/layout';
+import { addGlint, GLINT_ADD_LABEL } from '../glint';
 import { englishOf, jaOf, tr, type Lang } from '../i18n';
 import { useSectionsOpen } from '../sectionMemory';
 
@@ -26,7 +27,8 @@ export type FindTarget =
   | { kind: 'multi' }
   | { kind: 'part'; layerId: string; part: PartKey }
   | { kind: 'effect'; layerId: string; part: PartKey | null; effectId: string }
-  | { kind: 'mask'; layerId: string; maskId: string };
+  | { kind: 'mask'; layerId: string; maskId: string }
+  | { kind: 'glint'; layerId: string };
 
 /** One page of the index: a node's view as the panel shows it. */
 export interface Slot {
@@ -69,6 +71,8 @@ export interface FindIndex {
   addTo: string | null;
   /** Effect types the layer already has (shown as hits, not offered again). */
   hasTypes: ReadonlySet<string>;
+  /** Whether the layer is a 3D title whose glint isn't listed: “Glint (3D highlights)” is offered to add. */
+  addGlint: boolean;
 }
 
 export interface HitMatch {
@@ -79,7 +83,8 @@ export interface HitMatch {
 }
 
 export interface AddMatch {
-  def: EffectDef;
+  /** The effect to add; null for the 3D glint (switched on, ui/glint.ts). */
+  def: EffectDef | null;
   name: string;
   layerId: string;
   rank: number;
@@ -101,6 +106,7 @@ const SYNONYMS: readonly (readonly string[])[] = [
   ['color', 'colour', 'tint', '色', 'カラー'],
   ['glow', 'emissive', '光彩', 'グロー'],
   ['shine', 'gloss', 'specular', 'spec', '光沢', '艶'],
+  ['glint', 'shine', 'shines', 'sparkle', 'sparkles', 'star', 'stars', 'streak', 'streaks', 'glare', 'bloom', 'きらきら', 'キラ', '輝き', 'グリント'],
   ['reflection', 'reflections', 'environment', 'env', 'mirror', '反射', '環境'],
   ['opacity', 'transparency', 'alpha', '不透明度'],
   ['shadow', '影', 'シャドウ'],
@@ -202,7 +208,7 @@ export function collectHits(container: Element, slots: readonly Slot[], lang: La
   slots.forEach((slot, i) => {
     const root = container.querySelector(`[data-find-slot="${i}"]`);
     if (!root) return;
-    if (slot.target.kind === 'effect' || slot.target.kind === 'mask' || slot.target.kind === 'part') add(slot, slot.prefix.at(-1) ?? '', slot.prefix.slice(0, -1), [], null, 0, []);
+    if (slot.target.kind === 'effect' || slot.target.kind === 'glint' || slot.target.kind === 'mask' || slot.target.kind === 'part') add(slot, slot.prefix.at(-1) ?? '', slot.prefix.slice(0, -1), [], null, 0, []);
     for (const el of root.querySelectorAll(`${SECTION}, [data-fid]`)) {
       const chain = sectionsOf(el, root);
       const titles = chain.map((s) => nameOf(s.querySelector(':scope > header > .title')));
@@ -295,7 +301,7 @@ const MAX_RESULTS = 60;
 
 /**
  * The hits of `index` for `query`, best first (ties in panel order), then the effects that could
- * be added whose name matches (not those the layer has: they are hits).
+ * be added whose name matches (not those the layer has: they are hits), the 3D glint first.
  */
 export function search(index: FindIndex, query: string): Match[] {
   const q = parseQuery(query);
@@ -308,13 +314,16 @@ export function search(index: FindIndex, query: string): Match[] {
   }
   found.sort((a, b) => a.rank - b.rank || a.hit.order - b.hit.order);
   const adds: AddMatch[] = [];
-  if (index.addTo)
-    for (const def of listEffects()) {
-      if (index.hasTypes.has(def.type)) continue;
-      const names = (['en', 'ja'] as const).map((lang) => norm(tr(def.label, undefined, { lang })));
+  const layerId = index.addTo;
+  if (layerId) {
+    const offer = (def: EffectDef | null, label: string) => {
+      const names = (['en', 'ja'] as const).map((lang) => norm(tr(label, undefined, { lang })));
       const rank = best(names, [q.text]);
-      if (rank >= 0 && rank <= 2) adds.push({ def, name: tr(def.label), layerId: index.addTo, rank });
-    }
+      if (rank >= 0 && rank <= 2) adds.push({ def, name: tr(label), layerId, rank });
+    };
+    if (index.addGlint) offer(null, GLINT_ADD_LABEL);
+    for (const def of listEffects()) if (!index.hasTypes.has(def.type)) offer(def, def.label);
+  }
   adds.sort((a, b) => a.rank - b.rank);
   return [...found.slice(0, MAX_RESULTS), ...adds];
 }
@@ -382,7 +391,10 @@ async function reveal(hit: Hit | null, pick: number) {
 export function landOn(m: Match) {
   const st = useEditor.getState();
   if (isAdd(m)) {
-    if (st.addEffect({ layerId: m.layerId, part: null }, m.def.type)) void reveal(null, -1);
+    if (!m.def) {
+      addGlint(m.layerId);
+      void reveal(null, -1);
+    } else if (st.addEffect({ layerId: m.layerId, part: null }, m.def.type)) void reveal(null, -1);
     return;
   }
   const { hit, pick } = m;
@@ -409,6 +421,9 @@ export function landOn(m: Match) {
       break;
     case 'mask':
       st.selectNode({ kind: 'mask', layerId: target.layerId, maskId: target.maskId });
+      break;
+    case 'glint':
+      st.selectNode({ kind: 'glint', layerId: target.layerId });
       break;
   }
   const open = [...hit.slot.open, ...hit.sections];

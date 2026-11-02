@@ -7,13 +7,14 @@ import { useEditor, type EffectOwner, type NodeRef } from '../../store/store';
 import { ancestorsOf } from '../../store/tree';
 import { NumberField } from '../controls';
 import { useT } from '../i18n';
+import { deleteGlint } from '../glint';
 import { addGroupLayer, draggingFiles, importFiles } from '../layerActions';
 import { AddEffectMenu, type MenuAnchor } from '../properties/AddEffectMenu';
 import { oneShot } from '../util';
 import { addMaskItems, adjustmentItems, newLayerItems } from './commands';
 import { drag } from './dnd';
 import { ContextMenu, type CtxEntry } from './LayerContextMenu';
-import { EffectRow, HeadRow, LayerRow, PartRow, type RowUi } from './LayerRow';
+import { EffectRow, GlintRow, HeadRow, LayerRow, PartRow, type RowUi } from './LayerRow';
 import { buildRows, rowFocused, rowNode, sameNode, twirlOf, type PanelRow } from './rows';
 import './layers.css';
 
@@ -38,10 +39,11 @@ function ownersOf(node: NodeRef | null, layers: readonly Layer[]): EffectOwner[]
   return layers.some((x) => x.id === node.layerId) ? [{ layerId: node.layerId, part: null }] : [];
 }
 
-/** Delete / trash: the focused effect or mask, or the selected layers. A part can't be deleted here (its editor removes rims / bands). */
+/** Delete / trash: the focused effect, glint or mask, or the selected layers. A part can't be deleted here (its editor removes rims / bands). */
 function deleteNode(node: NodeRef | null) {
   const st = useEditor.getState();
   if (node?.kind === 'effect') st.removeEffect({ layerId: node.layerId, part: node.part }, node.effectId);
+  else if (node?.kind === 'glint') deleteGlint([node.layerId]);
   else if (node?.kind === 'mask') st.removeMask(node.layerId, node.maskId);
   else if (node?.kind !== 'part' && node?.kind !== 'parts' && st.selectedLayerIds.length) st.removeLayers(st.selectedLayerIds);
 }
@@ -192,14 +194,14 @@ export function LayersPanel() {
   );
 
   // A node selected elsewhere (canvas, Properties breadcrumb) is twirled into view: its groups
-  // open, and its layer when it is a part or an effect.
+  // open, and its layer when it is a part, an effect or the glint.
   useEffect(() => {
     if (!node) return;
     const st = useEditor.getState();
     const { layers: all } = st.project;
     const want: Layer[] = ancestorsOf(all, node.layerId);
     const own = all.find((l) => l.id === node.layerId);
-    if ((node.kind === 'part' || node.kind === 'parts' || node.kind === 'effect') && own) want.push(own);
+    if ((node.kind === 'part' || node.kind === 'parts' || node.kind === 'effect' || node.kind === 'glint') && own) want.push(own);
     const closed = want.filter((l) => twirlOf(l, st.view.expanded) === false);
     if (closed.length) st.setView({ expanded: { ...st.view.expanded, ...Object.fromEntries(closed.map((l) => [l.id, true])) } });
   }, [node]);
@@ -261,7 +263,7 @@ export function LayersPanel() {
           ui.twirl(cur.r.layer.id, false, false);
           break;
         }
-        // Up to the parent node: mask → its layer, effect → its part or layer, part → layer, member → group.
+        // Up to the parent node: mask → its layer, effect → its part or layer, part / glint → layer, member → group.
         const n = cur.n;
         if (n.kind === 'effect' && n.part) st.selectNode({ kind: 'part', layerId: n.layerId, part: n.part });
         else if (n.kind !== 'layer') st.selectNode({ kind: 'layer', layerId: n.layerId });
@@ -313,6 +315,8 @@ export function LayersPanel() {
         const layer = byId.get(r.layerId);
         return layer && <EffectRow key={r.fx.id} row={r} layer={layer} focused={focused} ui={ui} />;
       }
+      case 'glint':
+        return <GlintRow key={`${r.layer.id}|glint`} row={r} focused={focused} ui={ui} />;
       case 'head':
         return <HeadRow key={r.key} row={r} />;
     }
@@ -393,11 +397,11 @@ export function LayersPanel() {
         <ToolButton label={`${primary?.clip ? t('Release clipping mask') : t('Create clipping mask')} (⌥⌘G)`} disabled={!selectedIds.length} onClick={() => useEditor.getState().toggleClip()}>
           ↳
         </ToolButton>
-        <ToolButton label={node?.kind === 'effect' ? t('Duplicate effect') : t('Duplicate layer (⌘J)')} disabled={!node || node.kind === 'part' || node.kind === 'parts'} onClick={() => duplicateNode(node)}>
+        <ToolButton label={node?.kind === 'effect' ? t('Duplicate effect') : t('Duplicate layer (⌘J)')} disabled={!node || node.kind === 'part' || node.kind === 'parts' || node.kind === 'glint'} onClick={() => duplicateNode(node)}>
           ⧉
         </ToolButton>
         <ToolButton
-          label={node?.kind === 'effect' ? t('Delete effect') : node?.kind === 'mask' ? t('Delete mask') : t('Delete layer (Del)')}
+          label={node?.kind === 'effect' || node?.kind === 'glint' ? t('Delete effect') : node?.kind === 'mask' ? t('Delete mask') : t('Delete layer (Del)')}
           disabled={!node || node.kind === 'part' || node.kind === 'parts'}
           onClick={() => deleteNode(node)}
         >

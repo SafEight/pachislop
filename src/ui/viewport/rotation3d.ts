@@ -2,7 +2,9 @@ import * as THREE from 'three';
 
 // Rotation channels of the 3D gizmo as matrices: a layer's rotX / rotY / rotZ and a glyph's
 // tiltX / tiltY / rotate, each an Euler composition (degrees), to world orientation and back.
-// Pure (no editor state), so the trackball round trip is unit-tested.
+// The gizmo turns the object about the axes of its fixed frame (arcs) or the screen's
+// (trackball) on top of its orientation at the press, then writes the result back as these
+// channels. Pure (no editor state), so the round trips are unit-tested.
 //
 // Layer (Layer3DRenderer / layerMatrix): R = Rz(−rotZ)·Ry(rotY)·Rx(rotX), three's 'ZYX' with
 // (rotX, rotY, −rotZ): rotZ (clockwise on screen) is outermost, about the comp's Z.
@@ -22,8 +24,6 @@ export interface RotationModel {
   orient(rot: Vec3): THREE.Matrix3;
   /** Channel values of world orientation `w`: of the two Euler solutions, the one nearest `near`, each channel unwrapped toward it. */
   fromOrient(w: THREE.Matrix3, near: Vec3): Vec3;
-  /** Channels from outermost to innermost (a channel's axis turns with the channels outside it). */
-  nesting: readonly [Channel, Channel, Channel];
 }
 
 const m4 = new THREE.Matrix4();
@@ -71,7 +71,6 @@ export const layerRotation: RotationModel = {
       near,
     );
   },
-  nesting: [2, 1, 0],
 };
 
 /** A glyph's tiltX / tiltY / rotate inside a layer whose rotation and flip are `base` (orthonormal). */
@@ -86,31 +85,27 @@ export function glyphRotation(base: THREE.Matrix3): RotationModel {
         near,
       );
     },
-    nesting: [1, 0, 2],
   };
 }
 
-/** The world axis (unit, right-handed) that channel `i` turns about: +1° on it turns +1° about this axis. */
-export function channelAxis(model: RotationModel, rot: Vec3, i: Channel): THREE.Vector3 {
-  const h = 0.01;
-  const w0 = model.orient(rot);
-  const w1 = model.orient([rot[0] + (i === 0 ? h : 0), rot[1] + (i === 1 ? h : 0), rot[2] + (i === 2 ? h : 0)]);
-  // w1·w0ᵀ = I + h·[ω]× for the small turn (w0 orthonormal, so its inverse is its transpose).
-  const e = w1.multiply(w0.transpose()).elements; // column-major
-  return new THREE.Vector3(e[5] - e[7], e[6] - e[2], e[1] - e[3]).normalize();
-}
+/** A gizmo frame: three orthogonal world unit vectors (X, Y, Z; left-handed on a mirrored layer). */
+export type Frame = readonly [THREE.Vector3, THREE.Vector3, THREE.Vector3];
 
 /**
- * Two world directions spanning the plane channel `i` turns in, A→B turning positively about
- * its axis: the frame of the channels outside it (the gimbal ring), its other two axes.
+ * The rotation arc around `frame` axis `i`: the other two axes A, B (cyclic order, so the arcs
+ * read the same on every frame) and the world axis `n` = A×B a turn A→B is positive about (the
+ * frame axis itself, reversed on a mirrored frame). It depends on the frame alone, never on the
+ * object's rotation.
  */
-export function channelPlane(model: RotationModel, rot: Vec3, i: Channel): [THREE.Vector3, THREE.Vector3] {
-  const inner = model.nesting.slice(model.nesting.indexOf(i));
-  const frame = model.orient([inner.includes(0) ? 0 : rot[0], inner.includes(1) ? 0 : rot[1], inner.includes(2) ? 0 : rot[2]]);
-  const col = (k: number) => new THREE.Vector3().setFromMatrix3Column(frame, k).normalize();
-  const a = col((i + 1) % 3);
-  const b = col((i + 2) % 3);
-  return a.clone().cross(b).dot(channelAxis(model, rot, i)) >= 0 ? [a, b] : [b, a];
+export function arcPlane(frame: Frame, i: Channel): { a: THREE.Vector3; b: THREE.Vector3; n: THREE.Vector3 } {
+  const a = frame[(i + 1) % 3];
+  const b = frame[(i + 2) % 3];
+  return { a, b, n: a.clone().cross(b).normalize() };
+}
+
+/** `w0` turned `deg` degrees about world unit axis `n`, in world space (on the left). */
+export function turnAbout(w0: THREE.Matrix3, n: THREE.Vector3, deg: number): THREE.Matrix3 {
+  return new THREE.Matrix3().setFromMatrix4(m4.makeRotationAxis(n, deg * DEG)).multiply(w0);
 }
 
 /**

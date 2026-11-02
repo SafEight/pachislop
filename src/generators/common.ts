@@ -186,12 +186,19 @@ float glintRay(vec2 v, vec2 d, float len, float thin, float minW, float px) {
   float u = 1.0 - al;
   float w = max(thin * (0.12 + 0.88 * u * u), minW);
   float we = sqrt(w * w + 0.25 * px * px);
+  // past ~30 widths both profiles are below 1e-4 of the ray: skip the exponentials
+  if (pe > 30.0 * we) return 0.0;
   // spike (crisp; under a pixel it keeps its light, spread over the pixel, so the look is the
-  // same at every export scale) + a soft sheath that dies off near the core
-  float spike = exp(-pe / we) * (w / we);
-  float sheath = 0.22 * exp(-pe / (we * 4.0)) * exp(-al * 3.0);
+  // same at every export scale) + a soft sheath that dies off near the core; one exp each
+  // across (spike = sheath profile⁴) and along (e^-al powers)
+  float sh = exp(-pe / (we * 4.0));
+  float sp = sh * sh;
+  float e1 = exp(-al);
+  float e2 = e1 * e1;
+  float spike = sp * sp * (w / we);
+  float sheath = 0.22 * sh * e2 * e1;
   // hot near the core, a long faint exponential tail, reaching 0 at the tip
-  float fall = (exp(-al * 5.0) * 2.0 + 1.3 * exp(-al * 1.3)) * sqrt(u);
+  float fall = (e2 * e2 * e1 * 2.0 + 1.3 * e1 * sqrt(e1)) * sqrt(u);
   return (spike + sheath) * fall;
 }
 vec3 glintSpectrum(float t) {

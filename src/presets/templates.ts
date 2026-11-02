@@ -860,12 +860,12 @@ export const TEMPLATES: Template[] = [
         '元祖',
         [
           backdrop(BG_RED),
-          // 元祖 small, white all through (face, bands, side) by per-character override; the red
-          // walls fade to black with depth; one long horizontal hero beam. Thinned glyphs keep the
-          // small 元祖 open under the outside bands.
+          // 元祖 small, white all through (face, bands, side) by per-character override; the pop-out
+          // look's red walls fade to black with depth; one long horizontal hero beam. Thinned glyphs
+          // keep the small 元祖 open under the outside bands.
           {
             ...title3D('元祖ツラヌキ', {
-              preset: 'f-3d-deep-red-walls',
+              preset: 'f-3d-popout',
               size: 260,
               shear: 12,
               tracking: 10,
@@ -879,7 +879,7 @@ export const TEMPLATES: Template[] = [
             weight: -1,
           },
         ],
-        { preset3d: 'f-3d-deep-red-walls' },
+        { preset3d: 'f-3d-popout' },
       ),
   },
   {

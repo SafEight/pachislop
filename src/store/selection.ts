@@ -10,12 +10,13 @@ import { ancestorsOf, hasPart } from './tree';
 
 export const layerNode = (id: string | null): NodeRef | null => (id ? { kind: 'layer', layerId: id } : null);
 
-/** Whether `node`'s layer, part(s), effect or mask all still exist. */
+/** Whether `node`'s layer, part(s), effect or mask all still exist (a glint node: its layer is a 3D title). */
 function nodeExists(project: Project, node: NodeRef): boolean {
   const l = project.layers.find((x) => x.id === node.layerId);
   if (!l) return false;
   if (node.kind === 'layer') return true;
   if (node.kind === 'mask') return l.masks.some((m) => m.id === node.maskId);
+  if (node.kind === 'glint') return l.kind === 'title3d';
   if (node.kind === 'parts') return isTitleLayer(l) && node.parts.every((p) => hasPart(l, p));
   if (node.part !== null && !(isTitleLayer(l) && hasPart(l, node.part))) return false;
   return node.kind === 'part' || effectsOf(project, node).some((e) => e.id === node.effectId);
@@ -36,7 +37,7 @@ function listedParts(l: TitleLayer): PartKey[] {
   return parts;
 }
 
-/** The node one level up: effect → its part or layer, part / mask → its layer, layer → none. */
+/** The node one level up: effect → its part or layer, part / mask / glint → its layer, layer → none. */
 export const ownerNode = (node: NodeRef): NodeRef | null =>
   node.kind === 'effect' && node.part !== null ? { kind: 'part', layerId: node.layerId, part: node.part } : node.kind === 'layer' ? null : layerNode(node.layerId);
 

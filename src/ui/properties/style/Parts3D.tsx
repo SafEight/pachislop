@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { bandSide, sideMaterial } from '../../../model/bands';
-import type { Band3D, BevelProfile3D, Glint3D, Material3D, PlateShape, Title3DLayer, Title3DProps } from '../../../model/types';
+import type { Band3D, BevelProfile3D, Material3D, PlateShape, Title3DLayer, Title3DProps } from '../../../model/types';
 import { refKey } from '../../../store/paths';
 import { useEditor, type PropRef, type Refs } from '../../../store/store';
 import { RefCheck, RefColor, RefNum, Row, Section, Seg } from '../../controls';
@@ -19,8 +19,8 @@ import { IconChoice, SwatchTitle } from './widgets';
 // the face, bevel and side walls), its side walls while they have a material of their own, and
 // each band (a whole extruded outline copy stacked behind) get their own editor (Properties ›
 // part node). What belongs to no part sits on the layer node: its Shape section (extrude /
-// inflate, the letter's depth and bevel, skew) and its Render passes (glint, AO, shadow
-// catcher); lighting is Lighting3D's.
+// inflate, the letter's depth and bevel, skew) and its Render passes (AO, shadow catcher; the
+// glint is listed as an effect, GlintCard); lighting is Lighting3D's.
 
 const PROFILES: readonly { value: BevelProfile3D; label: string }[] = [
   { value: 'flat', label: 'Flat (ledge)' },
@@ -66,15 +66,6 @@ function bandHidden(b: Band3D): string | null {
   return null;
 }
 
-
-const STREAK_COUNTS = [
-  { value: '0', label: 'None' },
-  { value: '2', label: '2' },
-  { value: '4', label: '4' },
-  { value: '6', label: '6' },
-  { value: '8', label: '8' },
-] as const;
-
 /**
  * One render pass inside Render passes: the header checkbox switches it on (and opens its
  * settings); while it's off the body says what it does. Over several layers (`refp` a list) the
@@ -111,35 +102,6 @@ function ShadowSection({ refp }: { refp: Refs }) {
       <div className="hint-line">{t('遊技機 practice: coloured (deep red / brown / navy), not black.')}</div>
       <RefNum label={t('Opacity')} refp={sub(refp, 'opacity')} min={0} max={1} clamp display={100} unit="%" />
       <RefNum label={t('Softness')} refp={sub(refp, 'softness')} min={0} max={1} clamp display={100} unit="%" title={t('Blur of the shadow edge, relative to the title size')} />
-    </PassSection>
-  );
-}
-
-/** HDR glint: bloom + star streaks keyed to the specular highlights, before tone mapping. `glint`: the first layer's. */
-function GlintSection({ refp, glint }: { refp: Refs; glint: Glint3D }) {
-  const t = useT();
-  const setAt = useEditor((s) => s.setAt);
-  const [streaksMixed] = useMixed(sub(refp, 'streaks'));
-  return (
-    <PassSection id="pass-glint" title={t('Glint')} refp={refp} about={t('Bloom and star streaks on highlights brighter than the threshold')}>
-      <RefNum label={t('Threshold')} refp={sub(refp, 'threshold')} min={0} max={8} step={0.05} title={t('HDR luminance above which pixels glint (1 ≈ brighter than white)')} />
-      <RefNum label={t('Intensity')} refp={sub(refp, 'intensity')} min={0} max={4} step={0.01} clamp unit="x" />
-      <RefNum label={t('Bloom radius')} refp={sub(refp, 'radius')} min={0} max={40} step={0.1} unit="%" title={t('% of the source size')} />
-      <Row label={t('Streaks')}>
-        <Seg
-          value={String(glint.streaks) as (typeof STREAK_COUNTS)[number]['value']}
-          mixed={streaksMixed}
-          options={STREAK_COUNTS.map((o) => (o.value === '0' ? { ...o, label: t(o.label) } : o))}
-          onChange={(v) => setAt(sub(refp, 'streaks'), Number(v))}
-        />
-      </Row>
-      {(streaksMixed || glint.streaks > 0) && (
-        <>
-          <RefNum label={t('Length')} refp={sub(refp, 'length')} min={0} max={200} step={0.5} unit="%" title={t('% of the source size')} />
-          <RefNum label={t('Angle')} refp={sub(refp, 'angle')} min={-180} max={180} step={0.5} unit="deg" title={t('Clockwise on screen')} />
-        </>
-      )}
-      <RefColor label={t('Tint')} refp={sub(refp, 'tint')} />
     </PassSection>
   );
 }
@@ -547,17 +509,17 @@ export function Shape3DSection({ layers }: { layers: readonly Title3DLayer[] }) 
 }
 
 /**
- * Render passes of 3D titles, collapsed in one section: glint, ambient occlusion, shadow catcher.
- * Several layers (a multi-selection) edit together; the title lists the passes any of them has on.
+ * Render passes of 3D titles, collapsed in one section: ambient occlusion and the shadow catcher
+ * (the glint is an effect card, GlintCard). Several layers (a multi-selection) edit together; the
+ * title lists the passes any of them has on.
  */
 export function RenderPassesSection({ layers }: { layers: readonly Title3DLayer[] }) {
   const t = useT();
-  const any = (pass: 'glint' | 'ao' | 'shadow') => layers.some((l) => l.style3d[pass].enabled);
-  const on = [any('glint') && t('Glint'), any('ao') && t('Ambient occlusion'), any('shadow') && t('Shadow catcher')].filter(Boolean);
+  const any = (pass: 'ao' | 'shadow') => layers.some((l) => l.style3d[pass].enabled);
+  const on = [any('ao') && t('Ambient occlusion'), any('shadow') && t('Shadow catcher')].filter(Boolean);
   const name = layers.length === 1 ? t('Render passes') : `${t('Render passes')} · ${t('{n} layers', { n: layers.length })}`;
   return (
     <Section id="render-passes" defaultOpen={false} title={on.length ? `${name} · ${on.join(', ')}` : name}>
-      <GlintSection refp={styleRefs(layers, 'glint')} glint={layers[0].style3d.glint} />
       <AOSection refp={styleRefs(layers, 'ao')} />
       <ShadowSection refp={styleRefs(layers, 'shadow')} />
     </Section>

@@ -1,7 +1,8 @@
 import { layerParts, partEffectsOf, isTitleLayer, type TitleLayer } from '../../model/parts';
-import type { EffectInstance, Layer, PartKey } from '../../model/types';
+import type { EffectInstance, Layer, PartKey, Title3DLayer } from '../../model/types';
 import type { NodeRef } from '../../store/store';
 import { childrenOf, isClipped } from '../../store/tree';
+import { glintListed } from '../glint';
 
 // The Layers panel's flat row list: the layer tree top-first with the open twirls' sub-rows.
 
@@ -22,7 +23,9 @@ export type PanelRow =
     }
   | { kind: 'head'; key: string; label: 'Style' | 'Effects'; depth: number; dimmed: boolean }
   | { kind: 'part'; layer: TitleLayer; part: PartKey; depth: number; dimmed: boolean }
-  | { kind: 'effect'; layerId: string; part: PartKey | null; fx: EffectInstance; depth: number; dimmed: boolean };
+  | { kind: 'effect'; layerId: string; part: PartKey | null; fx: EffectInstance; depth: number; dimmed: boolean }
+  /** A 3D title's glint (`style3d.glint`): pinned first under its Effects, see ui/glint.ts. */
+  | { kind: 'glint'; layer: Title3DLayer; depth: number; dimmed: boolean };
 
 /**
  * A title's parts FRONT to back (face first, as a stack reads in PS). A 2D face switched off
@@ -47,7 +50,10 @@ export function twirlOf(l: Layer, expanded: Readonly<Record<string, boolean>>): 
   return expanded[l.id] ?? l.kind === 'group';
 }
 
-/** Rows top-first. Effects are listed last-applied first, like the layer stack. */
+/**
+ * Rows top-first. Effects are listed last-applied first, like the layer stack, under a 3D
+ * title's glint while it is listed (ui/glint.ts).
+ */
 export function buildRows(layers: readonly Layer[], expanded: Readonly<Record<string, boolean>>): PanelRow[] {
   const out: PanelRow[] = [];
   const effectRows = (layerId: string, part: PartKey | null, fx: readonly EffectInstance[], depth: number, dimmed: boolean) => {
@@ -71,8 +77,10 @@ export function buildRows(layers: readonly Layer[], expanded: Readonly<Record<st
           effectRows(l.id, part, partEffectsOf(l, part), sub + 1, dimmed);
         }
       }
-      if (l.effects.length) {
+      const glint = glintListed(l);
+      if (l.effects.length || glint) {
         out.push({ kind: 'head', key: `${l.id}:fx`, label: 'Effects', depth: sub, dimmed });
+        if (glint) out.push({ kind: 'glint', layer: l, depth: sub, dimmed: dimmed || !l.style3d.glint.enabled });
         effectRows(l.id, null, l.effects, sub, dimmed);
       }
       if (l.kind === 'group') walk(l.id, sub, dimmed);
@@ -91,6 +99,8 @@ export function rowNode(r: PanelRow): NodeRef | null {
       return { kind: 'part', layerId: r.layer.id, part: r.part };
     case 'effect':
       return { kind: 'effect', layerId: r.layerId, part: r.part, effectId: r.fx.id };
+    case 'glint':
+      return { kind: 'glint', layerId: r.layer.id };
     case 'head':
       return null;
   }
@@ -102,6 +112,7 @@ export function sameNode(a: NodeRef | null, b: NodeRef | null): boolean {
   if (a.kind === 'part') return b.kind === 'part' && a.part === b.part;
   if (a.kind === 'parts') return b.kind === 'parts' && a.parts.length === b.parts.length && a.parts.every((p) => b.parts.includes(p));
   if (a.kind === 'mask') return b.kind === 'mask' && a.maskId === b.maskId;
+  if (a.kind === 'glint') return true;
   return b.kind === 'effect' && a.effectId === b.effectId && a.part === b.part;
 }
 

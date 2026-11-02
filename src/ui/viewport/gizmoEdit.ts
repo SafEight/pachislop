@@ -3,25 +3,28 @@ import type { Comp, Layer, Transform } from '../../model/types';
 import { useEditor } from '../../store/store';
 import { oneShot } from '../util';
 import { drag, press, type StageMap } from './drag';
-import { compCamera, glyphPoint3, layerMatrix, type Pt } from './geometry';
+import { compCamera, glyphPivotZ, glyphPoint3, layerMatrix, type Pt } from './geometry';
 import { snap, writeGlyphs, type TextLayer } from './glyphEdit';
 import type { GlyphGizmoGeom } from './glyphs';
-import { channelPlane, glyphRotation, layerRotation, trackball, type Channel, type RotationModel, type Vec3 } from './rotation3d';
+import { arcPlane, glyphRotation, layerRotation, trackball, turnAbout, type Channel, type Frame, type RotationModel, type Vec3 } from './rotation3d';
 
 // The shared 3D gizmo (Gizmo3D.tsx) of a 3D layer (Move tool) and of the picked glyphs of a 3D
 // text (Per-letter tool): the same handles and gestures, through a target that says what is
-// edited (the layer's transform / the glyphs' CharAdjust), where the pivot is, which way the
-// move axes point and how its rotation channels compose (rotation3d.ts). Values share one
-// convention: X / Y / Z move (+ right / up / toward the viewer) and rotation X / Y / Z (+ top
-// toward the viewer / right side away / clockwise on screen): Transform x, y, z, rotX, rotY, rotZ
-// and CharAdjust dx, dy, dz, tiltX, tiltY, rotate.
+// edited (the layer's transform / the glyphs' CharAdjust), where the pivot is, its frame and how
+// its rotation channels compose (rotation3d.ts). Values share one convention: X / Y / Z move
+// (+ right / up / toward the viewer) and rotation X / Y / Z (+ top toward the viewer / right side
+// away / clockwise on screen): Transform x, y, z, rotX, rotY, rotZ and CharAdjust dx, dy, dz,
+// tiltX, tiltY, rotate.
+//
+// Arrows and arcs share one frame that never turns with the object: the comp's axes for a
+// layer, the layer's own axes for its glyphs. An arc is the quarter ring around one frame axis,
+// between the other two axes' arms; dragging it turns the object about that axis (on top of its
+// orientation at the press), written back as its own rotation channels, several at once.
 //
 // On screen every direction is drawn as its true projection at the pivot, plus, as it turns
 // toward the viewer and foreshortens, a growing share of its depth along the down-left diagonal
-// (the front-view convention: an axis seen head-on is drawn there). The blend is continuous, so
-// arrows and arcs turn smoothly with the object; an axis at least half across the view is drawn
-// exactly as it points. Each rotation arc is the quarter of its gimbal ring between two of its
-// frame's axes, drawn from those same arms.
+// (the front-view convention: an axis seen head-on is drawn there). The blend is continuous, and
+// an axis at least half across the view is drawn exactly as it points.
 
 export type Axis = Channel;
 export type { Vec3 };
@@ -73,6 +76,8 @@ export interface Gizmo3DTarget {
   origin: THREE.Vector3;
   /** World displacement per unit of the X / Y / Z move values. */
   axes: readonly [THREE.Vector3, THREE.Vector3, THREE.Vector3];
+  /** The gizmo's frame (world unit vectors): the axes the arcs turn about. */
+  frame: Frame;
   /** How the rotation channels compose into an orientation. */
   rotation: RotationModel;
   /** Move values and rotations of the target (glyphs: the primary one). */
@@ -96,6 +101,7 @@ export function layerTarget(layer: Layer): Gizmo3DTarget {
     id: layer.id,
     origin: new THREE.Vector3(t.x, t.y, t.z),
     axes: UNIT,
+    frame: UNIT,
     rotation: layerRotation,
     pos: [t.x, t.y, t.z],
     rot: [t.rotX, t.rotY, t.rotZ],
@@ -116,24 +122,28 @@ export function layerTarget(layer: Layer): Gizmo3DTarget {
 
 /**
  * The picked glyphs of a 3D text: the layer's own axes (they turn with an orbited layer; Z
- * follows the oblique extrusion's skew), about the primary glyph's pivot on its front face.
+ * follows the oblique extrusion's skew), about the primary glyph's rotation pivot (its centre at
+ * mid-depth, pushed by dz), the point its tilts and rotate keep in place, so the gizmo stays put
+ * while the letter turns.
  */
 export function glyphTarget(layer: TextLayer, indices: readonly number[], gz: GlyphGizmoGeom): Gizmo3DTarget | null {
   if (layer.kind !== 'title3d' || !gz.pivotL || indices.length === 0) return null;
   const m = layerMatrix(layer);
   const m3 = new THREE.Matrix3().setFromMatrix4(m);
-  // The layer's rotation and flip without its scale: the frame the glyph's tilts turn in.
+  // The layer's rotation and flip without its scale: the glyph's frame, the one its tilts turn in.
   const s = Math.abs(layer.transform.scale) || 1e-6;
   const base = m3.clone().multiplyScalar(1 / s);
+  const col = (i: number) => new THREE.Vector3().setFromMatrix3Column(base, i);
   const { x: kx, y: ky } = layer.style3d.skew;
   const chars0 = layer.source.chars;
   const a = chars0[indices[0]];
-  const pz = glyphPoint3(layer, gz.pivotL, a, gz.pivotL, 0);
+  const pz = glyphPoint3(layer, gz.pivotL, a, gz.pivotL, glyphPivotZ(layer));
   const k = layer.source.size / 100;
   return {
     id: layer.id,
     origin: new THREE.Vector3(pz.p.x - kx * pz.z, pz.p.y - ky * pz.z, pz.z).applyMatrix4(m),
     axes: [new THREE.Vector3(k, 0, 0).applyMatrix3(m3), new THREE.Vector3(0, k, 0).applyMatrix3(m3), new THREE.Vector3(-kx * k, -ky * k, k).applyMatrix3(m3)],
+    frame: [col(0), col(1), col(2)],
     rotation: glyphRotation(base),
     pos: [a?.dx ?? 0, a?.dy ?? 0, a?.dz ?? 0],
     rot: [a?.tiltX ?? 0, a?.tiltY ?? 0, a?.rotate ?? 0],
@@ -168,7 +178,7 @@ export interface GizmoArm {
   value(gx: number, gy: number): number;
 }
 
-/** A rotation arc on screen: the quarter ring c + cosθ·A + sinθ·B, θ 0→90° turning its channel positively. */
+/** A rotation arc on screen: the quarter ring c + cosθ·A + sinθ·B, θ 0→90° turning the object positively about its frame axis. */
 export interface GizmoArc {
   a: Pt;
   b: Pt;
@@ -230,8 +240,9 @@ export function gizmoView(comp: Comp, target: Gizmo3DTarget, stage: StageMap): G
     // Dragging the arrow's drawn length moves the target ARM_PX / k world units along the axis (exactly under the pointer for an axis across the view).
     return { arm: a, value: (gx, gy) => (((gx * a.x + gy * a.y) / n2) * (ARM_PX / k)) / len };
   };
+  // Each arc from the frame alone: it stays put however the object is turned.
   const arc = (i: Channel): GizmoArc => {
-    const [a, b] = channelPlane(target.rotation, target.rot, i);
+    const { a, b } = arcPlane(target.frame, i);
     return { a: drawn(a), b: drawn(b) };
   };
   const toValues = new THREE.Matrix4().makeBasis(target.axes[0], target.axes[1], target.axes[2]).invert();
@@ -293,18 +304,22 @@ function nearestOnArc(c: Pt, arc: GizmoArc, from: number, to: number, p: Pt): { 
 }
 
 /**
- * Drag a rotation arc: the angle turned is the angle swept along the ring (its whole ellipse on
- * screen, beyond the drawn quarter), so the object turns as far and the same way as the hand
- * goes, all the way round. Each move steps along the ring's tangent from the last angle, then
- * settles on the ring point nearest the pointer within ±45° of it (pointer near the ring), so the
- * angle never drifts from the hand. `toStage`: client px → stage px. Shift: 15° steps of the value.
+ * Drag a rotation arc: the object turns about the arc's frame axis by the angle swept along the
+ * ring (its whole ellipse on screen, beyond the drawn quarter), so it turns as far and the same
+ * way as the hand goes, all the way round. Each move steps along the ring's tangent from the
+ * last angle, then settles on the ring point nearest the pointer within ±45° of it (pointer near
+ * the ring), so the angle never drifts from the hand. The turn goes on top of the orientation at
+ * the press and is written back as the target's channels, the solution nearest the previous
+ * one. `toStage`: client px → stage px. Shift: 15° steps of the swept angle.
  */
 export function startGizmoRotate(e: React.PointerEvent, target: Gizmo3DTarget, view: GizmoView, axis: Axis, toStage: (x: number, y: number) => Pt, onEnd: () => void) {
   const key = oneShot(`gizmo-rot:${target.id}`);
   const { c } = view;
   const arc = view.arcs[axis];
+  const { n } = arcPlane(target.frame, axis);
+  const w0 = target.rotation.orient(target.rot);
+  let prev = target.rot;
   const r = ARC_PX / ARM_PX;
-  const r0 = target.rot[axis];
   const o = toStage(0, 0);
   let th = nearestOnArc(c, arc, 0, Math.PI / 2, { x: e.clientX + o.x, y: e.clientY + o.y }).th;
   const th0 = th;
@@ -321,8 +336,9 @@ export function startGizmoRotate(e: React.PointerEvent, target: Gizmo3DTarget, v
       const near = nearestOnArc(c, arc, th - Math.PI / 4, th + Math.PI / 4, { x: ev.clientX + o.x, y: ev.clientY + o.y });
       if (near.dist < ARC_PX * 0.6) th = near.th;
       let d = (th - th0) / DEG;
-      if (ev.shiftKey) d = snap(r0 + d, ROT_SNAP) - r0;
-      target.write(NONE, [axis === 0 ? d : 0, axis === 1 ? d : 0, axis === 2 ? d : 0], key, ROTATE_ACTIONS[axis]);
+      if (ev.shiftKey) d = snap(d, ROT_SNAP);
+      prev = target.rotation.fromOrient(turnAbout(w0, n, d), prev);
+      target.write(NONE, [prev[0] - target.rot[0], prev[1] - target.rot[1], prev[2] - target.rot[2]], key, ROTATE_ACTIONS[axis]);
     },
     onEnd,
   );

@@ -456,7 +456,6 @@ export const JA_INSPECTOR: Readonly<Record<string, string>> = {
   'Shadow on an invisible wall behind the title (needs a directional light)': 'タイトルの後ろの見えない壁に落ちる影 (平行光源が必要)',
   '遊技機 practice: coloured (deep red / brown / navy), not black.': '遊技機の定石：黒ではなく色付き (深紅 / 茶 / 紺)。',
   'Blur of the shadow edge, relative to the title size': '影の縁のぼかし (タイトルサイズに対して)',
-  'Bloom and star streaks on highlights brighter than the threshold': 'しきい値より明るいハイライトにブルームと光条',
   'HDR luminance above which pixels glint (1 ≈ brighter than white)': 'グリントさせる HDR 輝度の下限 (1 ≈ 白より明るい)',
   'Bloom radius': 'ブルームの半径',
   '% of the source size': 'ソースのサイズの %',
@@ -1030,4 +1029,14 @@ export const JA_INSPECTOR: Readonly<Record<string, string>> = {
   'Cross-section: the letter and {bands}': '断面：文字と{bands}',
   'Cross-section: the letter': '断面：文字',
   'Give “{chars}” side walls of their own (a copy of what they show), so they can differ': '「{chars}」の側面に個別のコピー (今の見た目) を設定し、違う見た目にできるようにします',
+  // 3D glint shown as an effect (ui/glint.ts, GlintCard)
+  'Glint (3D highlights)': 'グリント（3D のハイライト）',
+  'Bloom and star streaks on the 3D highlights brighter than the threshold. Computed inside the 3D render, before tone mapping and before every other effect, so it is always applied first.':
+    'しきい値より明るい 3D のハイライトにブルームと光条を加えます。3D レンダーの内部で、トーンマッピングとほかのすべてのエフェクトより前に計算されるため、常に最初に適用されます。',
+  'Pinned first: the glint is computed inside the 3D render, before every other effect, so it can’t be reordered':
+    '先頭に固定：グリントは 3D レンダーの内部で、ほかのすべてのエフェクトより前に計算されるため、順序は変更できません',
+  'Reset the glint settings to their defaults': 'グリントの設定を既定値に戻す',
+  'Glint on': 'グリントをオン',
+  'Glint off': 'グリントをオフ',
+  'Reset glint': 'グリントをリセット',
 };

@@ -213,7 +213,7 @@ export function plateShape(overrides: Partial<PlateShape> = {}): PlateShape {
 }
 
 export function rim2D(width: number, material: Material2D, overrides: Partial<Rim2D> = {}): Rim2D {
-  return { id: uid(), enabled: true, width, join: 'miter', fillCounters: true, plate: plateShape(), offsetX: 0, offsetY: 0, material, ...overrides };
+  return { id: uid(), enabled: true, width, join: 'miter', fillCounters: false, plate: plateShape(), offsetX: 0, offsetY: 0, material, ...overrides };
 }
 
 /** かすれ off; the fields hold a dry-brush starting point for when it's switched on. */
@@ -244,11 +244,32 @@ export function defaultTitleStyle2D(): TitleStyle2D {
 // ---------- 3D ----------
 
 /**
- * Gold metal banding (top → bottom): warm white-hot top, saturated yellow, an orange → red-brown
- * horizon just below the middle, then orange-yellow. No near-white mid stops: a metal reflects
- * the environment TINTED by this colour, so pale stops read khaki and dark yellows read olive.
+ * Classic pachislot gold banding (top → bottom): warm white-hot top, saturated yellow, an orange →
+ * red-brown horizon just below the middle, then orange-yellow. `punchyGold` keeps it.
  */
 const GOLD_BANDING = g([0, '#fff4b0'], [0.18, '#ffd400'], [0.42, '#ff9800'], [0.5, '#b83000'], [0.58, '#ff7c00'], [0.8, '#ffb800'], [1, '#ffe070']);
+
+/**
+ * Polished gold (top → bottom), a mirror's sky / horizon / ground: a thin pale-yellow top, rich
+ * gold and amber, then a near-black warm-brown horizon just below the middle (the dark
+ * environment a real gold mirror shows) climbing back through amber to a pale-yellow bottom. The
+ * darks stay red-brown, never olive; the top stays gold, not pale, so bright bevels read on it.
+ */
+const POLISHED_GOLD = g(
+  [0, '#fff8d8'],
+  [0.06, '#ffe890'],
+  [0.16, '#ffc838'],
+  [0.3, '#f0a018'],
+  [0.4, '#c06a06'],
+  [0.47, '#5a2602'],
+  [0.51, '#1a0800'],
+  [0.55, '#120500'],
+  [0.6, '#5a2804'],
+  [0.72, '#c87810'],
+  [0.84, '#f8b830'],
+  [0.94, '#ffe080'],
+  [1, '#fff4c8'],
+);
 
 /**
  * 虹 banding (top → bottom), the 3D form of GRADIENTS.rainbowFill: the same hues over the gold
@@ -276,13 +297,19 @@ const PRESET_VALUES: Record<Exclude<MaterialPreset, 'custom'>, Partial<Material3
   // Metals carry a banded tint gradient (top → bottom: white-hot, mid tone, dark band just
   // below the middle, mid tone, pale) — the classic pachislot metal banding, which reads
   // head-on AND rotated, independent of what the environment happens to reflect.
+  // Polished gold: a near-mirror (low roughness) whose banding bends with the bevels
+  // (gradientBend), so up-facing facets catch the pale top and down-facing ones the dark horizon.
+  // The banding runs over each LINE: across a whole two-line title the horizon falls between
+  // the lines and both read flat yellow.
   gold: {
-    color: '#ffc000',
+    color: '#ffc23a',
     metalness: 1,
-    roughness: 0.08,
+    roughness: 0.06,
     // No clearcoat: an untinted coat lays a pale, unsaturated reflection over the metal.
     clearcoat: 0,
-    gradient: GOLD_BANDING,
+    gradient: POLISHED_GOLD,
+    gradientSpan: 'line',
+    gradientBend: 0.6,
   },
   /** 遊技機 gold pushed past physical (Element 3D Spec / Env multipliers): punchier highlights. */
   punchyGold: {

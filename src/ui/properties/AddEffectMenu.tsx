@@ -9,6 +9,7 @@ import { makeEffect } from '../../store/effects';
 import { effectOwnerLabel } from '../../store/labels';
 import { formatMsg } from '../../store/msg';
 import { useEditor, type EffectOwner } from '../../store/store';
+import { addGlint, GLINT_ABOUT, GLINT_ADD_LABEL } from '../glint';
 import { tr, useT } from '../i18n';
 import { ADJUSTMENT_MENU } from '../layers/commands';
 import './effects.css';
@@ -28,12 +29,17 @@ const summary = (desc: string) => desc.match(/^.*?(?:\.(?=\s|$)|。)/)?.[0] ?? d
 
 /**
  * One add-menu entry: an effect with its default params, or, for the Adjust effect, one entry
- * per adjustment of the adjustment-layer menu (bar Effects only), named by the adjustment.
+ * per adjustment of the adjustment-layer menu (bar Effects only), named by the adjustment; or,
+ * on a 3D title, its glint (switched on, ui/glint.ts).
  */
 interface Entry {
-  /** Unique per entry: the effect type, or `adjust:<adjustment type>`. */
+  /** Unique per entry: the effect type, `adjust:<adjustment type>`, or `glint3d`. */
   key: string;
-  def: EffectDef;
+  /** The effect added; null for the 3D glint. */
+  def: EffectDef | null;
+  category: EffectCategory;
+  /** English description (the i18n key). */
+  description: string;
   /** English name (the i18n key) and its i18n context. */
   label: string;
   ctx?: string;
@@ -41,17 +47,21 @@ interface Entry {
   params?: Readonly<Record<string, ParamValue>>;
 }
 
+const GLINT_ENTRY: Entry = { key: 'glint3d', def: null, category: 'Glow', description: GLINT_ABOUT, label: GLINT_ADD_LABEL };
+
 function menuEntries(): Entry[] {
   return listEffects().flatMap((def): Entry[] =>
     def.type === 'adjust'
       ? ADJUSTMENT_MENU.filter((a) => a.type !== 'effectsOnly').map((a) => ({
           key: `adjust:${a.type}`,
           def,
+          category: def.category,
+          description: def.description,
           label: a.label,
           ctx: 'adjustment',
           params: { adjustment: defaultAdjustment(a.type) },
         }))
-      : [{ key: def.type, def, label: def.label }],
+      : [{ key: def.type, def, category: def.category, description: def.description, label: def.label }],
   );
 }
 
@@ -72,8 +82,8 @@ function searchTextsOf(e: Entry): SearchText[] {
     texts = (['en', 'ja'] as const).map((lang) => {
       const label = norm(tr(e.label, undefined, { lang, ctx: e.ctx }));
       // An adjustment entry is also found by its effect's name (“Adjust”).
-      const effect = e.label === d.label ? '' : ` ${norm(tr(d.label, undefined, { lang }))}`;
-      return { label, hay: `${label}${effect} ${e.key.toLowerCase()} ${norm(tr(d.category, undefined, { lang }))} ${norm(tr(d.description, undefined, { lang }))}` };
+      const effect = d && e.label !== d.label ? ` ${norm(tr(d.label, undefined, { lang }))}` : '';
+      return { label, hay: `${label}${effect} ${e.key.toLowerCase()} ${norm(tr(e.category, undefined, { lang }))} ${norm(tr(e.description, undefined, { lang }))}` };
     });
     searchTexts.set(e.key, texts);
   }
@@ -154,16 +164,18 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
   const listRef = useRef<HTMLDivElement>(null);
   const previewing = useRef(false);
   const q = query.trim().normalize('NFKC').toLowerCase();
-  const entries = useMemo(() => menuEntries(), []);
+  // A 3D title's glint is offered for the layer (not its parts) while it is off.
+  const glintOffered = ownerLayer?.kind === 'title3d' && owners[0].part === null && !ownerLayer.style3d.glint.enabled;
+  const entries = useMemo(() => (glintOffered ? [GLINT_ENTRY, ...menuEntries()] : menuEntries()), [glintOffered]);
   // Every match across categories, best first while searching, else category then registry order.
   const hits = useMemo(() => {
     const scored = entries.map((e, i) => ({ e, i, s: q ? searchRank(e, q) : 0 })).filter((h) => h.s >= 0);
-    return scored.sort((a, b) => a.s - b.s || catRank(a.e.def.category) - catRank(b.e.def.category) || a.i - b.i).map((h) => h.e);
+    return scored.sort((a, b) => a.s - b.s || catRank(a.e.category) - catRank(b.e.category) || a.i - b.i).map((h) => h.e);
   }, [entries, q]);
-  const shown = useMemo(() => (cat === 'all' ? hits : hits.filter((e) => e.def.category === cat)), [hits, cat]);
+  const shown = useMemo(() => (cat === 'all' ? hits : hits.filter((e) => e.category === cat)), [hits, cat]);
   const counts = useMemo(() => {
     const m = new Map<EffectCategory, number>();
-    for (const e of hits) m.set(e.def.category, (m.get(e.def.category) ?? 0) + 1);
+    for (const e of hits) m.set(e.category, (m.get(e.category) ?? 0) + 1);
     return m;
   }, [hits]);
   // The highlighted entry: the one hovered / arrowed to, else the top hit while searching.
@@ -171,10 +183,16 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
   const name = (e: Entry) => t(e.label, undefined, { ctx: e.ctx });
   const preview = (e: Entry | null) => {
     setActive(e?.key ?? null);
-    const fx = e && makeEffect(e.def.type, e.params);
     const layer = useEditor.getState().project.layers.find((l) => l.id === layerId);
-    previewing.current = !!(fx && layer);
-    setPreviewOverride(fx && layer ? withEffect(layer, owners, fx) : null);
+    let shownLayer: Layer | null = null;
+    if (layer && e?.def) {
+      const fx = makeEffect(e.def.type, e.params);
+      shownLayer = fx && withEffect(layer, owners, fx);
+    } else if (layer?.kind === 'title3d' && e) {
+      shownLayer = { ...layer, style3d: { ...layer.style3d, glint: { ...layer.style3d.glint, enabled: true } } };
+    }
+    previewing.current = !!shownLayer;
+    setPreviewOverride(shownLayer);
   };
   // Esc and outside clicks close the menu. Closing drops the hover preview, only when this menu
   // set one, so mounting or closing never clears another preview.
@@ -195,7 +213,8 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
   const add = (e: Entry) => {
     if (previewing.current) setPreviewOverride(null);
     previewing.current = false;
-    addEffect(owners, e.def.type, e.params);
+    if (e.def) addEffect(owners, e.def.type, e.params);
+    else addGlint(layerId);
     onClose();
   };
   const onQuery = (v: string) => {
@@ -314,24 +333,24 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
           )}
           {shown.map((e, i) => (
             <div key={e.key}>
-              {!q && cat === 'all' && e.def.category !== shown[i - 1]?.def.category && <div className="menu-group">{t(e.def.category)}</div>}
+              {!q && cat === 'all' && e.category !== shown[i - 1]?.category && <div className="menu-group">{t(e.category)}</div>}
               <button
                 id={`fx-add-${e.key}`}
                 role="option"
                 aria-selected={e === current}
                 data-key={e.key}
                 className={`fx-add-item ${e === current ? 'active' : ''}`}
-                title={t('{label}: {description}', { label: name(e), description: t(e.def.description) })}
+                title={t('{label}: {description}', { label: name(e), description: t(e.description) })}
                 onPointerEnter={() => preview(e)}
                 onFocus={() => preview(e)}
                 onClick={() => add(e)}
               >
                 <span className="fx-add-label">
                   {name(e)}
-                  {q && <span className="fx-add-cat">{t(e.def.category)}</span>}
+                  {q && <span className="fx-add-cat">{t(e.category)}</span>}
                   {e === current && q && <kbd className="fx-add-enter">↵</kbd>}
                 </span>
-                <span className="fx-add-sum">{summary(t(e.def.description))}</span>
+                <span className="fx-add-sum">{summary(t(e.description))}</span>
               </button>
             </div>
           ))}
@@ -340,7 +359,7 @@ export function AddEffectMenu({ owner: picked, onClose, anchor }: { owner: Effec
       <div className="fx-add-detail" aria-live="polite">
         {current ? (
           <>
-            <b>{name(current)}</b> {t(current.def.description)}
+            <b>{name(current)}</b> {t(current.description)}
           </>
         ) : (
           t('Hover an effect to preview it on the layer. Click or press Enter to add it on top of the stack.')

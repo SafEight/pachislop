@@ -9,6 +9,7 @@ import { effectName } from '../util';
 import { Breadcrumb } from './Breadcrumb';
 import { DocumentView } from './DocumentView';
 import { EffectView } from './EffectView';
+import { GlintCard } from './GlintCard';
 import { LayerView } from './LayerView';
 import { MultiView } from './MultiView';
 import { MaskView } from './MaskView';
@@ -40,7 +41,7 @@ function Header({ at }: { at: Resolved }) {
   const badge =
     at.kind === 'part' ? (
       <span className="badge k-part">{t('Part')}</span>
-    ) : at.kind === 'effect' ? (
+    ) : at.kind === 'effect' || at.kind === 'glint' ? (
       <span className="badge k-effect">fx</span>
     ) : at.kind === 'mask' ? (
       <span className="badge k-mask">{t('Mask')}</span>
@@ -54,7 +55,9 @@ function Header({ at }: { at: Resolved }) {
         ? effectName(t, at.fx)
         : at.kind === 'mask'
           ? formatMsg(maskLabel(at.layer, at.mask.id), t)
-          : layer.name;
+          : at.kind === 'glint'
+            ? t('Glint')
+            : layer.name;
   return (
     <div className="panel-head props-head">
       {badge}
@@ -108,7 +111,9 @@ export function PropertiesPanel() {
           ? `${at.layer.id}:${at.part}`
           : at.kind === 'mask'
             ? `${at.layer.id}:${at.mask.id}`
-            : `${at.layer.id}:${at.fx.id}`;
+            : at.kind === 'glint'
+              ? `${at.layer.id}:glint`
+              : `${at.layer.id}:${at.fx.id}`;
   // The body remounts per node: restore its remembered scroll, once more on the next frame for
   // content that grows after the first layout (thumbnails, previews).
   const shownKey = useRef(scrollKey);
@@ -138,7 +143,7 @@ export function PropertiesPanel() {
       <Breadcrumb at={at} />
       <Header at={at} />
       <div
-        className={`scroll props-body ${at.kind === 'effect' ? 'full' : ''}`}
+        className={`scroll props-body ${at.kind === 'effect' || at.kind === 'glint' ? 'full' : ''}`}
         key={key}
         ref={bodyRef}
         onScroll={(e) => scrollMemory.set(scrollKey, e.currentTarget.scrollTop)}
@@ -152,6 +157,8 @@ export function PropertiesPanel() {
             <PartView layer={at.layer} part={at.part} />
           ) : at.kind === 'mask' ? (
             <MaskView layer={at.layer} mask={at.mask} />
+          ) : at.kind === 'glint' ? (
+            <GlintCard layers={[at.layer]} full />
           ) : (
             <EffectView layerId={at.layer.id} part={at.part} effectId={at.fx.id} />
           )}

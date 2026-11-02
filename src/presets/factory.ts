@@ -53,6 +53,8 @@ import type {
 import { fullLighting } from './apply';
 import { applyColourway, COLOURWAY_INFO, tintOrb } from './colourways';
 import { more3DLooks } from './factory3dMore';
+import { setA3DLooks } from './factory3dSetA';
+import { setB3DLooks } from './factory3dSetB';
 import { COLOURWAYS, type Colourway, type StylePreset } from './types';
 
 // Factory style library. Every look is authored for a 200 px source (REF): style dimensions are
@@ -60,7 +62,7 @@ import { COLOURWAYS, type Colourway, type StylePreset } from './types';
 //
 // The 2D looks follow the researched production stacks (research-ps §2): a gradient-mapped,
 // bevelled metal face with a gloss cap and noisy inner glow, then 2–4 rims inner → outer
-// (dark keyline → bright → thick coloured, 1 : 2 width ratio, miter joins, filled counters)
+// (dark keyline → bright → thick coloured, 1 : 2 width ratio, miter joins, open counters)
 // and a dropped dark base for weight. 3D looks follow the Element 3D recipe (research-e3d §1):
 // thick extrusion, round bevel, reflective metal under a hard-light studio environment,
 // separate under-plates, and a two-layer (tight + wide) glow.
@@ -121,13 +123,9 @@ const solid = (color: string, o: Partial<Material2D> = {}) => material2D(solidFi
 const keyline = (w: number, color = '#0a0604') => rim2D(w, solid(color));
 /** Dropped dark base under everything (weight / contact shadow). */
 const base = (w: number, dy: number, color = '#000000', dx = 0) => rim2D(w, solid(color), { offsetX: dx, offsetY: dy });
-// Bright rims leave the counters (holes of 口, B, O…) open so the next dark rim fills them:
-// counters read dark, as in the production stacks, instead of flooding with gold/white.
 /** Thin bright line with a soft bevel (white / pale stroke). */
 const lightLine = (w: number, color = '#ffffff') =>
-  rim2D(w, solid(color, { bevel: bevel2D({ size: 1.2, depth: 2, gloss: 'linear', highlightOpacity: 0.6, shadowOpacity: 0.35 }) }), {
-    fillCounters: false,
-  });
+  rim2D(w, solid(color, { bevel: bevel2D({ size: 1.2, depth: 2, gloss: 'linear', highlightOpacity: 0.6, shadowOpacity: 0.35 }) }));
 /** Bevelled metal ring (gold / red / silver frames). */
 const metalRim = (w: number, fill: Gradient, ramp: Gradient | null, o: Partial<Bevel2D> = {}, angle = 270, amount = 0.85) =>
   rim2D(
@@ -136,7 +134,6 @@ const metalRim = (w: number, fill: Gradient, ramp: Gradient | null, o: Partial<B
       bevel: bevel2D({ size: Math.max(0.8, w * 0.6), depth: 4, gloss: 'ring', highlightOpacity: 0.85, shadowOpacity: 0.6, ...o }),
       finish: ramp ? finish(ramp, amount) : { enabled: false, gradient: GRADIENTS.goldRamp, amount: 1 },
     }),
-    { fillCounters: false },
   );
 
 /** Bevelled, gradient-mapped metal face, optionally with pattern marks (柄). */
@@ -354,7 +351,6 @@ const ultimateGold = p2({
           finish: finish(GRADIENTS.goldRamp, 0.8),
           texture: tex('sparkle', 0.8, 3, 'screen', 5),
         }),
-        { fillCounters: false },
       ),
       keyline(1.6, '#140a00'),
       base(1.4, 2.2),
@@ -582,7 +578,6 @@ const chromeRim = (w: number, ramp: Gradient, blur = 20, highlight = 0.7) =>
       reflection: reflection2D({ enabled: true, blur }),
       finish: finish(ramp, 1),
     }),
-    { fillCounters: false },
   );
 /** Yellow chrome gold (not the orange gold ramp): near-black brown flanks → gold → white-hot highlight, for high-contrast tubes. */
 const GOLD_CHROME = g([0, '#1e0c00'], [0.25, '#6a3c00'], [0.5, '#d09020'], [0.7, '#ffe060'], [0.88, '#fffbe0'], [1, '#ffffff']);
@@ -755,10 +750,7 @@ const neon = p2({
   style: {
     face: solid('#16030f', { innerGlow: glow('#ff2ab8', 2.6, 0.75, 0) }),
     rims: [
-      rim2D(1.6, solid('#ffeefa', { bevel: bevel2D({ profile: 'ridge', size: 0.8, depth: 3, gloss: 'linear', highlightOpacity: 0.9, shadowColor: '#ff1aa8', shadowOpacity: 0.85 }) }), {
-        join: 'round',
-        fillCounters: false,
-      }),
+      rim2D(1.6, solid('#ffeefa', { bevel: bevel2D({ profile: 'ridge', size: 0.8, depth: 3, gloss: 'linear', highlightOpacity: 0.9, shadowColor: '#ff1aa8', shadowOpacity: 0.85 }) }), { join: 'round' }),
       rim2D(1.2, solid('#16030f'), { join: 'round' }),
     ],
   },
@@ -781,14 +773,8 @@ const neonKnockout = p2({
     // draws nothing (Photoshop Knockout needs fill opacity below 100 % too).
     face: solid('#ff2ab8', { opacity: 0 }),
     rims: [
-      rim2D(1, solid('#fff4fc', { bevel: bevel2D({ profile: 'ridge', size: 0.5, depth: 3, gloss: 'linear', highlightOpacity: 0.9, shadowColor: '#ff1aa8', shadowOpacity: 0.6 }) }), {
-        join: 'round',
-        fillCounters: false,
-      }),
-      rim2D(1.6, solid('#ff2ab8', { bevel: bevel2D({ profile: 'ridge', size: 0.8, depth: 3, gloss: 'linear', highlightOpacity: 0.6, shadowColor: '#6a0040', shadowOpacity: 0.7 }) }), {
-        join: 'round',
-        fillCounters: false,
-      }),
+      rim2D(1, solid('#fff4fc', { bevel: bevel2D({ profile: 'ridge', size: 0.5, depth: 3, gloss: 'linear', highlightOpacity: 0.9, shadowColor: '#ff1aa8', shadowOpacity: 0.6 }) }), { join: 'round' }),
+      rim2D(1.6, solid('#ff2ab8', { bevel: bevel2D({ profile: 'ridge', size: 0.8, depth: 3, gloss: 'linear', highlightOpacity: 0.6, shadowColor: '#6a0040', shadowOpacity: 0.7 }) }), { join: 'round' }),
     ],
     knockout: true,
   },
@@ -1296,10 +1282,10 @@ export function letter3D(o: { depth: number; bevel: BevelShape3D; rings?: Ring[]
   return { depth: total, bevel: o.bevel, ...side, bands: [...edge, ...(o.plates ?? [])] };
 }
 
-/** A plate (also used by the templates): a band `grow` beyond the solid in front of it, counters filled, 10 deep, a 0.6 round top bevel; `o` / `mo` over the band / its material. */
+/** A plate (also used by the templates): a band `grow` beyond the solid in front of it, 10 deep, a 0.6 round top bevel; `o` / `mo` over the band / its material. */
 export function plate(grow: number, preset: MaterialPreset, o: Partial<Band3D> = {}, mo: Partial<Material3D> = {}): Band3D {
   const b = band3D(grow, preset);
-  return { ...b, fillCounters: true, depth: 10, bevel: bevel3D(0.6, 0.6), material: { ...b.material, ...mo }, ...o };
+  return { ...b, depth: 10, bevel: bevel3D(0.6, 0.6), material: { ...b.material, ...mo }, ...o };
 }
 
 /** Black lacquer under-plate whose gloss stays dark at grazing angles (no silver rim line). */
@@ -1313,9 +1299,9 @@ export const blackPlate = (grow: number, o: Partial<Band3D> = {}, mo: Partial<Ma
 const BEVEL = 1.6;
 export const letterBevel = (profile: BevelProfile3D = 'chamfer', width = BEVEL) => bevel3D(width, width, profile);
 
-/** Environment look; rotation slides the reflections across the metal. Punch tone mapping keeps saturated metals saturated in the highlights. */
-export const envLook = (preset: EnvPreset, rotation: number, intensity = 1): LookLighting => ({
-  environment: { preset, intensity, rotation, tint: '#ffffff', contrast: 1, saturation: 1, blur: 0, repeatX: 1, repeatY: 1 },
+/** Environment look; rotation slides the reflections across the metal, contrast grades it. Punch tone mapping keeps saturated metals saturated in the highlights. */
+export const envLook = (preset: EnvPreset, rotation: number, intensity = 1, contrast = 1): LookLighting => ({
+  environment: { preset, intensity, rotation, tint: '#ffffff', contrast, saturation: 1, blur: 0, repeatX: 1, repeatY: 1 },
   toneMapping: 'punch',
   exposure: 1,
 });
@@ -1324,12 +1310,12 @@ export const envLook = (preset: EnvPreset, rotation: number, intensity = 1): Loo
 const studioEnv = (rotation: number): LookLighting => envLook('studio', rotation);
 
 /**
- * Gold under the softbox HDRI: its broad panels keep every bevel facet lit, so the gold stays
- * saturated and bright head-on AND tilted — the studio's dark floor turns down-facing facets of a
- * saturated yellow metal olive. Measured on 大当り (gold-pixel HSV): softbox S 0.79 / V 0.85,
- * studio S 0.74 / V 0.79.
+ * Gold under the softbox HDRI: its broad panels keep every bevel facet lit head-on AND tilted
+ * (the studio's dark floor turns down-facing facets of a yellow metal olive). The contrast grade
+ * deepens the HDRI's dim walls, so the polished gold shows dark-to-bright reflections, not a
+ * flat yellow.
  */
-const goldEnv = (rotation: number): LookLighting => envLook('softbox', rotation);
+const goldEnv = (rotation: number): LookLighting => envLook('softbox', rotation, 1, 1.4);
 
 /** Light glow from the hottest highlights only: white-hot near them, the look's colour in the halo. */
 export const glow3D = (color: string, intensity = 1.5) => [
@@ -1345,8 +1331,30 @@ export const edge3D = (color: string, keyline = '#0a0604') => [
 /** A title look's effects: edge (keyline + hugging glow) then the highlight glow. */
 export const fx3D = (color: string) => [...edge3D(color), ...glow3D(color)];
 
+/** Glint on the HDR specular highlights: soft bloom plus 4-point star streaks. */
+export const starGlint = (o: Partial<Glint3D> = {}): Glint3D =>
+  glint3D({ enabled: true, threshold: 1, intensity: 1, radius: 5, streaks: 4, length: 32, angle: 15, ...o });
+
 const goldEdge = () => ring(0.3, 0.6, darkMetal('#3a1000'), 'step');
 
+/**
+ * The gold letters' bevel as a band of brighter polished gold (silver3D's chrome bevel, in gold):
+ * pale and white-hot where its facets face up, deep amber where they face down, so every edge of
+ * the letters is drawn with a crisp bright line against the face's darker banding.
+ */
+const goldBevelRing = (width = BEVEL) =>
+  ring(
+    width,
+    width,
+    m3('gold', {
+      reflectivity: 0.9,
+      gradient: g([0, '#ffffff'], [0.22, '#fff2b8'], [0.42, '#ffc848'], [0.5, '#a85a06'], [0.56, '#5a2a02'], [0.66, '#e8a028'], [0.84, '#ffe490'], [1, '#ffffff']),
+      gradientBend: 1,
+    }),
+    'chamfer',
+  );
+
+/** Classic polished gold: a bright gold bevel and a dark edge line on a black lacquer plate. */
 const gold3D = p3({
   id: 'f-3d-gold',
   name: 'Element Gold',
@@ -1354,11 +1362,13 @@ const gold3D = p3({
   style3d: {
     curveSegments: 10,
     face: m3('gold', { reflectivity: 0.85 }),
-    ...letter3D({ depth: 10, bevel: letterBevel(), rings: [goldEdge()], side: darkMetal('#4a1a00'), plates: [blackPlate(5, { depth: 7 })] }),
+    // the bright bevel is not the face's material: it is a band, the letter has no bevel
+    ...letter3D({ depth: 10, bevel: bevel3D(0, 0), rings: [goldBevelRing(), goldEdge()], side: darkMetal('#2a0e00', 0.3), plates: [blackPlate(5, { depth: 7 })] }),
     shadow: shadow3D(),
+    // no glint: its passes cost ~45 ms a frame on the heavy BIG BONUS template for a couple of stars
     glint: glint3D(),
   },
-  effects: fx3D('#ff9a1a'),
+  effects: [...edge3D('#ffa21a'), ...glow3D('#ffc850', 1.2)],
   lighting: goldEnv(25),
 });
 
@@ -1383,47 +1393,43 @@ const chrome3D = p3({
   lighting: studioEnv(-30),
 });
 
-/** Blender "Cornice Molding" / pachimoji 3-segment bevel: gold face, white band, red band. */
-const cornice3D = p3({
-  id: 'f-3d-cornice',
-  name: 'Cornice Bands (gold / white / red)',
-  group: THREE_D,
-  style3d: {
-    curveSegments: 10,
-    face: m3('gold', { reflectivity: 0.8 }),
-    ...letter3D({
-      depth: 9,
-      bevel: letterBevel('chamfer', 0.6),
-      rings: [ring(0.2, 0.3, darkMetal('#2a0a00'), 'step'), ring(0.5, 0.4, m3('whiteGloss'), 'step'), ring(1, 1.2, m3('redMetal'), 'round')],
-      side: darkMetal('#4a000a'),
-      plates: [blackPlate(4.8, { depth: 6 })],
-    }),
-    shadow: shadow3D(),
-    glint: glint3D(),
-  },
-  effects: fx3D('#ff6a1a'),
-  lighting: goldEnv(25),
-});
+/** Deep red metal for the plates under gold: dark-horizon banding, little coat, so it reads metal, not plastic. */
+const GOLD_STACK_RED: Partial<Material3D> = {
+  metalness: 1,
+  roughness: 0.12,
+  clearcoat: 0.3,
+  gradient: g([0, '#ff6a50'], [0.25, '#e01018'], [0.45, '#8a0008'], [0.52, '#240002'], [0.6, '#90000c'], [0.82, '#e81820'], [1, '#ff6048']),
+  gradientBend: 0.6,
+};
 
-/** Element 3D under-plates (外枠): gold letters on a black then a red extruded plate. */
+/**
+ * Element 3D under-plates (外枠): polished gold letters on a stack — a black plate, a deep red
+ * metal plate, a thin gold line, then a black base, so the silhouette alternates dark / red /
+ * bright / dark.
+ */
 const goldPlate3D = p3({
   id: 'f-3d-gold-plate',
-  name: 'Gold on Black/Red Plates (外枠)',
+  name: '外枠 Gold on Red Stack',
   group: THREE_D,
   style3d: {
     curveSegments: 10,
     face: m3('gold', { reflectivity: 0.85 }),
     ...letter3D({
       depth: 10,
-      bevel: letterBevel(),
-      rings: [goldEdge()],
-      side: darkMetal('#4a1a00'),
-      plates: [blackPlate(5, { depth: 8 }), plate(2.4, 'redMetal', { depth: 6, bevel: bevel3D(1.4, 1.4) })],
+      bevel: bevel3D(0, 0),
+      rings: [goldBevelRing(), goldEdge()],
+      side: darkMetal('#2a0e00', 0.3),
+      plates: [
+        blackPlate(2.2, { depth: 8 }, { reflectivity: 0.25 }),
+        plate(3, 'redMetal', { depth: 6, bevel: bevel3D(1.6, 1.6, 'chamfer') }, GOLD_STACK_RED),
+        plate(0.9, 'gold', { depth: 5, bevel: bevel3D(0.8, 0.8, 'round') }, { reflectivity: 0.9 }),
+        blackPlate(1.6, { depth: 5, bevel: bevel3D(0.6, 0.6) }, { color: '#0a0000', reflectivity: 0.25 }),
+      ],
     }),
     shadow: shadow3D(),
     glint: glint3D(),
   },
-  effects: fx3D('#ff7a10'),
+  effects: [...edge3D('#ff3a10'), ...glow3D('#ffc850', 1.2)],
   lighting: goldEnv(25),
 });
 
@@ -1478,58 +1484,72 @@ const silver3D = p3({
   lighting: studioEnv(120),
 });
 
+/**
+ * Candy-apple red metal: a deep wine paint over metal (hot pink-white top, near-black horizon,
+ * bright red below) under a glossy clear coat; the bevel is a band of a paler, hotter red chrome
+ * so every edge flares pink-white, then a dark step, a chrome line and a black / red / black stack.
+ * The softbox keeps the whole face lit head-on AND tilted (the studio's floor turns it black).
+ */
 const red3D = p3({
   id: 'f-3d-red',
-  name: 'Red Metal',
+  name: '赤メタル Candy-Apple Red',
   group: THREE_D,
   style3d: {
     curveSegments: 10,
-    face: m3('redMetal', { reflectivity: 0.8 }),
+    face: {
+      ...material3D('custom'),
+      color: '#7a0010',
+      gradient: g([0, '#ffe0e8'], [0.1, '#ff5070'], [0.28, '#c00020'], [0.45, '#3a0008'], [0.52, '#100002'], [0.62, '#7a0012'], [0.82, '#e8102e'], [1, '#ff7890']),
+      gradientBend: 0.4,
+      metalness: 1,
+      roughness: 0.04,
+      clearcoat: 1,
+      reflectivity: 0.5,
+      specBoost: 1.6,
+    },
+    // the hot bevel is not the face's material: it is a band, the letter has no bevel
     ...letter3D({
       depth: 10,
-      bevel: letterBevel('chamfer', 1.1),
-      rings: [ring(0.6, 0.6, m3('gold'), 'step'), ring(0.25, 0.5, darkMetal('#2a0004'), 'step')],
-      side: darkMetal('#4a0008'),
-      plates: [blackPlate(4.5, { depth: 8 })],
+      bevel: bevel3D(0, 0),
+      rings: [
+        ring(
+          1.3,
+          1.3,
+          {
+            ...material3D('custom'),
+            color: '#ff4060',
+            gradient: g([0, '#fff0f4'], [0.3, '#ff5a78'], [0.5, '#a00020'], [0.7, '#ff4a6a'], [1, '#ffe0e8']),
+            metalness: 1,
+            roughness: 0.03,
+            clearcoat: 1,
+            reflectivity: 1.2,
+            specBoost: 2,
+          },
+          'chamfer',
+        ),
+        ring(0.25, 0.4, darkMetal('#1a0006'), 'step'),
+        ring(1, 1, m3('chrome', { reflectivity: 0.9 }), 'chamfer'),
+        ring(0.3, 0.6, darkMetal('#14000a'), 'step'),
+      ],
+      side: darkMetal('#2a0008', 0.3),
+      plates: [
+        blackPlate(2.4, { depth: 7 }, { color: '#0a0204' }),
+        plate(1.1, 'redMetal', { depth: 4, bevel: bevel3D(0.9, 0.9, 'round') }, { color: '#a00018' }),
+        blackPlate(1, { depth: 4, bevel: bevel3D(0.5, 0.5) }),
+      ],
     }),
     shadow: shadow3D(),
-    glint: glint3D(),
+    glint: starGlint({ intensity: 0.4, threshold: 2.2, tint: '#ffe8f0' }),
   },
-  effects: fx3D('#ff2a10'),
-  lighting: studioEnv(25),
-});
-
-/** Glint on the HDR specular highlights: soft bloom plus 4-point star streaks. */
-export const starGlint = (o: Partial<Glint3D> = {}): Glint3D =>
-  glint3D({ enabled: true, threshold: 1, intensity: 1, radius: 5, streaks: 4, length: 32, angle: 15, ...o });
-
-/** 遊技機 gold pushed past physical (Spec / Env multipliers) under strip lights, with star glints. */
-const punchyGold3D = p3({
-  id: 'f-3d-punchy-gold',
-  name: '派手金 Punchy Gold + Glint',
-  group: THREE_D,
-  style3d: {
-    curveSegments: 10,
-    face: m3('punchyGold'),
-    ...letter3D({
-      depth: 10,
-      bevel: letterBevel('round'),
-      rings: [goldEdge()],
-      side: darkMetal('#4a1a00'),
-      plates: [blackPlate(4.8, { depth: 8 }), plate(2.2, 'redMetal', { depth: 6, bevel: bevel3D(1.2, 1.2) })],
-    }),
-    shadow: shadow3D(),
-    glint: starGlint({ intensity: 0.5, threshold: 1.6 }),
-  },
-  effects: fx3D('#ff8a10'),
-  lighting: envLook('strips', 20),
+  effects: [...edge3D('#ff1a40', '#0a0004'), ...glow3D('#ff6a8a', 1)],
+  lighting: envLook('softbox', 25),
 });
 
 /**
  * Gold-framed gem inlay. A gem body shows what the title has right behind it
  * (engine/three/materials.ts), and every band is a whole copy of the outline: a `bed` band flush
  * with the letters (no grow, no bevel) comes first, so the stone takes its colour (silver for
- * diamond, red metal for ruby) instead of the dark ring's; the frame rings follow, then a rim of
+ * diamond) instead of the dark ring's; the frame rings follow, then a rim of
  * the bed and a black plate that separates it from the background.
  */
 function gemInlay(id: string, name: string, gem: P3, bed: P3, glowCol: string, tint: string): StylePreset {
@@ -1561,7 +1581,6 @@ function gemInlay(id: string, name: string, gem: P3, bed: P3, glowCol: string, t
 }
 
 const diamond3D = gemInlay('f-3d-diamond', 'ダイヤ Diamond Inlay', 'diamond', 'silver', '#e8f4ff', '#f4faff');
-const ruby3D = gemInlay('f-3d-ruby', 'ルビー Ruby', 'ruby', 'redMetal', '#ff2a40', '#ffe0e4');
 
 /**
  * Candy-apple glitter paint with a chrome step and a white enamel plate (pop). The paint is a
@@ -1597,34 +1616,6 @@ const candy3D = p3({
   },
 });
 
-/**
- * Element 3D Matte Shadow showcase: a gold title floating just above a lit panel. A nearly
- * frontal key light (a little upper left) drops a soft crimson shadow a short way below right of
- * the letters, never a black or far-offset blob; the edge has no hugging glow, which would bury
- * the shadow, only the dark keyline and the highlight glow. The softbox sits at rotation 0: its
- * dark horizon then stays a thin band across every letter instead of muddying one end of the title.
- */
-const shadowGold3D = p3({
-  id: 'f-3d-tinted-shadow',
-  name: '影 Gold + Tinted Shadow',
-  group: THREE_D,
-  style3d: {
-    curveSegments: 10,
-    face: m3('gold', { reflectivity: 0.85 }),
-    ...letter3D({ depth: 10, bevel: letterBevel(), rings: [goldEdge()], side: darkMetal('#4a1a00'), plates: [blackPlate(4.6, { depth: 7 }, { color: '#1a0800' })] }),
-    shadow: shadow3D({ enabled: true, color: '#7a0c20', opacity: 0.85, softness: 0.4 }),
-    glint: glint3D(),
-  },
-  effects: [fx('keyline', { width: 2.5, color: '#0a0604', opacity: 1, softness: 0 }), ...glow3D('#ff9a1a')],
-  lighting: {
-    ...goldEnv(0),
-    lights: [
-      { id: uid(), type: 'directional', color: '#fff4e0', intensity: 1.2, x: -400, y: 800, z: 2000 },
-      { id: uid(), type: 'ambient', color: '#ffffff', intensity: 0.3, x: 0, y: 0, z: 0 },
-    ],
-  },
-});
-
 /** Red paint whose ramp runs front → back (Material3D.gradientAxis 'depth'): walls fade to black with depth. */
 const depthRedWall = (): Material3D => ({
   ...material3D('custom'),
@@ -1650,59 +1641,19 @@ const popout3D = p3({
     curveSegments: 10,
     skew: { x: 0.35, y: -0.5 },
     face: m3('gold', { reflectivity: 0.85 }),
-    ...letter3D({ depth: 24, bevel: letterBevel('chamfer', 1.3), rings: [goldEdge()], side: depthRedWall() }),
+    ...letter3D({ depth: 24, bevel: bevel3D(0, 0), rings: [goldBevelRing(1.3), goldEdge()], side: depthRedWall() }),
     shadow: shadow3D(),
-    glint: starGlint({ intensity: 0.45, threshold: 1.6 }),
+    glint: starGlint({ intensity: 0.35, threshold: 4.5, tint: '#fff4d0' }),
     ao: ao3D({ enabled: true, radius: 4, intensity: 1.2 }),
   },
-  effects: [...edge3D('#ff3a10'), ...glow3D('#ffb43c')],
+  effects: [...edge3D('#ff3a10'), ...glow3D('#ffc850', 1.2)],
   lighting: goldEnv(25),
 });
-
-/**
- * 元祖 / ツラヌキ deep title: a straight deep extrusion whose red walls fade to black with depth
- * (no skew), a dark keyline and a red glow hugging the silhouette.
- */
-const deepRed3D = p3({
-  id: 'f-3d-deep-red-walls',
-  name: '赤壁 Gold + Depth-fade Red Walls',
-  group: THREE_D,
-  style3d: {
-    curveSegments: 10,
-    face: m3('gold', { reflectivity: 0.85 }),
-    ...letter3D({ depth: 18, bevel: letterBevel('chamfer', 1.3), rings: [goldEdge()], side: depthRedWall() }),
-    shadow: shadow3D(),
-    glint: glint3D(),
-  },
-  effects: [...edge3D('#ff1a00'), ...glow3D('#ff6a1a')],
-  lighting: goldEnv(25),
-});
-
-/** Gold surface look: `surface` bends the reflections (液体金 liquid ripples, クシャ crumpled foil). */
-function surfaceGold3D(id: string, name: string, surface: Material3D['surface'], glowCol: string): StylePreset {
-  const gold = m3('gold', { reflectivity: 0.9, surface });
-  return p3({
-    id,
-    name,
-    group: THREE_D,
-    style3d: {
-      curveSegments: 10,
-      face: gold,
-      ...letter3D({ depth: 10, bevel: letterBevel('round', 1.3), rings: [goldEdge()], side: darkMetal('#4a1a00'), plates: [blackPlate(4.3, { depth: 7 })] }),
-      shadow: shadow3D(),
-      glint: glint3D(),
-    },
-    effects: fx3D(glowCol),
-    lighting: goldEnv(25),
-  });
-}
-
-const liquidGold3D = surfaceGold3D('f-3d-liquid-gold', '液体金 Liquid Gold', { kind: 'liquid', amount: 0.55, scale: 34, seed: 3 }, '#ff8a10');
-const crumpleGold3D = surfaceGold3D('f-3d-crumple-gold', 'クシャ金 Crumpled Gold Foil', { kind: 'crumple', amount: 0.45, scale: 12, seed: 5 }, '#ff9a1a');
 
 /**
  * 北斗-style slanted box plates: one angular plate around the WHOLE word (PlateShape 'box', leaning
- * with the text) instead of rings that follow every glyph bump: red, then a black base plate.
+ * with the text) instead of rings that follow every glyph bump: deep red metal, a thin gold line,
+ * then a black base plate.
  */
 const boxPlate3D = p3({
   id: 'f-3d-box-plate',
@@ -1715,18 +1666,24 @@ const boxPlate3D = p3({
     // margin around the bevelled letters.
     ...letter3D({
       depth: 9,
-      bevel: letterBevel('chamfer', 1.2),
-      rings: [goldEdge()],
-      side: darkMetal('#4a1a00'),
+      bevel: bevel3D(0, 0),
+      rings: [goldBevelRing(1.2), goldEdge()],
+      side: darkMetal('#2a0e00', 0.3),
       plates: [
-        plate(3.4, 'redMetal', { depth: 5, shape: plateShape({ kind: 'box', corner: 3, slant: 12 }), bevel: { ...bevel3D(1.2, 1.2, 'chamfer'), segments: 1 } }),
-        blackPlate(2.5, { depth: 7, shape: plateShape({ kind: 'box', corner: 4, slant: 12 }) }),
+        // the box is one big flat face: deeper crimson than the rings' red, so it frames the gold instead of outshining it
+        plate(3.4, 'redMetal', { depth: 5, shape: plateShape({ kind: 'box', corner: 3, slant: 12 }), bevel: { ...bevel3D(1.2, 1.2, 'chamfer'), segments: 1 } }, {
+          ...GOLD_STACK_RED,
+          gradient: g([0, '#b02018'], [0.3, '#700010'], [0.48, '#30000a'], [0.52, '#100002'], [0.6, '#40000a'], [0.85, '#8a0812'], [1, '#c02a20']),
+          reflectivity: 0.8,
+        }),
+        plate(0.8, 'gold', { depth: 4, shape: plateShape({ kind: 'box', corner: 3.5, slant: 12 }), bevel: { ...bevel3D(0.6, 0.6, 'chamfer'), segments: 1 } }, { reflectivity: 0.9 }),
+        blackPlate(2, { depth: 7, shape: plateShape({ kind: 'box', corner: 4, slant: 12 }) }, { reflectivity: 0.25 }),
       ],
     }),
     shadow: shadow3D(),
     glint: glint3D(),
   },
-  effects: [...edge3D('#ff3a10'), ...glow3D('#ffb43c')],
+  effects: [...edge3D('#ff3a10'), ...glow3D('#ffc850', 1.2)],
   lighting: goldEnv(25),
 });
 
@@ -1764,43 +1721,44 @@ const inflate3D = p3({
 const LIQUID_PROFILE = curve([0, 0], [0.045, 0.11, true], [0.105, 0.11, true], [0.143, 0.2, true], [0.6, 0.74], [0.85, 0.94], [1, 1]);
 
 /**
- * Liquid chrome in 3D: the face inflated over the outline's distance field with LIQUID_PROFILE,
- * on a fine grid so the ridges run straight, and lumpy like Eye Candy's ランプ surface. Light silver
- * metal mirrors the roadside photo (Autumn Road: overcast sky, trees, grey road; Eye Candy's 沿道),
- * graded grey and soft, with a low key light from the left.
+ * 黒クローム black chrome: a smoked mirror (a dark banded tint, almost black at the horizon) so the
+ * studio's sky lays one crisp white sweep across the tops; a bright chrome chamfer band outlines
+ * every glyph, then a dark step, a red tube, black, a chrome line and a black keyline plate.
  */
-const liquidChrome3D: StylePreset = (() => {
-  const chrome: Material3D = {
-    ...material3D('custom'),
-    color: '#d6d6d6',
-    metalness: 1,
-    roughness: 0.15,
-    reflectivity: 1,
-    surface: { kind: 'liquid', amount: 0.5, scale: 12, seed: 1 },
-  };
-  return p3({
-    id: 'f-3d-chrome-liquid',
-    name: '液体クローム Liquid Chrome (3D)',
-    group: THREE_D,
-    style3d: {
-      mode: 'inflate',
-      inflate: { height: 5.7, profile: LIQUID_PROFILE, smoothness: 10, detail: 4 },
-      depth: 1,
-      curveSegments: 12,
-      face: chrome,
+const blackChrome3D = p3({
+  id: 'f-3d-black-chrome',
+  name: '黒クローム Black Chrome + Red Line',
+  group: THREE_D,
+  style3d: {
+    curveSegments: 10,
+    face: {
+      ...material3D('custom'),
+      color: '#3a3f4a',
+      gradient: g([0, '#dce4f0'], [0.18, '#6a7284'], [0.42, '#1c2028'], [0.5, '#040507'], [0.58, '#1a1e26'], [0.8, '#5a6272'], [1, '#c0c8d8']),
+      metalness: 1,
+      roughness: 0.03,
+      reflectivity: 0.9,
+      specBoost: 1.5,
+    },
+    // the chrome bevel is not the smoked face's material: it is a band, the letter has no bevel
+    ...letter3D({
+      depth: 10,
       bevel: bevel3D(0, 0),
-      bands: [],
-      shadow: shadow3D(),
-      glint: glint3D(),
-    },
-    lighting: {
-      environment: { preset: 'highway', intensity: 1.45, rotation: 0, tint: '#ffffff', contrast: 0.5, saturation: 0, blur: 0, repeatX: 1, repeatY: 1 },
-      lights: [{ id: uid(), type: 'directional', color: '#ffffff', intensity: 1.2, x: -1000, y: -35, z: 155 }],
-      toneMapping: 'punch',
-      exposure: 1,
-    },
-  });
-})();
+      rings: [ring(1.4, 1.4, m3('chrome', { reflectivity: 1 }), 'chamfer'), ring(0.3, 0.6, darkMetal('#05060a'), 'step')],
+      side: darkMetal('#14161c', 0.2),
+      plates: [
+        plate(1.6, 'redMetal', { depth: 5, join: 'round', bevel: { ...bevel3D(1.6, 0.8, 'tube'), segments: 12 } }, { reflectivity: 0.9 }),
+        blackPlate(2.4, { depth: 7 }, { color: '#020203' }),
+        plate(0.8, 'chrome', { depth: 4, bevel: bevel3D(0.6, 0.6, 'round') }),
+        blackPlate(1, { depth: 4, bevel: bevel3D(0.5, 0.5) }),
+      ],
+    }),
+    shadow: shadow3D(),
+    glint: starGlint({ intensity: 0.4, threshold: 2.4, tint: '#ffffff' }),
+  },
+  effects: [...edge3D('#ff2a3a', '#000000'), ...glow3D('#e8f0ff', 0.8)],
+  lighting: studioEnv(-30),
+});
 
 /**
  * One vertical rainbow down the whole title: crimson top, hot pink, magenta, purple, blue, a long
@@ -1828,46 +1786,41 @@ const GLASS_RAINBOW = g(
 );
 
 /**
- * 青ブタ虹 in 3D: the liquid-chrome profile inflated taller in saturated candy glass with one
+ * 青ブタ虹 in 3D: LIQUID_PROFILE inflated low and sheared, in saturated candy glass with one
  * vertical rainbow across the whole layer. The glass deepens toward its turned-away edges and the
- * ramp bends with the dome, so the green glows as a core inside the cyan; the face mirrors its own
- * softbox (big window highlights). Bands as rims, each a half-round tube: a cream inner glass
- * edge, one chunky gold tube, a dark brown separator, a slim gold tube and a black keyline; the
- * gold mirrors its own contrasty city street through big liquid lumps, so the rims carry broken
- * highlights along their length. A tight halo, pink above, cyan below.
+ * ramp bends with the dome; fine liquid lumps break the face's own softbox into sparkle. Four slim
+ * bands: a silver half-round tube with chrome walls, a gold tube, a broad black gloss keyline and a
+ * deep gold plate behind; the gold is a hot mirror of the highway, tiled small and softened, lit by
+ * a strong light from the lower right. A tight halo, pink above, cyan below.
  */
 const rainbowGlassGold3D: StylePreset = (() => {
   const candy: Material3D = {
     ...material3D('custom'),
     gradient: GLASS_RAINBOW,
-    gradientSpan: 'layer',
-    gradientAngle: 90,
     gradientBend: 0.35,
     glassDepth: 1,
-    metalness: 0,
     roughness: 0.15,
     clearcoat: 1,
-    reflectivity: 1,
-    surface: { kind: 'liquid', amount: 0.5, scale: 12, seed: 1 },
+    surface: { kind: 'liquid', amount: 0.5, scale: 5.775, seed: 1 },
     // the part's own reflections; blur and repeat stay the layer's
     environment: { preset: 'softbox', intensity: 2.8, rotation: 30, tint: '#ffffff', contrast: 1.6, saturation: 1 },
   };
   const gold: Material3D = {
     ...material3D('custom'),
-    color: '#ffe4a0',
-    metalness: 1,
-    roughness: 0.08,
-    reflectivity: 1.6,
-    surface: { kind: 'liquid', amount: 0.75, scale: 25, seed: 3 },
-    environment: { preset: 'city', intensity: 4, rotation: 0, tint: '#ffffff', contrast: 1.8, saturation: 0 },
+    color: '#ffd35c',
+    metalness: 0.98,
+    roughness: 0.15,
+    reflectivity: 4,
+    surface: { kind: 'liquid', amount: 0, scale: 12.03, seed: 3 },
   };
-  const cream: Material3D = { ...material3D('custom'), color: '#fff6e0', metalness: 1, roughness: 0.04, reflectivity: 2 };
-  const tube = (grow: number, material: Material3D, profile: BevelProfile3D = 'tube'): Band3D => ({
+  const depth = 0.4813;
+  const band = (grow: number, d: number, bevel: BevelShape3D, material: Material3D, side?: Material3D): Band3D => ({
     ...band3D(grow, 'custom'),
     join: 'round',
-    depth: 1,
-    bevel: { ...bevel3D(grow, profile === 'tube' ? grow / 2 : grow, profile), segments: 16 },
+    depth: d,
+    bevel: { ...bevel, segments: 16 },
     material,
+    ...(side ? { side } : {}),
   });
   const look = p3({
     id: 'f-3d-rainbow-glass-gold',
@@ -1875,13 +1828,19 @@ const rainbowGlassGold3D: StylePreset = (() => {
     group: THREE_D,
     style3d: {
       mode: 'inflate',
-      inflate: { height: 8, profile: LIQUID_PROFILE, smoothness: 10, detail: 4 },
-      depth: 1,
+      inflate: { height: 1.2, profile: LIQUID_PROFILE, smoothness: 10, detail: 4 },
+      depth,
+      skew: { x: 0.15, y: -0.27 },
       curveSegments: 12,
       face: candy,
       bevel: bevel3D(0, 0),
-      // the two gold tubes are one "Gold"
-      bands: [tube(1.6, cream), tube(3.2, { ...gold, link: 'gold' }), tube(0.45, darkMetal('#2a1200')), tube(1.4, { ...gold, link: 'gold' }), tube(1.33, m3('blackGloss', { reflectivity: 0.35 }), 'round')],
+      // the two gold band fronts are one "Gold"
+      bands: [
+        band(0.6, depth, bevel3D(0.77, 0.385, 'tube'), m3('silver', { metalness: 0.96 }), m3('chrome')),
+        band(0.783, depth, bevel3D(0.25, 0.77, 'tube'), { ...gold, link: 'gold' }),
+        band(1.1745, depth, bevel3D(2.2, 0.6401), m3('blackGloss', { metalness: 0, reflectivity: 0.35, clearcoat: 0.17 }), m3('blackGloss', { reflectivity: 0.35 })),
+        band(0.6711, 2.3, bevel3D(0.2, 0.4), { ...gold, link: 'gold' }, { ...gold, surface: { ...gold.surface, amount: 0.17 } }),
+      ],
       shadow: shadow3D(),
       glint: glint3D(),
     },
@@ -1889,7 +1848,7 @@ const rainbowGlassGold3D: StylePreset = (() => {
       fx('outerGlow', {
         fill: 'gradient',
         gradient: g([0, '#ff20e0'], [0.45, '#ff30c0'], [0.6, '#4090ff'], [1, '#00e8ff']),
-        size: 14,
+        size: 6.738,
         intensity: 1,
         spread: 0.2,
         opacity: 1,
@@ -1897,11 +1856,11 @@ const rainbowGlassGold3D: StylePreset = (() => {
       }),
     ],
     lighting: {
-      environment: { preset: 'highway', intensity: 3.4, rotation: 0, tint: '#ffffff', contrast: 2.2, saturation: 0, blur: 0, repeatX: 1, repeatY: 1 },
+      environment: { preset: 'highway', intensity: 3.4, rotation: -46, tint: '#ffffff', contrast: 2.2, saturation: 0, blur: 0.22, repeatX: 8, repeatY: 8 },
       lights: [
-        // a low key light from the left, and a fill from below the camera so the lower curves stay lemon, not olive
+        // a low key light from the left, and a strong light from the lower right in front
         { id: uid(), type: 'directional', color: '#ffffff', intensity: 1.5, x: -1000, y: -35, z: 155 },
-        { id: uid(), type: 'directional', color: '#ffffff', intensity: 2.5, x: 0, y: -700, z: 1000 },
+        { id: uid(), type: 'directional', color: '#ffffff', intensity: 10, x: 571, y: -487, z: 956 },
       ],
       toneMapping: 'punch',
       exposure: 1,
@@ -2050,25 +2009,20 @@ export const FACTORY_STYLES: StylePreset[] = [
   hokutoBox,
   gold3D,
   chrome3D,
-  cornice3D,
   goldPlate3D,
   boxPlate3D,
   rainbow3D,
   rainbowGlassGold3D,
   silver3D,
+  blackChrome3D,
   red3D,
-  punchyGold3D,
-  liquidGold3D,
-  crumpleGold3D,
   diamond3D,
-  ruby3D,
   candy3D,
   inflate3D,
-  liquidChrome3D,
-  shadowGold3D,
   popout3D,
-  deepRed3D,
   ...more3DLooks(),
+  ...setA3DLooks(),
+  ...setB3DLooks(),
   ...ORB_PRESETS,
   deepGlowGold,
   jackpot,

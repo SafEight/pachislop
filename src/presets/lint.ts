@@ -125,7 +125,7 @@ function insertRim2D(l: Title2DLayer, at: number, color: string): Title2DLayer {
   const light = color === '#ffffff';
   const material = material2D(solidFill(color), light ? { bevel: bevel2D({ size: 0.8, depth: 2, gloss: 'linear', highlightOpacity: 0.6, shadowOpacity: 0.3 }) } : {});
   const rims = [...l.style.rims];
-  rims.splice(at, 0, rim2D(1, material, { fillCounters: !light }));
+  rims.splice(at, 0, rim2D(1, material));
   return { ...l, style: { ...l.style, rims } };
 }
 

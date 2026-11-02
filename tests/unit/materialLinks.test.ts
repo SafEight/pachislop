@@ -13,7 +13,7 @@ import { getIn, updateIn } from '../../src/store/paths';
 const proj = (layers: Layer[], materialLinks?: Project['materialLinks']): Project => ({ version: 11, name: 'T', comp: defaultComp(), layers, ...(materialLinks ? { materialLinks } : {}) });
 
 const rainbowGlass = () => FACTORY_STYLES.find((s) => s.id === 'f-3d-rainbow-glass-gold')!;
-/** A 3D title wearing the rainbow glass look (its two gold tubes are one link named Gold). */
+/** A 3D title wearing the rainbow glass look (its two gold band fronts are one link named Gold). */
 function rainbowTitle(): Project {
   const t = createTitle3DLayer('BIG');
   return applyPresetToProject(proj([t]), t.id, rainbowGlass(), { applyFont: false });
@@ -97,11 +97,11 @@ describe('links in looks and templates', () => {
     }
   });
 
-  it('the rainbow glass look’s two gold tube materials are one link named Gold; the tube sides follow their fronts', () => {
+  it('the rainbow glass look’s two gold band fronts are one link named Gold; the band sides stay unlinked', () => {
     const p = rainbowTitle();
     const gold = linkedSlots(p).filter((s) => p.materialLinks?.[s.link]?.name === 'Gold');
     expect(gold.map((s) => s.path.at(-1))).toEqual(['material', 'material']);
-    expect((p.layers[0] as Title3DLayer).style3d.bands.every((b) => !b.side)).toBe(true);
+    expect((p.layers[0] as Title3DLayer).style3d.bands.flatMap((b) => (b.side?.link ? [b.side] : []))).toEqual([]);
   });
 
   it('a look gets fresh link ids per layer; its names join the project', () => {

@@ -197,12 +197,17 @@ button.part-eye:hover:not(:disabled) {
   min-width: 22px;
   padding: 1px 3px;
 }
-/* X / Y (/ Z), Rotation / Scale, Tilt X / Turn Y: two or three fields per row, labels hugging them. */
+/* X / Y (/ Z), Rotation / Scale, Rotation X / Y / Z: two or three fields per row, labels hugging
+   them. A narrow panel wraps fields onto the next line instead of squeezing the inputs. */
 .xf-grid {
+  --xf-min: 96px;
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(var(--xf-min), 1fr));
   column-gap: 10px;
+}
+/* Fields with long labels (Rotation X / Y / Z) need more room before they wrap. */
+.xf-grid.xf-wide {
+  --xf-min: 136px;
 }
 .xf-grid > .row > .label {
   width: auto;
@@ -213,6 +218,7 @@ button.part-eye:hover:not(:disabled) {
   justify-content: flex-end;
 }
 .xf-grid .num {
+  flex: none;
   width: 50px;
 }
 

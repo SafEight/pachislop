@@ -7,6 +7,7 @@ import { partLabel } from '../../store/labels';
 import { useEditor } from '../../store/store';
 import { IconBtn, Section } from '../controls';
 import { useT } from '../i18n';
+import { glintListed } from '../glint';
 import { partEnabled } from '../layers/parts';
 import { listedParts } from '../layers/rows';
 import { useOpenSection, useSectionsOpen, SectionScope } from '../sectionMemory';
@@ -123,12 +124,13 @@ function StyleClipButtons({ layer }: { layer: TitleLayer }) {
  * Title layer node, ordered by how often things change: transform, source (text / shape / asset),
  * Appearance (parts, edited in place, with the style check and copy / paste style), Letters
  * (per-character), the 2D Style (knockout, かすれ), for 3D the Shape and Lighting, then effects
- * and the 3D Render passes. Blend and opacity are the Layers panel header's; 2D ⇄ 3D conversion
- * is a layer command (context menu). `parts`: the selected parts, expanded in Appearance.
+ * (a 3D title's glint pinned first) and the 3D Render passes. Blend and opacity are the Layers
+ * panel header's; 2D ⇄ 3D conversion is a layer command (context menu). `parts`: the selected
+ * parts, expanded in Appearance.
  */
 function TitleView({ layer, parts }: { layer: TitleLayer; parts: readonly PartKey[] }) {
   const t = useT();
-  const n = layer.effects.length;
+  const n = layer.effects.length + (glintListed(layer) ? 1 : 0);
   const openSection = useOpenSection();
   const scope = useContext(SectionScope);
   const appearanceOpen = useSectionsOpen((s) => s[`${scope}/appearance`] ?? true);

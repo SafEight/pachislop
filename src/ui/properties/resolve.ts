@@ -1,5 +1,5 @@
 import { isTitleLayer, type TitleLayer } from '../../model/parts';
-import type { EffectInstance, Layer, LayerMask, PartKey, Project } from '../../model/types';
+import type { EffectInstance, Layer, LayerMask, PartKey, Project, Title3DLayer } from '../../model/types';
 import { effectsOf } from '../../store/effects';
 import type { NodeRef } from '../../store/store';
 import { hasPart } from '../../store/tree';
@@ -12,14 +12,16 @@ import { partScope } from './parts';
 /**
  * The selected node checked against the project: a stale part / effect / mask falls back to its
  * owner, a missing layer to the Document. Selected parts show in their layer's page, expanded in
- * Appearance (`parts`), unless the one part was opened on its own page (`pageKey`).
+ * Appearance (`parts`), unless the one part was opened on its own page (`pageKey`). A glint node
+ * shows its 3D title's glint card.
  */
 export type Resolved =
   | { kind: 'document' }
   | { kind: 'layer'; layer: Layer; parts: readonly PartKey[] }
   | { kind: 'part'; layer: TitleLayer; part: PartKey }
   | { kind: 'effect'; layer: Layer; part: PartKey | null; fx: EffectInstance }
-  | { kind: 'mask'; layer: Layer; mask: LayerMask };
+  | { kind: 'mask'; layer: Layer; mask: LayerMask }
+  | { kind: 'glint'; layer: Title3DLayer };
 
 export function resolve(project: Project, node: NodeRef | null, pageKey: string | null): Resolved {
   const layer = node && project.layers.find((l) => l.id === node.layerId);
@@ -29,6 +31,7 @@ export function resolve(project: Project, node: NodeRef | null, pageKey: string 
     const mask = layer.masks.find((m) => m.id === node.maskId);
     return mask ? { kind: 'mask', layer, mask } : { kind: 'layer', layer, parts: [] };
   }
+  if (node.kind === 'glint') return layer.kind === 'title3d' ? { kind: 'glint', layer } : { kind: 'layer', layer, parts: [] };
   if (node.kind === 'parts') return { kind: 'layer', layer, parts: isTitleLayer(layer) ? node.parts.filter((p) => hasPart(layer, p)) : [] };
   const part = node.part !== null && isTitleLayer(layer) && hasPart(layer, node.part) ? node.part : null;
   if (node.kind === 'effect' && (part !== null || node.part === null)) {
@@ -52,5 +55,7 @@ export function nodeKind(at: Resolved, multi: boolean): string {
       return `effect:${at.fx.type}`;
     case 'mask':
       return `mask:${at.mask.kind}`;
+    case 'glint':
+      return 'glint3d';
   }
 }

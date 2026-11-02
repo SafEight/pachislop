@@ -3,7 +3,7 @@ import type { GeneratorCategory } from '../../engine/contracts';
 import { listGenerators } from '../../generators/registry';
 import { ADJUSTMENT_NAMES, createBackgroundLayer } from '../../model/defaults';
 import { isTitleLayer, type TitleLayer } from '../../model/parts';
-import type { AdjustmentType, EffectInstance, Layer, LayerMask, PartKey, ShapeKind } from '../../model/types';
+import type { AdjustmentType, EffectInstance, Layer, LayerMask, PartKey, ShapeKind, Title3DLayer } from '../../model/types';
 import { errorMsg, formatMsg, type Translate } from '../../store/msg';
 import { effectOwnerLabel, maskLabel, partLabel } from '../../store/labels';
 import { effectsOf } from '../../store/effects';
@@ -12,6 +12,7 @@ import { nodeParts } from '../../store/selection';
 import { childrenOf } from '../../store/tree';
 import { flipTargets } from '../../store/transformOps';
 import { GeneratorIcon } from '../generatorIcons';
+import { deleteGlint, setGlintEnabled } from '../glint';
 import { addFileLayer, addGroupLayer, addShapeLayer, addTextLayer, openSplitImage, replaceWithSvgFile } from '../layerActions';
 import type { MenuAnchor } from '../properties/AddEffectMenu';
 import { oneShot, SHAPES } from '../util';
@@ -329,6 +330,19 @@ export function effectMenu(t: Translate, layer: Layer, owner: EffectOwner, fx: E
       ? [{ label: t('Move to layer effects'), hint: t('Run it on the whole layer instead of this part'), onSelect: () => st.moveEffect(owner, fx.id, layerFx, effectsOf(st.project, layerFx).length, false) }]
       : []),
     { label: t('Add effect to {part}…', { part: formatMsg(effectOwnerLabel(layer, owner.part), t) }), onSelect: () => ui.addEffect(owner, anchor) },
+    'sep',
+    layerSubmenu(t, layer, ui, anchor),
+  ];
+}
+
+/** Context menu of a 3D title's glint row: on / off and delete (no duplicate or move: there is one glint, computed inside the 3D render). */
+export function glintMenu(t: Translate, layer: Title3DLayer, ui: PanelUi, anchor: MenuAnchor): CtxEntry[] {
+  const on = layer.style3d.glint.enabled;
+  const owner: EffectOwner = { layerId: layer.id, part: null };
+  return [
+    { label: t('Enabled'), checked: on, onSelect: () => setGlintEnabled([layer.id], !on) },
+    { label: t('Delete effect'), onSelect: () => deleteGlint([layer.id]) },
+    { label: t('Add effect to {part}…', { part: formatMsg(effectOwnerLabel(layer, null), t) }), onSelect: () => ui.addEffect(owner, anchor) },
     'sep',
     layerSubmenu(t, layer, ui, anchor),
   ];
